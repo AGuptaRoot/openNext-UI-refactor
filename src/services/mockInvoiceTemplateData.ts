@@ -1,0 +1,55 @@
+import type { InvoiceTemplateItem } from '../types/invoiceTemplates';
+
+export const INITIAL_MOCK_INVOICE_TEMPLATES: InvoiceTemplateItem[] = [
+  {
+    _id: 'invtpl_1',
+    name: 'Standard Retainer - 30 Days',
+    category: 'Retainer',
+    description: 'Monthly retainer with standard payment terms.',
+    currency: 'INR',
+    paymentTermsDays: 30,
+    taxCalculation: 'after_discount',
+    shippingCharge: 0,
+    tags: ['retainer', 'monthly'],
+    recipientNotes: 'Thank you for trusting us with your ongoing work.',
+    terms: 'Payment due within 30 days. Late fees may apply after due date.',
+    paymentDetails: 'NEFT / UPI accepted. Reference invoice number in remittance.',
+    isDefault: true,
+    discountType: 'percent',
+    discountValue: 0,
+    lineItems: [
+      {
+        name: 'Monthly Retainer',
+        description: 'Dedicated support & delivery hours',
+        qty: 1,
+        rate: 75000,
+        tax: 18,
+      },
+    ],
+  },
+  {
+    _id: 'invtpl_2',
+    name: 'Web Development Milestone',
+    category: 'Web Development',
+    description: 'Milestone billing for website / app builds.',
+    currency: 'INR',
+    paymentTermsDays: 15,
+    taxCalculation: 'after_discount',
+    shippingCharge: 0,
+    tags: ['web', 'milestone'],
+    recipientNotes: 'Milestone deliverables as agreed in SOW.',
+    terms: 'Work continues on receipt of milestone payment.',
+    isDefault: false,
+    discountType: 'percent',
+    discountValue: 0,
+    lineItems: [
+      {
+        name: 'Development Milestone',
+        description: 'Agreed scope for this phase',
+        qty: 1,
+        rate: 150000,
+        tax: 18,
+      },
+    ],
+  },
+];

@@ -1,0 +1,148 @@
+import React, { useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { useDashboardSidebarSync, hideParentSidebarRoutes } from '../hooks/useDashboardSidebarSync';
+import { GlobalSearchBar } from './common/GlobalSearchBar';
+import { NavbarTimer } from './common/NavbarTimer';
+import { CheckoutNoteModal } from './common/CheckoutNoteModal';
+import { ModuleTour } from '../tours/ModuleTour';
+import { LeadsTour } from '../tours/LeadsTour';
+import { ClientsTour } from '../tours/ClientsTour';
+import { ProjectsTour } from '../tours/ProjectsTour';
+import { TasksTour } from '../tours/TasksTour';
+import { TimeLogsTour } from '../tours/TimeLogsTour';
+import { QuotationsTour } from '../tours/QuotationsTour';
+import { InvoicesTour } from '../tours/InvoicesTour';
+import { ExpensesTour } from '../tours/ExpensesTour';
+import { DataQualityTour } from '../tours/DataQualityTour';
+import { SalesOrdersTour } from '../tours/SalesOrdersTour';
+import { SamplesTour } from '../tours/SamplesTour';
+import { OpportunitiesTour } from '../tours/OpportunitiesTour';
+import { TicketsTour } from '../tours/TicketsTour';
+import { CustomerSuccessTour } from '../tours/CustomerSuccessTour';
+import { MarketingTour } from '../tours/MarketingTour';
+import { AuditTour } from '../tours/AuditTour';
+import { SettingsTour } from '../tours/SettingsTour';
+import { DashboardTour } from '../tours/DashboardTour';
+import { ReportsTour } from '../tours/ReportsTour';
+import { TourControlBar } from '../tours/TourControlBar';
+
+export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, activeRole, isClient, canUseTours } = useAuth();
+  useDashboardSidebarSync();
+
+  // Client: hide Dashboard. Employee: hide Expenses.
+  useEffect(() => {
+    const hideIds: string[] = [];
+    if (isClient) hideIds.push('dashboard');
+    const role = String(activeRole || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_]+/g, '-');
+    if (role === 'crm-employee' || role === 'employee' || role === 'freelancer' || role === '104') {
+      hideIds.push('expenses');
+    }
+    if (!hideIds.length) return;
+    hideParentSidebarRoutes(hideIds);
+    const timer = window.setInterval(() => hideParentSidebarRoutes(hideIds), 500);
+    return () => window.clearInterval(timer);
+  }, [isClient, activeRole]);
+
+  const displayName = user?.username || user?.email?.split('@')[0] || 'Admin';
+  const tenantName = (user?.tenant as { name?: string })?.name || 'Root Workspace';
+  const homePath = isClient ? '/projects' : '/dashboard';
+
+  return (
+    <div className="min-h-screen bg-zinc-50 flex flex-col font-sans">
+      {canUseTours && (
+        <>
+          <ModuleTour />
+          <LeadsTour />
+          <ClientsTour />
+          <ProjectsTour />
+          <TasksTour />
+          <TimeLogsTour />
+          <QuotationsTour />
+          <InvoicesTour />
+          <ExpensesTour />
+          <DataQualityTour />
+          <SalesOrdersTour />
+          <SamplesTour />
+          <OpportunitiesTour />
+          <TicketsTour />
+          <CustomerSuccessTour />
+          <MarketingTour />
+          <AuditTour />
+          <SettingsTour />
+          <DashboardTour />
+          <ReportsTour />
+        </>
+      )}
+
+      <div className="sticky top-0 z-[60]">
+        {canUseTours && <TourControlBar />}
+
+        {/* Top Navbar */}
+        <header
+          data-tour="crm-header"
+          className="bg-white border-b border-zinc-200 px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between gap-4"
+        >
+        {/* Left: Brand & Home Link */}
+        <div className="flex items-center gap-3 shrink-0">
+          <Link to={homePath} className="flex items-center gap-3 no-underline">
+            <div className="w-8 h-8 rounded-lg bg-zinc-950 text-white flex items-center justify-center font-bold text-sm select-none">
+              📊
+            </div>
+            <div>
+              <h1 className="text-[14px] font-bold text-zinc-950 leading-tight tracking-tight m-0">
+                Root CRM
+              </h1>
+              <p className="text-[11px] text-zinc-500 m-0 leading-none mt-0.5">
+                {tenantName}
+              </p>
+            </div>
+          </Link>
+        </div>
+
+        {/* Center: Global Search Bar (RBAC-Based) */}
+        <div data-tour="crm-search" className="flex-1 min-w-0 max-w-xl mx-auto">
+          <GlobalSearchBar />
+        </div>
+
+        {/* Right Area: Active Task Timer & User Profile */}
+        <div className="flex items-center gap-3 shrink-0">
+          <div data-tour="crm-timer">
+            <NavbarTimer />
+          </div>
+
+          {/* User Profile & Role Info */}
+          <div className="flex items-center gap-2 pl-1 sm:pl-2 sm:border-l sm:border-zinc-200">
+            <div className="w-8 h-8 rounded-full bg-zinc-950 text-white flex items-center justify-center text-xs font-semibold select-none">
+              {displayName.charAt(0).toUpperCase()}
+            </div>
+            <div className="hidden md:block text-left">
+              <div className="text-xs font-semibold text-zinc-950 leading-tight">
+                {displayName}
+              </div>
+              <span className="inline-block text-[10px] font-medium bg-zinc-100 text-zinc-700 px-1.5 py-0.5 rounded border border-zinc-200 mt-0.5">
+                {activeRole}
+              </span>
+            </div>
+          </div>
+        </div>
+      </header>
+      </div>
+
+      {/* Main Content Area */}
+      <main
+        data-tour="crm-main"
+        className="box-border w-full max-w-[1600px] flex-1 p-4 sm:p-6 lg:p-8 mx-auto"
+      >
+        {children}
+      </main>
+
+      {/* Global Check-Out Work Note Modal */}
+      <CheckoutNoteModal />
+    </div>
+  );
+};

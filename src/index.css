@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Preflight is disabled (MUI compat). Without the border-style reset,
+  Tailwind `border` / `border-*` only set width and stay invisible.
+*/
+*,
+::before,
+::after {
+  box-sizing: border-box;
+  border-width: 0;
+  border-style: solid;
+  border-color: #d4d4d8; /* zinc-300 — clearer list/card edges */
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}

@@ -1,0 +1,427 @@
+import { displayLabel } from '../../utils/displayLabels';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import AddIcon from '@mui/icons-material/Add';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import DownloadIcon from '@mui/icons-material/Download';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import DocumentScannerOutlinedIcon from '@mui/icons-material/DocumentScannerOutlined';
+import { crmApi } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
+import { TourButton } from '../../ui/tour';
+import { useDialog } from '../../context/DialogContext';
+import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
+import { ListPager, type ListPaginationMeta } from '../../components/common/ListPager';
+import { FinancePdfScanModal } from '../../components/finance/FinancePdfScanModal';
+import { QUOTATION_STATUSES, type QuotationItem } from '../../types/quotations';
+import { triggerFileDownload } from '../../utils/fileDownload';
+
+function statusClass(status: string): string {
+  const map: Record<string, string> = {
+    Draft: 'bg-zinc-100 text-zinc-700',
+    Sent: 'bg-sky-50 text-sky-800',
+    Accepted: 'bg-emerald-50 text-emerald-800',
+    Rejected: 'bg-rose-50 text-rose-800',
+    Expired: 'bg-amber-50 text-amber-800',
+    Converted: 'bg-indigo-50 text-indigo-800',
+  };
+  return map[status] || 'bg-zinc-100 text-zinc-700';
+}
+
+function quoteNo(item: QuotationItem): string {
+  return displayLabel(item.quotationNo, item.quotationNumber, item.number);
+}
+
+export const QuotationsPage: React.FC = () => {
+  const { confirm } = useDialog();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { hasAnyPermission, isClient } = useAuth();
+  const canWriteQuotes =
+    hasAnyPermission('crm.quotes.write', 'crm.finance.write') && !isClient;
+  const [items, setItems] = useState<QuotationItem[]>([]);
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState(() => searchParams.get('status') || '');
+  const opportunityIdFilter = String(searchParams.get('opportunityId') || '').trim();
+  const [archived, setArchived] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState<ListPaginationMeta | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [busyId, setBusyId] = useState('');
+  const [pdfScanOpen, setPdfScanOpen] = useState(false);
+
+  useEffect(() => {
+    const next = searchParams.get('status') || '';
+    setStatus((prev) => (prev === next ? prev : next));
+  }, [searchParams]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams);
+    if (status) params.set('status', status);
+    else params.delete('status');
+    setSearchParams(params, { replace: true });
+  }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const onArchive = (e: Event) => {
+      const archivedFlag = (e as CustomEvent<{ archived?: boolean }>).detail?.archived;
+      if (typeof archivedFlag === 'boolean') setArchived(archivedFlag);
+    };
+    window.addEventListener('crm-quotations-tour-archive', onArchive as EventListener);
+    return () => window.removeEventListener('crm-quotations-tour-archive', onArchive as EventListener);
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await crmApi.listQuotations({
+        search: search || undefined,
+        status: status || undefined,
+        opportunityId: opportunityIdFilter || undefined,
+        archived,
+        page,
+        limit: 20,
+      });
+      setItems(response.data || []);
+      setPagination(response.pagination || null);
+      setError('');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Failed to load quotations');
+    } finally {
+      setLoading(false);
+    }
+  }, [search, status, archived, page, opportunityIdFilter]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, status, archived, opportunityIdFilter]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(load, 250);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  const kpis = useMemo(() => {
+    const draft = items.filter((item) => item.status === 'Draft').length;
+    const sent = items.filter((item) => item.status === 'Sent').length;
+    const accepted = items.filter((item) => item.status === 'Accepted').length;
+    const pipeline = items
+      .filter((item) => ['Draft', 'Sent', 'Accepted'].includes(item.status))
+      .reduce((sum, item) => sum + Number(item.grandTotal || 0), 0);
+    return {
+      count: items.length,
+      draft,
+      sent,
+      accepted,
+      pipeline,
+    };
+  }, [items]);
+
+  const runAction = async (id: string, action: 'archive' | 'restore' | 'delete') => {
+    setBusyId(id);
+    try {
+      if (action === 'archive') await crmApi.archiveQuotation(id);
+      if (action === 'restore') await crmApi.restoreQuotation(id);
+      if (action === 'delete') {
+        if (!(await confirm({ message: 'Delete this draft quotation? This cannot be undone.', tone: 'danger', confirmLabel: 'Delete' }))) return;
+        await crmApi.deleteQuotation(id);
+      }
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Action failed');
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  const exportData = async () => {
+    try {
+      const response = await crmApi.exportQuotations({
+        search: search || undefined,
+        status: status || undefined,
+        archived,
+        format: 'csv',
+      });
+      triggerFileDownload({
+        filename: response.data.filename,
+        content: response.data.content,
+        format: 'csv',
+      });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Export failed');
+    }
+  };
+
+  return (
+    <div data-tour="quotations-tour-landing" className="flex flex-col gap-5">
+      <header className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 pb-4 border-b border-zinc-200">
+        <div data-tour="quotations-title">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 m-0 mb-1">
+            Sales Finance
+          </p>
+          <h1 className="text-2xl font-bold text-zinc-950 m-0">Quotations</h1>
+          <p className="text-sm text-zinc-500 m-0 mt-1">
+            Price proposals, portal sign-off, revisions, and conversion to invoices or sales orders.
+          </p>
+          {opportunityIdFilter ? (
+            <p className="text-xs text-zinc-600 m-0 mt-2">
+              Showing quotations for opportunity{' '}
+              <code className="font-mono text-[11px]">{opportunityIdFilter}</code>
+              .{' '}
+              <button
+                type="button"
+                className="border-0 bg-transparent p-0 text-xs font-semibold text-zinc-950 underline cursor-pointer"
+                onClick={() => {
+                  const params = new URLSearchParams(searchParams);
+                  params.delete('opportunityId');
+                  setSearchParams(params, { replace: true });
+                }}
+              >
+                Clear filter
+              </button>
+            </p>
+          ) : null}
+        </div>
+        <div data-tour="quotations-header-actions" className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            data-tour="quotations-refresh-btn"
+            onClick={load}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer"
+          >
+            <RefreshIcon sx={{ fontSize: 15 }} /> Refresh
+          </button>
+          <button
+            type="button"
+            data-tour="quotations-export-btn"
+            onClick={exportData}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer"
+          >
+            <DownloadIcon sx={{ fontSize: 15 }} /> Export CSV
+          </button>
+          {canWriteQuotes && (
+            <button
+              type="button"
+              data-tour="quotations-templates-btn"
+              onClick={() => navigate('/quotation-templates')}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer"
+            >
+              <FolderOpenIcon sx={{ fontSize: 15 }} /> Templates
+            </button>
+          )}
+          {canWriteQuotes && (
+            <button
+              type="button"
+              data-tour="quotations-scan-pdf-btn"
+              onClick={() => setPdfScanOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-zinc-300 bg-white text-zinc-800 cursor-pointer"
+            >
+              <DocumentScannerOutlinedIcon sx={{ fontSize: 16 }} /> Scan PDF
+            </button>
+          )}
+          {canWriteQuotes && (
+            <button
+              type="button"
+              data-tour="quotations-create-btn"
+              onClick={() => navigate('/quotations/create')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg border border-zinc-950 bg-zinc-950 text-white cursor-pointer"
+            >
+              <AddIcon sx={{ fontSize: 16 }} /> Create Quotation
+            </button>
+          )}
+          <TourButton
+            moduleId="quotations"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer"
+          />
+        </div>
+      </header>
+
+      <div data-tour="quotations-kpis" className={`grid grid-cols-2 ${isClient ? 'lg:grid-cols-4' : 'lg:grid-cols-5'} gap-3`}>
+        {[
+          { label: archived ? 'Archived' : 'Active quotes', value: String(kpis.count) },
+          ...(!isClient ? [{ label: 'Draft', value: String(kpis.draft) }] : []),
+          { label: 'Sent', value: String(kpis.sent) },
+          { label: 'Accepted', value: String(kpis.accepted) },
+          { label: 'Pipeline value', value: formatFinanceMoney(kpis.pipeline) },
+        ].map((card) => (
+          <div key={card.label} className="rounded-xl border border-zinc-300 bg-white p-4">
+            <div className="text-[11px] font-semibold uppercase text-zinc-500">{card.label}</div>
+            <div className="mt-1 text-lg font-bold text-zinc-950">{card.value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div
+        data-tour="quotations-filters"
+        className="bg-white border border-zinc-300 rounded-xl p-4 flex flex-col lg:flex-row gap-3"
+      >
+        <input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search quotation # or client name (e.g. QT-001, AR)…"
+          className="h-9 flex-1 px-3 text-sm border border-zinc-200 rounded-lg outline-none focus:border-zinc-400"
+        />
+        <select
+          value={status}
+          onChange={(event) => setStatus(event.target.value)}
+          className="h-9 px-3 text-sm border border-zinc-300 rounded-lg bg-white lg:w-48"
+        >
+          <option value="">All statuses</option>
+          {QUOTATION_STATUSES.filter((val) => !isClient || val !== 'Draft').map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
+        <div
+          data-tour="quotations-archive-toggle"
+          className="inline-flex rounded-lg border border-zinc-200 p-0.5 bg-zinc-50"
+        >
+          <button
+            type="button"
+            onClick={() => setArchived(false)}
+            className={`h-8 px-3 text-xs font-semibold rounded-md border-0 cursor-pointer ${
+              !archived ? 'bg-zinc-950 text-white' : 'bg-transparent text-zinc-600'
+            }`}
+          >
+            Active
+          </button>
+          <button
+            type="button"
+            onClick={() => setArchived(true)}
+            className={`h-8 px-3 text-xs font-semibold rounded-md border-0 cursor-pointer ${
+              archived ? 'bg-zinc-950 text-white' : 'bg-transparent text-zinc-600'
+            }`}
+          >
+            Archived
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
+      )}
+
+      <div
+        data-tour="quotations-table"
+        className="bg-white border border-zinc-300 rounded-xl overflow-hidden"
+      >
+        {loading ? (
+          <div className="p-12 text-center text-sm text-zinc-500">Loading quotations…</div>
+        ) : items.length === 0 ? (
+          <div className="p-12 text-center text-sm text-zinc-500">No quotations found.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-left text-sm">
+              <thead>
+                <tr className="bg-zinc-50 border-b border-zinc-200 text-[11px] uppercase text-zinc-500">
+                  <th className="px-4 py-3">Quotation</th>
+                  <th className="px-4 py-3">Recipient</th>
+                  <th className="px-4 py-3">Issued</th>
+                  <th className="px-4 py-3">Valid till</th>
+                  <th className="px-4 py-3">Total</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item, index) => (
+                  <tr
+                    key={item._id}
+                    data-tour={index === 0 ? 'quotations-row-first' : undefined}
+                    data-quotation-id={index === 0 ? item._id : undefined}
+                    className="border-b border-zinc-100 hover:bg-zinc-50"
+                  >
+                    <td className="px-4 py-3">
+                      <Link
+                        to={`/quotations/${item._id}`}
+                        className="font-semibold text-zinc-950 no-underline hover:underline"
+                      >
+                        {quoteNo(item)}
+                      </Link>
+                      {item.title && (
+                        <div className="text-xs text-zinc-500 mt-0.5 truncate max-w-[220px]">{item.title}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-zinc-700">
+                      {item.recipientName || item.clientName || item.customerName || item.customerLabel || '—'}
+                    </td>
+                    <td className="px-4 py-3 text-zinc-600">
+                      {item.issueDate ? new Date(item.issueDate).toLocaleDateString() : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-zinc-600">
+                      {item.validTill || item.expiryDate
+                        ? new Date(item.validTill || item.expiryDate || '').toLocaleDateString()
+                        : '—'}
+                    </td>
+                    <td className="px-4 py-3 font-semibold">
+                      {formatFinanceMoney(item.grandTotal, item.currency)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${statusClass(
+                          item.status
+                        )}`}
+                      >
+                        {item.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/quotations/${item._id}`)}
+                          className="h-7 px-2 text-[11px] font-semibold rounded-md border border-zinc-200 bg-white cursor-pointer"
+                        >
+                          Open
+                        </button>
+                        {canWriteQuotes &&
+                          (archived ? (
+                            <button
+                              type="button"
+                              disabled={busyId === item._id}
+                              onClick={() => runAction(item._id, 'restore')}
+                              className="h-7 px-2 text-[11px] font-semibold rounded-md border border-zinc-200 bg-white cursor-pointer disabled:opacity-50"
+                            >
+                              Restore
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={busyId === item._id}
+                              onClick={() => runAction(item._id, 'archive')}
+                              className="h-7 px-2 text-[11px] font-semibold rounded-md border border-zinc-200 bg-white cursor-pointer disabled:opacity-50"
+                            >
+                              Archive
+                            </button>
+                          ))}
+                        {canWriteQuotes && item.status === 'Draft' && (
+                          <button
+                            type="button"
+                            disabled={busyId === item._id}
+                            onClick={() => runAction(item._id, 'delete')}
+                            className="h-7 px-2 text-[11px] font-semibold rounded-md border border-red-200 bg-red-50 text-red-700 cursor-pointer disabled:opacity-50"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <ListPager pagination={pagination} onPageChange={setPage} label="quotations" />
+      </div>
+
+      <FinancePdfScanModal
+        open={pdfScanOpen}
+        onClose={() => setPdfScanOpen(false)}
+        documentType="quotation"
+      />
+    </div>
+  );
+};

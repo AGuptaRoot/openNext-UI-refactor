@@ -1,0 +1,791 @@
+import { displayLabel } from '../../utils/displayLabels';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import SendIcon from '@mui/icons-material/Send';
+import PrintIcon from '@mui/icons-material/Print';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import LinkIcon from '@mui/icons-material/Link';
+import ArchiveIcon from '@mui/icons-material/Archive';
+import UnarchiveIcon from '@mui/icons-material/Unarchive';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import CancelOutlinedIcon from '@mui/icons-material/CancelOutlined';
+import HistoryIcon from '@mui/icons-material/History';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import { crmApi } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
+import { useDialog } from '../../context/DialogContext';
+import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
+import { COMPANY_STATE_DEFAULT, type QuotationItem } from '../../types/quotations';
+import { calculateFinanceTotals } from '../../utils/financeTotals';
+import { buildFullQuotationPortalLink } from '../../utils/portalLinks';
+import { triggerFileDownload } from '../../utils/fileDownload';
+
+function statusClass(status: string): string {
+  const map: Record<string, string> = {
+    Draft: 'bg-zinc-100 text-zinc-700',
+    Sent: 'bg-sky-50 text-sky-800',
+    Accepted: 'bg-emerald-50 text-emerald-800',
+    Rejected: 'bg-rose-50 text-rose-800',
+    Expired: 'bg-amber-50 text-amber-800',
+    Converted: 'bg-indigo-50 text-indigo-800',
+  };
+  return map[status] || 'bg-zinc-100 text-zinc-700';
+}
+
+function quoteNo(item: QuotationItem): string {
+  return displayLabel(item.quotationNo, item.quotationNumber, item.number);
+}
+
+export const QuotationDetailPage: React.FC = () => {
+  const { id = '' } = useParams();
+  const navigate = useNavigate();
+  const { alert, confirm } = useDialog();
+  const { hasPermission, hasAnyPermission, isClient, isAdmin, activeRole } = useAuth();
+  const canWriteQuotes =
+    hasAnyPermission('crm.quotes.write', 'crm.finance.write') && !isClient;
+  const canWriteFinance = hasPermission('crm.finance.write') && !isClient;
+  const canWriteOrders = hasPermission('crm.orders.write') && !isClient;
+  const [quote, setQuote] = useState<QuotationItem | null>(null);
+  const [revisions, setRevisions] = useState<QuotationItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [portalLink, setPortalLink] = useState('');
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [reviseOpen, setReviseOpen] = useState(false);
+  const [reviseReason, setReviseReason] = useState('');
+  const [reviseValidTill, setReviseValidTill] = useState('');
+
+  const load = useCallback(async () => {
+    if (!id) return;
+    setLoading(true);
+    try {
+      const [detail, rev] = await Promise.all([
+        crmApi.getQuotation(id),
+        crmApi.listQuotationRevisions(id).catch(() => ({ data: [] as QuotationItem[] })),
+      ]);
+      setQuote(detail.data);
+      setRevisions(rev.data || []);
+      setPortalLink(
+        buildFullQuotationPortalLink(
+          detail.data.portalUrl,
+          detail.data.portalToken
+        )
+      );
+      setError('');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Failed to load quotation');
+      setQuote(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const totals = useMemo(() => {
+    if (!quote) return null;
+    return calculateFinanceTotals({
+      lines: quote.lineItems || [],
+      discountType: quote.discountType,
+      discountValue: quote.discountValue ?? quote.discountPercent ?? quote.discountAmount,
+      taxCalculation: quote.taxCalculation,
+      shippingCharge: quote.shippingCharge,
+    });
+  }, [quote]);
+
+  const gstMode =
+    quote?.gstMode ||
+    (quote?.shippingState === COMPANY_STATE_DEFAULT ? 'intra' : 'inter');
+
+  const taxTotal = quote?.taxTotal ?? totals?.taxTotal ?? 0;
+  const cgst = quote?.cgst ?? (gstMode === 'intra' ? taxTotal / 2 : 0);
+  const sgst = quote?.sgst ?? (gstMode === 'intra' ? taxTotal / 2 : 0);
+  const igst = quote?.igst ?? (gstMode === 'inter' ? taxTotal : 0);
+
+  const run = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await fn();
+      await load();
+      setError('');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Action failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendQuote = () =>
+    run(async () => {
+      await crmApi.sendQuotation(id);
+      await alert('Quotation marked as sent / email dispatched.');
+    });
+
+  const generatePortal = () =>
+    run(async () => {
+      const result = await crmApi.generateQuotationPortalToken(id);
+      setPortalLink(
+        buildFullQuotationPortalLink(result.data.portalUrl, result.data.portalToken)
+      );
+      await alert('Client portal link generated.');
+    });
+
+  const acceptQuote = () =>
+    run(async () => {
+      if (!(await confirm('Mark this quotation as accepted?'))) return;
+      await crmApi.acceptQuotation(id);
+    });
+
+  const rejectQuote = () =>
+    run(async () => {
+      if (!rejectReason.trim()) throw new Error('Rejection reason is required.');
+      await crmApi.rejectQuotation(id, { reason: rejectReason.trim() });
+      setRejectOpen(false);
+      setRejectReason('');
+    });
+
+  const reviseQuote = () =>
+    run(async () => {
+      if (!reviseReason.trim()) throw new Error('Revision reason is required.');
+      const created = await crmApi.reviseQuotation(id, {
+        reason: reviseReason.trim(),
+        validTill: reviseValidTill || undefined,
+      });
+      setReviseOpen(false);
+      setReviseReason('');
+      setReviseValidTill('');
+      navigate(`/quotations/${created.data._id}`);
+    });
+
+  const convertInvoice = () =>
+    run(async () => {
+      const invoice = await crmApi.convertQuotationToInvoice(id);
+      await alert('Converted to invoice.');
+      navigate(`/invoices/${invoice.data._id}`);
+    });
+
+  const convertSalesOrder = () =>
+    run(async () => {
+      const order = await crmApi.convertQuotationToSalesOrder(id);
+      await alert('Converted to sales order.');
+      if (order.data?._id) navigate(`/sales-orders/${order.data._id}`);
+    });
+
+  const printQuote = () => {
+    const popup = window.open('', '_blank');
+    if (!popup) {
+      setError('Pop-up blocked. Allow pop-ups for this site to print quotations.');
+      return;
+    }
+    popup.document.write(
+      '<!doctype html><html><head><title>Preparing print…</title></head><body style="font-family:system-ui,sans-serif;padding:24px;color:#52525b">Preparing quotation print view…</body></html>'
+    );
+    popup.document.close();
+
+    run(async () => {
+      try {
+        const result = await crmApi.getQuotationPrintHtml(id);
+        const html = result.data?.html;
+        if (!html) throw new Error('Print view returned no content');
+        popup.document.open();
+        popup.document.write(html);
+        popup.document.close();
+        popup.focus();
+        popup.setTimeout(() => {
+          try {
+            popup.print();
+          } catch {
+            // ignore
+          }
+        }, 250);
+      } catch (reason) {
+        try {
+          popup.close();
+        } catch {
+          // ignore
+        }
+        throw reason;
+      }
+    });
+  };
+
+  const downloadPdf = () =>
+    run(async () => {
+      const blob = await crmApi.downloadQuotationPdf(id);
+      const filename = `${quoteNo(quote!) || 'quotation'}.pdf`;
+      const pdfBlob = blob.type.includes('pdf')
+        ? blob
+        : new Blob([await blob.arrayBuffer()], { type: 'application/pdf' });
+      const ok = triggerFileDownload({
+        filename,
+        content: pdfBlob,
+        mimeType: 'application/pdf',
+        format: 'pdf',
+      });
+      if (!ok) {
+        throw new Error('Could not start the PDF download in this browser.');
+      }
+    });
+
+  if (loading) {
+    return <div className="p-12 text-center text-sm text-zinc-500">Loading quotation…</div>;
+  }
+
+  if (!quote) {
+    return (
+      <div className="p-12 text-center">
+        <p className="text-sm text-zinc-500 mb-4">{error || 'Quotation not found.'}</p>
+        <Link to="/quotations" className="text-sm font-semibold text-zinc-950">
+          ← Back to quotations
+        </Link>
+      </div>
+    );
+  }
+
+  const locked = ['Converted'].includes(quote.status) || quote.isArchived;
+  // Only client, admin, and sales manager can accept or reject quotations (sales representatives cannot accept).
+  const canDecideQuote = isClient || isAdmin || activeRole === 'sales-manager';
+  const canAccept = canDecideQuote && ['Draft', 'Sent'].includes(quote.status) && !locked;
+  const canReject = canDecideQuote && ['Draft', 'Sent'].includes(quote.status) && !locked;
+  const canRevise = ['Accepted', 'Expired', 'Rejected', 'Sent'].includes(quote.status);
+  const canConvertInvoice =
+    canWriteFinance &&
+    ['Accepted', 'Sent'].includes(quote.status) &&
+    !quote.convertedInvoiceId &&
+    !quote.convertedSalesOrderId;
+  const canConvertSalesOrder =
+    canWriteOrders &&
+    ['Accepted', 'Sent'].includes(quote.status) &&
+    !quote.convertedInvoiceId &&
+    !quote.convertedSalesOrderId;
+
+  return (
+    <div data-tour="quotations-detail" className="flex flex-col gap-5">
+      <header className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 pb-4 border-b border-zinc-200">
+        <div>
+          <Link
+            to="/quotations"
+            className="text-xs font-semibold text-zinc-500 no-underline hover:text-zinc-950"
+          >
+            ← Quotations
+          </Link>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold text-zinc-950 m-0">{quoteNo(quote)}</h1>
+            <span
+              className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${statusClass(
+                quote.status
+              )}`}
+            >
+              {quote.status}
+            </span>
+            {quote.isArchived && (
+              <span className="inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold bg-zinc-100 text-zinc-600">
+                Archived
+              </span>
+            )}
+            {quote.revisionNumber != null && quote.revisionNumber > 0 && (
+              <span className="inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold bg-violet-50 text-violet-800">
+                R{quote.revisionNumber}
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-zinc-500 m-0 mt-1">
+            {quote.recipientName || quote.clientName || quote.customerName || quote.customerLabel || '—'}
+            {quote.opportunityTitle ? ` · ${quote.opportunityTitle}` : ''}
+            {quote.title ? ` · ${quote.title}` : ''}
+          </p>
+        </div>
+        <div data-tour="quotations-detail-actions" className="flex flex-wrap gap-2">
+          {canWriteQuotes && (
+            <button
+              type="button"
+              disabled={busy || locked}
+              onClick={sendQuote}
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold cursor-pointer disabled:opacity-50"
+            >
+              <SendIcon sx={{ fontSize: 15 }} /> Send
+            </button>
+          )}
+          {canWriteQuotes && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={generatePortal}
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold cursor-pointer disabled:opacity-50"
+            >
+              <LinkIcon sx={{ fontSize: 15 }} /> Portal token
+            </button>
+          )}
+          {canAccept && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={acceptQuote}
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-800 cursor-pointer disabled:opacity-50"
+            >
+              <CheckCircleOutlineIcon sx={{ fontSize: 15 }} /> Accept
+            </button>
+          )}
+          {canReject && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setRejectOpen(true)}
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 text-xs font-semibold text-rose-800 cursor-pointer disabled:opacity-50"
+            >
+              <CancelOutlinedIcon sx={{ fontSize: 15 }} /> Reject
+            </button>
+          )}
+          {canWriteQuotes && canRevise && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setReviseValidTill(quote.validTill || '');
+                setReviseOpen(true);
+              }}
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-semibold text-violet-900 cursor-pointer disabled:opacity-50"
+            >
+              <HistoryIcon sx={{ fontSize: 15 }} /> Revise
+            </button>
+          )}
+          {canConvertInvoice && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={convertInvoice}
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold text-indigo-900 cursor-pointer disabled:opacity-50"
+            >
+              <ReceiptLongIcon sx={{ fontSize: 15 }} /> Convert to Invoice
+            </button>
+          )}
+          {canConvertSalesOrder && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={convertSalesOrder}
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-3 text-xs font-semibold text-sky-900 cursor-pointer disabled:opacity-50"
+            >
+              <LocalShippingIcon sx={{ fontSize: 15 }} /> Convert to Sales Order
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={printQuote}
+            className="inline-flex h-9 items-center gap-1 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold cursor-pointer disabled:opacity-50"
+          >
+            <PrintIcon sx={{ fontSize: 15 }} /> Print
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={downloadPdf}
+            className="inline-flex h-9 items-center gap-1 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold cursor-pointer disabled:opacity-50"
+          >
+            <PictureAsPdfIcon sx={{ fontSize: 15 }} /> PDF
+          </button>
+          {canWriteQuotes &&
+            (quote.isArchived ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => run(() => crmApi.restoreQuotation(id))}
+                className="inline-flex h-9 items-center gap-1 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold cursor-pointer disabled:opacity-50"
+              >
+                <UnarchiveIcon sx={{ fontSize: 15 }} /> Restore
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => run(() => crmApi.archiveQuotation(id))}
+                className="inline-flex h-9 items-center gap-1 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold cursor-pointer disabled:opacity-50"
+              >
+                <ArchiveIcon sx={{ fontSize: 15 }} /> Archive
+              </button>
+            ))}
+        </div>
+      </header>
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
+      )}
+
+      {canWriteQuotes && portalLink && (
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-800">
+              Client portal URL
+            </div>
+            <a
+              href={portalLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 block break-all font-mono text-xs text-sky-800 underline select-all"
+              title={portalLink}
+            >
+              {portalLink}
+            </a>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              className="inline-flex h-8 items-center rounded-md border border-sky-300 bg-white px-3 text-xs font-semibold text-sky-900 cursor-pointer"
+              onClick={() => navigator.clipboard?.writeText(portalLink)}
+            >
+              Copy
+            </button>
+            <a
+              href={portalLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-8 items-center rounded-md border border-sky-300 bg-white px-3 text-xs font-semibold text-sky-900 no-underline"
+            >
+              Open
+            </a>
+          </div>
+        </div>
+      )}
+
+      {(quote.convertedInvoiceId || quote.convertedSalesOrderId) && (
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 flex flex-wrap gap-4">
+          {quote.convertedInvoiceId && (
+            <Link to={`/invoices/${quote.convertedInvoiceId}`} className="font-semibold no-underline text-indigo-900">
+              Open converted invoice →
+            </Link>
+          )}
+          {quote.convertedSalesOrderId && (
+            <Link
+              to={`/sales-orders/${quote.convertedSalesOrderId}`}
+              className="font-semibold no-underline text-indigo-900"
+            >
+              Open converted sales order →
+            </Link>
+          )}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[
+          { label: 'Grand total', value: formatFinanceMoney(quote.grandTotal, quote.currency) },
+          {
+            label: 'Tax total',
+            value: formatFinanceMoney(taxTotal, quote.currency),
+          },
+          {
+            label: 'GST mode',
+            value: gstMode === 'intra' ? 'Intra (CGST+SGST)' : 'Inter (IGST)',
+          },
+          {
+            label: 'Valid till',
+            value: quote.validTill || quote.expiryDate || '—',
+          },
+        ].map((card) => (
+          <div key={card.label} className="rounded-xl border border-zinc-300 bg-white p-4">
+            <div className="text-[11px] font-semibold uppercase text-zinc-500">{card.label}</div>
+            <div className="mt-1 text-lg font-bold text-zinc-950">{card.value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div data-tour="quotations-detail-sections" className="flex flex-col gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <section className="rounded-xl border border-zinc-300 bg-white p-5">
+          <h2 className="text-sm font-semibold m-0 mb-3">Quotation details</h2>
+          <dl className="grid grid-cols-2 gap-3 text-sm m-0">
+            <div>
+              <dt className="text-[11px] uppercase text-zinc-500">Issue date</dt>
+              <dd className="m-0 font-medium">{quote.issueDate}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] uppercase text-zinc-500">Valid till</dt>
+              <dd className="m-0 font-medium">{quote.validTill || quote.expiryDate || '—'}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] uppercase text-zinc-500">Currency</dt>
+              <dd className="m-0 font-medium">{quote.currency}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] uppercase text-zinc-500">Tax calc</dt>
+              <dd className="m-0 font-medium">{quote.taxCalculation}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] uppercase text-zinc-500">Recipient type</dt>
+              <dd className="m-0 font-medium capitalize">{quote.recipientType}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] uppercase text-zinc-500">Shipping state</dt>
+              <dd className="m-0 font-medium">{quote.shippingState}</dd>
+            </div>
+            {quote.description && (
+              <div className="col-span-2">
+                <dt className="text-[11px] uppercase text-zinc-500">Description</dt>
+                <dd className="m-0 whitespace-pre-wrap">{quote.description}</dd>
+              </div>
+            )}
+            {quote.rejectionReason && (
+              <div className="col-span-2">
+                <dt className="text-[11px] uppercase text-zinc-500">Rejection reason</dt>
+                <dd className="m-0">{quote.rejectionReason}</dd>
+              </div>
+            )}
+            {quote.acceptedByName && (
+              <div className="col-span-2">
+                <dt className="text-[11px] uppercase text-zinc-500">Accepted by</dt>
+                <dd className="m-0">
+                  {quote.acceptedByName}
+                  {quote.acceptedByEmail ? ` · ${quote.acceptedByEmail}` : ''}
+                </dd>
+              </div>
+            )}
+          </dl>
+        </section>
+
+        <section className="rounded-xl border border-zinc-300 bg-white p-5">
+          <h2 className="text-sm font-semibold m-0 mb-3">Totals & GST</h2>
+          {totals && (
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span>Subtotal</span>
+                <strong>{formatFinanceMoney(totals.subtotal, quote.currency)}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>Discount</span>
+                <strong>-{formatFinanceMoney(totals.discount, quote.currency)}</strong>
+              </div>
+              {gstMode === 'intra' ? (
+                <>
+                  <div className="flex justify-between">
+                    <span>CGST</span>
+                    <strong>{formatFinanceMoney(cgst, quote.currency)}</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>SGST</span>
+                    <strong>{formatFinanceMoney(sgst, quote.currency)}</strong>
+                  </div>
+                </>
+              ) : (
+                <div className="flex justify-between">
+                  <span>IGST</span>
+                  <strong>{formatFinanceMoney(igst, quote.currency)}</strong>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span>Tax total</span>
+                <strong>{formatFinanceMoney(taxTotal, quote.currency)}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>Shipping</span>
+                <strong>{formatFinanceMoney(totals.shippingCharge, quote.currency)}</strong>
+              </div>
+              <div className="flex justify-between border-t border-zinc-200 pt-2 text-base">
+                <span>Grand total</span>
+                <strong>{formatFinanceMoney(quote.grandTotal ?? totals.grandTotal, quote.currency)}</strong>
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
+
+      <section className="rounded-xl border border-zinc-300 bg-white overflow-hidden">
+        <div className="px-5 py-3 border-b border-zinc-200 text-sm font-semibold">Line items</div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead className="bg-zinc-50 text-[11px] uppercase text-zinc-500">
+              <tr>
+                <th className="px-4 py-2 text-left">Item</th>
+                <th className="px-4 py-2 text-right">Qty</th>
+                <th className="px-4 py-2 text-right">Rate</th>
+                <th className="px-4 py-2 text-right">Tax %</th>
+                <th className="px-4 py-2 text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(quote.lineItems || []).map((line, index) => (
+                <tr key={`${line.name}-${index}`} className="border-t border-zinc-100">
+                  <td className="px-4 py-3">
+                    <div className="font-medium">{line.name}</div>
+                    {line.description && (
+                      <div className="text-xs text-zinc-500">{line.description}</div>
+                    )}
+                    {line.fileUrl && !/amazonaws\.com/i.test(String(line.fileUrl)) && (
+                      <a
+                        href={line.fileUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-sky-700"
+                      >
+                        View attachment
+                      </a>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">{line.qty}</td>
+                  <td className="px-4 py-3 text-right">
+                    {formatFinanceMoney(line.rate, quote.currency)}
+                  </td>
+                  <td className="px-4 py-3 text-right">{line.tax}</td>
+                  <td className="px-4 py-3 text-right font-semibold">
+                    {formatFinanceMoney(line.amount ?? line.qty * line.rate, quote.currency)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {quote.recipientNotes && (
+        <section className="rounded-xl border border-zinc-300 bg-white p-5">
+          <h2 className="text-sm font-semibold m-0 mb-2">Recipient notes</h2>
+          <p className="m-0 text-sm whitespace-pre-wrap text-zinc-700">{quote.recipientNotes}</p>
+        </section>
+      )}
+
+      <section className="rounded-xl border border-zinc-300 bg-white overflow-hidden">
+        <div className="px-5 py-3 border-b border-zinc-200 text-sm font-semibold">
+          Revision history
+        </div>
+        {revisions.length === 0 ? (
+          <div className="p-8 text-center text-sm text-zinc-500">No revisions yet.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead className="bg-zinc-50 text-[11px] uppercase text-zinc-500">
+                <tr>
+                  <th className="px-4 py-2 text-left">Quotation</th>
+                  <th className="px-4 py-2 text-left">Status</th>
+                  <th className="px-4 py-2 text-right">Total</th>
+                  <th className="px-4 py-2 text-left">Reason</th>
+                  <th className="px-4 py-2 text-left">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {revisions.map((rev) => (
+                  <tr key={rev._id} className="border-t border-zinc-100">
+                    <td className="px-4 py-3">
+                      <Link
+                        to={`/quotations/${rev._id}`}
+                        className="font-semibold text-zinc-950 no-underline hover:underline"
+                      >
+                        {quoteNo(rev)}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${statusClass(
+                          rev.status
+                        )}`}
+                      >
+                        {rev.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold">
+                      {formatFinanceMoney(rev.grandTotal, rev.currency)}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-zinc-600">
+                      {rev.revisionReason || '—'}
+                    </td>
+                    <td className="px-4 py-3 text-zinc-600">
+                      {rev.createdAt ? new Date(rev.createdAt).toLocaleString() : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+      </div>
+
+      {rejectOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+            <h3 className="m-0 text-lg font-bold">Reject quotation</h3>
+            <p className="mt-2 mb-3 text-sm text-zinc-500">A reason is required for the audit trail.</p>
+            <textarea
+              className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+              rows={4}
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Why is this proposal declined?"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRejectOpen(false)}
+                className="h-9 px-3 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={rejectQuote}
+                className="h-9 px-3 text-xs font-semibold rounded-lg border border-zinc-950 bg-zinc-950 text-white cursor-pointer disabled:opacity-50"
+              >
+                Confirm reject
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reviseOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+            <h3 className="m-0 text-lg font-bold">Create revision</h3>
+            <p className="mt-2 mb-3 text-sm text-zinc-500">
+              Spawns a new versioned quotation (e.g. -R1) linked to this proposal.
+            </p>
+            <label className="flex flex-col gap-1 mb-3">
+              <span className="text-[11px] font-semibold uppercase text-zinc-500">
+                Revision reason *
+              </span>
+              <textarea
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                rows={3}
+                value={reviseReason}
+                onChange={(e) => setReviseReason(e.target.value)}
+                placeholder="Client requested scope / rate changes…"
+              />
+            </label>
+            <label className="flex flex-col gap-1 mb-3">
+              <span className="text-[11px] font-semibold uppercase text-zinc-500">
+                New valid till
+              </span>
+              <input
+                type="date"
+                className="h-9 rounded-lg border border-zinc-200 px-3 text-sm"
+                value={reviseValidTill}
+                onChange={(e) => setReviseValidTill(e.target.value)}
+              />
+            </label>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setReviseOpen(false)}
+                className="h-9 px-3 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={reviseQuote}
+                className="h-9 px-3 text-xs font-semibold rounded-lg border border-zinc-950 bg-zinc-950 text-white cursor-pointer disabled:opacity-50"
+              >
+                Create revision
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
