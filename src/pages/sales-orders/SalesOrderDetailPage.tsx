@@ -29,6 +29,7 @@ import {
   type SalesOrderShipment,
 } from '../../types/salesOrders';
 import { SalesOrderShippingTracker } from '../../components/sales-orders/SalesOrderShippingTracker';
+import { getCurrencySymbol, getRuntimeDefaultCurrency } from '../../utils/currency';
 
 function statusClass(status: string): string {
   const map: Record<string, string> = {
@@ -98,7 +99,7 @@ type ReturnSelection = Record<number, { selected: boolean; qty: number }>;
 export const SalesOrderDetailPage: React.FC = () => {
   const { id = '' } = useParams();
   const navigate = useNavigate();
-  const { hasPermission, isClient } = useAuth();
+  const { hasPermission, isClient, isAdmin, activeRole } = useAuth();
   const { confirm } = useDialog();
   const canWriteOrders = hasPermission('crm.orders.write') && !isClient;
   const canDeleteOrders = hasPermission('crm.orders.delete') && !isClient;
@@ -111,7 +112,6 @@ export const SalesOrderDetailPage: React.FC = () => {
   const [shipmentOpen, setShipmentOpen] = useState(false);
   const [shipSelection, setShipSelection] = useState<ShipSelection>({});
   const [courierName, setCourierName] = useState('');
-  const [trackingNumber, setTrackingNumber] = useState('');
   const [weightKg, setWeightKg] = useState(1);
   const [shipNotes, setShipNotes] = useState('');
 
@@ -127,6 +127,11 @@ export const SalesOrderDetailPage: React.FC = () => {
 
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+
+  const [generateInvoiceOpen, setGenerateInvoiceOpen] = useState(false);
+  const [sendInvoiceEmail, setSendInvoiceEmail] = useState(true);
+  const [invoiceRecipientEmail, setInvoiceRecipientEmail] = useState('');
+  const [invoiceEmailNote, setInvoiceEmailNote] = useState('');
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -154,6 +159,7 @@ export const SalesOrderDetailPage: React.FC = () => {
         setDeliveryOpen(null);
         setRmaOpen(false);
         setCancelOpen(false);
+        setGenerateInvoiceOpen(false);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -165,10 +171,15 @@ export const SalesOrderDetailPage: React.FC = () => {
     return (order.lineItems || []).some((line) => remainingShipQty(line) > 0);
   }, [order, canWriteOrders]);
 
-  const canReturn = useMemo(() => {
-    if (!canWriteOrders || !order || order.status === 'Cancelled') return false;
+  const isSalesManager = activeRole === 'sales-manager';
+  const isAuthorizedRmaRole = isClient || isAdmin || isSalesManager || activeRole === 'crm-manager';
+
+  const canGenerateRma = useMemo(() => {
+    if (!isAuthorizedRmaRole || !order || order.status === 'Cancelled' || order.status === 'Draft') {
+      return false;
+    }
     return (order.lineItems || []).some((line) => remainingReturnQty(line) > 0);
-  }, [order, canWriteOrders]);
+  }, [isAuthorizedRmaRole, order]);
 
   const canReserve =
     canWriteOrders &&
@@ -176,8 +187,9 @@ export const SalesOrderDetailPage: React.FC = () => {
     !order.stockReserved &&
     order.status !== 'Cancelled' &&
     order.status !== 'Draft';
+  // Staff with write access, or the linked client, can cancel before completion/dispatch.
   const canCancel =
-    canWriteOrders &&
+    (canWriteOrders || isClient) &&
     !!order &&
     !['Cancelled', 'Completed'].includes(order.status);
   const canDelete = canDeleteOrders && order?.status === 'Draft';
@@ -211,7 +223,6 @@ export const SalesOrderDetailPage: React.FC = () => {
     });
     setShipSelection(next);
     setCourierName('');
-    setTrackingNumber('');
     setWeightKg(1);
     setShipNotes('');
     setShipmentOpen(true);
@@ -222,13 +233,13 @@ export const SalesOrderDetailPage: React.FC = () => {
       const items = Object.entries(shipSelection)
         .filter(([, value]) => value.selected && value.qty > 0)
         .map(([index, value]) => ({ lineItemIndex: Number(index), qty: Number(value.qty) }));
-      if (!courierName.trim() || !trackingNumber.trim()) {
-        throw new Error('Courier and AWB tracking number are required.');
+      if (!courierName.trim()) {
+        throw new Error('Courier is required.');
       }
       if (!items.length) throw new Error('Select at least one item to ship.');
       await crmApi.addSalesOrderShipment(id, {
         courierName: courierName.trim(),
-        trackingNumber: trackingNumber.trim(),
+        trackingNumber: '',
         weightKg,
         notes: shipNotes.trim(),
         items,
@@ -248,6 +259,59 @@ export const SalesOrderDetailPage: React.FC = () => {
       setProofOfDelivery('');
     }, 'Delivery confirmed.');
 
+  const calculateRefundTotal = useCallback(
+    (selection: ReturnSelection): number => {
+      if (!order) return 0;
+      let total = 0;
+      Object.entries(selection).forEach(([indexStr, item]) => {
+        if (item.selected && Number(item.qty) > 0) {
+          const line = order.lineItems[Number(indexStr)];
+          if (line) {
+            total += Number(item.qty) * Number(line.rate || 0);
+          }
+        }
+      });
+      return Math.round(total * 100) / 100;
+    },
+    [order]
+  );
+
+  const toggleReturnItem = (index: number, selected: boolean) => {
+    if (!order) return;
+    const line = order.lineItems[index];
+    if (!line) return;
+    const remaining = remainingReturnQty(line);
+    const current = returnSelection[index] || { selected: false, qty: remaining };
+    const next: ReturnSelection = {
+      ...returnSelection,
+      [index]: {
+        selected,
+        qty: current.qty > 0 ? current.qty : remaining,
+      },
+    };
+    setReturnSelection(next);
+    setRefundAmount(calculateRefundTotal(next));
+  };
+
+  const updateReturnItemQty = (index: number, nextQty: number) => {
+    if (!order) return;
+    const line = order.lineItems[index];
+    if (!line) return;
+    const remaining = remainingReturnQty(line);
+    // Allow decreasing quantity; clamped strictly between 1 and remaining
+    const clampedQty = Math.min(remaining, Math.max(1, Number(nextQty) || 1));
+    const current = returnSelection[index] || { selected: true, qty: remaining };
+    const next: ReturnSelection = {
+      ...returnSelection,
+      [index]: {
+        ...current,
+        qty: clampedQty,
+      },
+    };
+    setReturnSelection(next);
+    setRefundAmount(calculateRefundTotal(next));
+  };
+
   const openRmaModal = () => {
     if (!order) return;
     const next: ReturnSelection = {};
@@ -257,7 +321,7 @@ export const SalesOrderDetailPage: React.FC = () => {
     });
     setReturnSelection(next);
     setRmaType('Return');
-    setRefundAmount(0);
+    setRefundAmount(calculateRefundTotal(next));
     setRmaReasonCategory(RMA_REASON_CATEGORIES[0]);
     setRmaReason('');
     setRmaOpen(true);
@@ -291,9 +355,15 @@ export const SalesOrderDetailPage: React.FC = () => {
 
       if (!returnedItems.length) throw new Error('Select at least one returned item.');
 
+      // For clients, always enforce the exact calculated refund total based on returned items & rates
+      const calculatedTotal = calculateRefundTotal(returnSelection);
+      const finalRefundAmount = isClient
+        ? calculatedTotal
+        : (rmaType === 'Return' ? Number(refundAmount || 0) : 0);
+
       await crmApi.createSalesOrderReturn(id, {
         type: rmaType,
-        refundAmount: rmaType === 'Return' ? Number(refundAmount || 0) : 0,
+        refundAmount: finalRefundAmount,
         reasonCategory: rmaReasonCategory,
         reason: rmaReason.trim(),
         returnedItems,
@@ -314,14 +384,61 @@ export const SalesOrderDetailPage: React.FC = () => {
       setCancelReason('');
     }, 'Sales order cancelled.');
 
-  const generateInvoice = () =>
-    run(async () => {
-      const invoice = await crmApi.generateInvoiceFromSalesOrder(id);
-      setInfo(`Invoice ${invoice.data.invoiceNo} linked.`);
-      if (invoice.data._id) {
-        // stay on SO detail; invoice link appears after reload
+  const openGenerateInvoiceModal = async () => {
+    if (!order) return;
+    if (order.convertedInvoiceId) {
+      navigate(`/invoices/${order.convertedInvoiceId}`);
+      return;
+    }
+    let email = order.customerEmail || order.clientEmail || '';
+    if (!email && order.clientId) {
+      try {
+        const clientRes = await crmApi.getClient(order.clientId);
+        if (clientRes?.data?.email) {
+          email = clientRes.data.email;
+        }
+      } catch {
+        // ignore client fetch error
       }
-    }, 'Invoice generated.');
+    }
+    setInvoiceRecipientEmail(email);
+    setSendInvoiceEmail(true);
+    setInvoiceEmailNote('');
+    setGenerateInvoiceOpen(true);
+  };
+
+  const submitGenerateInvoice = () =>
+    run(async () => {
+      if (!order) return;
+      if (sendInvoiceEmail) {
+        const email = invoiceRecipientEmail.trim();
+        if (!email || !email.includes('@')) {
+          throw new Error('Please enter a valid client recipient email address to send the invoice.');
+        }
+      }
+      const invoice = await crmApi.generateInvoiceFromSalesOrder(id, {
+        sendEmail: sendInvoiceEmail,
+        clientEmail: sendInvoiceEmail ? invoiceRecipientEmail.trim() : undefined,
+        emailMessage: sendInvoiceEmail && invoiceEmailNote.trim() ? invoiceEmailNote.trim() : undefined,
+      });
+
+      if (sendInvoiceEmail && invoice.data?._id && invoice.data.status !== 'Sent') {
+        try {
+          await crmApi.sendInvoice(invoice.data._id, {
+            email: invoiceRecipientEmail.trim(),
+            message: invoiceEmailNote.trim() || undefined,
+          });
+        } catch (sendErr) {
+          console.warn('Frontend invoice send dispatch fallback:', sendErr);
+        }
+      }
+
+      setGenerateInvoiceOpen(false);
+      const successMsg = sendInvoiceEmail
+        ? `Invoice ${invoice.data.invoiceNo} generated and emailed to ${invoiceRecipientEmail.trim()}.`
+        : `Invoice ${invoice.data.invoiceNo} generated successfully.`;
+      setInfo(successMsg);
+    }, 'Tax invoice generated.');
 
   const deleteDraft = async () => {
     if (!order || order.status !== 'Draft') return;
@@ -452,11 +569,11 @@ export const SalesOrderDetailPage: React.FC = () => {
               type="button"
               disabled={busy}
               onClick={() =>
-                run(() => crmApi.reserveSalesOrderStock(id), 'Stock reserved.')
+                run(() => crmApi.reserveSalesOrderStock(id), 'Order approved.')
               }
               className="inline-flex items-center gap-1.5 h-9 px-3 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer disabled:opacity-50"
             >
-              <InventoryIcon sx={{ fontSize: 15 }} /> Reserve stock
+              <InventoryIcon sx={{ fontSize: 15 }} /> Approved
             </button>
           )}
           {canShip && (
@@ -469,7 +586,7 @@ export const SalesOrderDetailPage: React.FC = () => {
               <LocalShippingIcon sx={{ fontSize: 15 }} /> Add shipment
             </button>
           )}
-          {canReturn && (
+          {canGenerateRma && (
             <button
               type="button"
               disabled={busy}
@@ -488,7 +605,7 @@ export const SalesOrderDetailPage: React.FC = () => {
                   navigate(`/invoices/${order.convertedInvoiceId}`);
                   return;
                 }
-                generateInvoice();
+                openGenerateInvoiceModal();
               }}
               className="inline-flex items-center gap-1.5 h-9 px-3 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer disabled:opacity-50"
             >
@@ -504,6 +621,22 @@ export const SalesOrderDetailPage: React.FC = () => {
               className="inline-flex items-center gap-1.5 h-9 px-3 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer disabled:opacity-50"
             >
               <ReceiptLongIcon sx={{ fontSize: 15 }} /> Open invoice
+            </button>
+          )}
+          {order.convertedInvoiceId && (canWriteOrders || hasPermission('crm.finance.write')) && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                run(
+                  () => crmApi.sendInvoice(order.convertedInvoiceId!),
+                  'Invoice emailed to customer.'
+                )
+              }
+              className="inline-flex items-center gap-1.5 h-9 px-3 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer disabled:opacity-50"
+              title="Email linked tax invoice to customer"
+            >
+              <EmailOutlinedIcon sx={{ fontSize: 15 }} /> Email invoice
             </button>
           )}
           {canCancel && (
@@ -555,11 +688,11 @@ export const SalesOrderDetailPage: React.FC = () => {
             <div>{order.shippingState || '—'}</div>
           </div>
           <div>
-            <div className="text-[11px] font-semibold uppercase text-zinc-500">Stock</div>
+            <div className="text-[11px] font-semibold uppercase text-zinc-500">Approval</div>
             <div>
               {order.stockReserved
-                ? `Reserved${order.stockReservedAt ? ` · ${formatDateTime(order.stockReservedAt)}` : ''}`
-                : 'Not reserved'}
+                ? `Approved${order.stockReservedAt ? ` · ${formatDateTime(order.stockReservedAt)}` : ''}`
+                : 'Not approved'}
               {order.inventoryDeducted ? ' · Inventory deducted' : ''}
             </div>
           </div>
@@ -696,7 +829,19 @@ export const SalesOrderDetailPage: React.FC = () => {
       </section>
 
       <section data-tour="sales-orders-detail-rma" className="bg-white border border-zinc-300 rounded-xl p-5">
-        <h2 className="text-sm font-semibold text-zinc-950 m-0 mb-3">Returns / RMA</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-zinc-950 m-0">Returns / RMA</h2>
+          {canGenerateRma && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={openRmaModal}
+              className="inline-flex items-center gap-1.5 h-8 px-2.5 text-xs font-semibold rounded-lg border border-amber-200 bg-amber-50 text-amber-900 cursor-pointer disabled:opacity-50"
+            >
+              <AssignmentReturnIcon sx={{ fontSize: 14 }} /> Request RMA
+            </button>
+          )}
+        </div>
         {(order.returns || []).length === 0 ? (
           <p className="text-sm text-zinc-500 m-0">No RMA requests.</p>
         ) : (
@@ -875,14 +1020,6 @@ export const SalesOrderDetailPage: React.FC = () => {
                   ))}
                 </select>
               </label>
-              <label className="flex flex-col gap-1 sm:col-span-2">
-                <span className="text-[11px] font-semibold uppercase text-zinc-500">AWB tracking *</span>
-                <input
-                  className={financeFieldClass}
-                  value={trackingNumber}
-                  onChange={(event) => setTrackingNumber(event.target.value)}
-                />
-              </label>
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-semibold uppercase text-zinc-500">Weight (kg)</span>
                 <input
@@ -999,17 +1136,40 @@ export const SalesOrderDetailPage: React.FC = () => {
               </label>
               {rmaType === 'Return' && (
                 <label className="flex flex-col gap-1">
-                  <span className="text-[11px] font-semibold uppercase text-zinc-500">
-                    Refund amount (₹)
-                  </span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold uppercase text-zinc-500">
+                      Refund amount ({order.currency || '₹'}) *
+                    </span>
+                    {isClient && (
+                      <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                        Auto-calculated
+                      </span>
+                    )}
+                  </div>
                   <input
-                    className={financeFieldClass}
+                    className={`${financeFieldClass} ${
+                      isClient
+                        ? 'bg-zinc-100 text-zinc-700 font-semibold cursor-not-allowed select-none border-zinc-200'
+                        : ''
+                    }`}
                     type="number"
                     min={0}
                     step="0.01"
                     value={refundAmount}
-                    onChange={(event) => setRefundAmount(Number(event.target.value))}
+                    readOnly={isClient}
+                    disabled={isClient}
+                    onChange={(event) => {
+                      if (!isClient) {
+                        setRefundAmount(Number(event.target.value));
+                      }
+                    }}
+                    title={isClient ? 'Refund amount is automatically calculated for clients and cannot be edited' : undefined}
                   />
+                  {isClient && (
+                    <span className="text-[10px] text-zinc-500">
+                      Refund amount is automatically calculated based on returned items & unit rates and cannot be changed.
+                    </span>
+                  )}
                 </label>
               )}
               <label className="flex flex-col gap-1 sm:col-span-2">
@@ -1035,52 +1195,88 @@ export const SalesOrderDetailPage: React.FC = () => {
                   rows={3}
                   value={rmaReason}
                   onChange={(event) => setRmaReason(event.target.value)}
+                  placeholder="Describe defects, transit damages, or reason for return..."
                 />
               </label>
             </div>
-            <div className="flex flex-col gap-2 max-h-[40vh] overflow-y-auto mb-3">
+            <div className="flex flex-col gap-2.5 max-h-[42vh] overflow-y-auto mb-3 pr-0.5">
               {(order.lineItems || []).map((line, index) => {
                 const remaining = remainingReturnQty(line);
                 if (remaining <= 0) return null;
                 const sel = returnSelection[index] || { selected: false, qty: remaining };
+                const lineRate = Number(line.rate || 0);
+                const lineRefund = Number(sel.qty || 0) * lineRate;
+
                 return (
-                  <label
+                  <div
                     key={index}
-                    className="flex items-start gap-3 rounded-lg border border-zinc-200 p-3 text-sm"
+                    className={`flex flex-col gap-2 rounded-xl border p-3 transition-colors ${
+                      sel.selected
+                        ? 'border-zinc-300 bg-zinc-50/70 shadow-xs'
+                        : 'border-zinc-200 bg-white opacity-70'
+                    }`}
                   >
-                    <input
-                      type="checkbox"
-                      checked={sel.selected}
-                      onChange={(event) =>
-                        setReturnSelection((prev) => ({
-                          ...prev,
-                          [index]: { ...sel, selected: event.target.checked },
-                        }))
-                      }
-                      className="mt-1"
-                    />
-                    <div className="flex-1">
-                      <div className="font-medium">{line.description}</div>
-                      <div className="text-xs text-zinc-500">Returnable: {remaining}</div>
-                      <input
-                        type="number"
-                        min={1}
-                        max={remaining}
-                        value={sel.qty}
-                        disabled={!sel.selected}
-                        onChange={(event) =>
-                          setReturnSelection((prev) => ({
-                            ...prev,
-                            [index]: {
-                              ...sel,
-                              qty: Math.min(remaining, Math.max(1, Number(event.target.value) || 1)),
-                            },
-                          }))
-                        }
-                        className={`${financeFieldClass} mt-2 max-w-[120px]`}
-                      />
+                    <div className="flex items-start justify-between gap-3">
+                      <label className="flex items-start gap-2.5 cursor-pointer select-none min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={sel.selected}
+                          onChange={(e) => toggleReturnItem(index, e.target.checked)}
+                          className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-zinc-950 focus:ring-zinc-950 cursor-pointer"
+                        />
+                        <div className="min-w-0">
+                          <span className="font-semibold text-zinc-950 text-sm block truncate">
+                            {line.description}
+                          </span>
+                          <span className="text-xs text-zinc-500">
+                            Unit rate: {formatFinanceMoney(lineRate, order.currency)} · Returnable max: {remaining}
+                          </span>
+                        </div>
+                      </label>
+                      {sel.selected && (
+                        <span className="text-xs font-bold text-zinc-900 shrink-0">
+                          {formatFinanceMoney(lineRefund, order.currency)}
+                        </span>
+                      )}
                     </div>
-                  </label>
+
+                    {sel.selected && (
+                      <div className="flex items-center justify-between gap-3 pt-2 border-t border-zinc-200/80">
+                        <span className="text-xs font-medium text-zinc-600">
+                          Return Quantity:
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={sel.qty <= 1}
+                            onClick={() => updateReturnItemQty(index, sel.qty - 1)}
+                            className="h-7 w-7 flex items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100 text-sm font-bold disabled:opacity-40 cursor-pointer"
+                            title="Decrease quantity"
+                          >
+                            –
+                          </button>
+                          <input
+                            type="number"
+                            min={1}
+                            max={remaining}
+                            value={sel.qty}
+                            onChange={(e) => updateReturnItemQty(index, Number(e.target.value))}
+                            className={`${financeFieldClass} h-7 w-16 text-center text-xs font-bold px-1`}
+                          />
+                          <button
+                            type="button"
+                            disabled={sel.qty >= remaining}
+                            onClick={() => updateReturnItemQty(index, sel.qty + 1)}
+                            className="h-7 w-7 flex items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100 text-sm font-bold disabled:opacity-40 cursor-pointer"
+                            title="Increase quantity (up to max returnable)"
+                          >
+                            +
+                          </button>
+                          <span className="text-[11px] text-zinc-400">/ {remaining}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -1119,8 +1315,9 @@ export const SalesOrderDetailPage: React.FC = () => {
               </button>
             </div>
             <p className="text-xs text-zinc-500 m-0 mb-3">
-              Cancellation is blocked if packages have already been dispatched or delivered. Use RMA
-              instead in that case.
+              {isClient
+                ? 'You can cancel this order only before packages are dispatched. After dispatch, request an RMA instead.'
+                : 'Cancellation is blocked if packages have already been dispatched or delivered. Use RMA instead in that case.'}
             </p>
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-semibold uppercase text-zinc-500">
@@ -1148,6 +1345,149 @@ export const SalesOrderDetailPage: React.FC = () => {
                 className="h-9 px-3 text-xs font-semibold rounded-lg border border-red-700 bg-red-700 text-white cursor-pointer disabled:opacity-50"
               >
                 Cancel order
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {generateInvoiceOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-xl border border-zinc-200 bg-white p-6 shadow-xl animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-200">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <ReceiptLongIcon sx={{ fontSize: 20 }} />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-zinc-950 m-0">Generate Tax Invoice</h3>
+                  <p className="text-xs text-zinc-500 m-0">
+                    Sales Order {order.orderNumber} · {displayLabel(order.clientName)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGenerateInvoiceOpen(false)}
+                className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-zinc-200 text-zinc-400 hover:text-zinc-700 bg-white cursor-pointer"
+              >
+                <CloseIcon sx={{ fontSize: 16 }} />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-4">
+              <div className="rounded-lg bg-zinc-50 border border-zinc-200 p-3.5 text-xs grid grid-cols-2 gap-3">
+                <div>
+                  <span className="text-[10px] font-semibold uppercase text-zinc-400">Order Number</span>
+                  <div className="font-semibold text-zinc-900 mt-0.5">{order.orderNumber}</div>
+                </div>
+                <div>
+                  <span className="text-[10px] font-semibold uppercase text-zinc-400">Grand Total</span>
+                  <div className="font-bold text-zinc-950 mt-0.5">
+                    {formatFinanceMoney(order.grandTotal, order.currency)}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-[10px] font-semibold uppercase text-zinc-400">Line Items</span>
+                  <div className="font-medium text-zinc-700 mt-0.5">
+                    {order.lineItems?.length || 0} items
+                  </div>
+                </div>
+                <div>
+                  <span className="text-[10px] font-semibold uppercase text-zinc-400">Client / Customer</span>
+                  <div className="font-medium text-zinc-700 truncate mt-0.5" title={order.clientName}>
+                    {displayLabel(order.clientName)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Email Option Card */}
+              <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4 space-y-3">
+                <label className="flex items-start gap-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={sendInvoiceEmail}
+                    onChange={(e) => setSendInvoiceEmail(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-blue-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-zinc-950">
+                        Send invoice to client via email
+                      </span>
+                      <span className="text-[10px] font-semibold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded-full border border-blue-200">
+                        Email Option
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-zinc-600 m-0 mt-0.5">
+                      Automatically dispatch the finalized tax invoice with PDF attachment and online payment link directly to the customer.
+                    </p>
+                  </div>
+                </label>
+
+                {sendInvoiceEmail && (
+                  <div className="pt-2 border-t border-blue-200/80 space-y-3 pl-7">
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] font-semibold uppercase text-zinc-700">
+                        Client Recipient Email *
+                      </span>
+                      <input
+                        type="email"
+                        value={invoiceRecipientEmail}
+                        onChange={(e) => setInvoiceRecipientEmail(e.target.value)}
+                        placeholder="client@company.com"
+                        className={`${financeFieldClass} bg-white text-xs`}
+                        required
+                      />
+                      <span className="text-[10px] text-zinc-500">
+                        Recipient will receive an email with payment link and downloadable PDF invoice.
+                      </span>
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] font-semibold uppercase text-zinc-700">
+                        Optional Note / Message to Client
+                      </span>
+                      <textarea
+                        rows={2}
+                        value={invoiceEmailNote}
+                        onChange={(e) => setInvoiceEmailNote(e.target.value)}
+                        placeholder="Thank you for your order! Please find attached your tax invoice."
+                        className={`${financeTextAreaClass} bg-white text-xs`}
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end items-center gap-2 pt-3 border-t border-zinc-200">
+              <button
+                type="button"
+                onClick={() => setGenerateInvoiceOpen(false)}
+                className="h-9 px-3.5 text-xs font-semibold rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={submitGenerateInvoice}
+                className={`h-9 px-4 text-xs font-semibold rounded-lg text-white cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50 transition-colors shadow-sm ${
+                  sendInvoiceEmail
+                    ? 'border border-blue-600 bg-blue-600 hover:bg-blue-700'
+                    : 'border border-zinc-900 bg-zinc-900 hover:bg-zinc-800'
+                }`}
+              >
+                {sendInvoiceEmail ? (
+                  <>
+                    <EmailOutlinedIcon sx={{ fontSize: 16 }} /> Generate & Email to Client
+                  </>
+                ) : (
+                  <>
+                    <ReceiptLongIcon sx={{ fontSize: 16 }} /> Generate Invoice Only
+                  </>
+                )}
               </button>
             </div>
           </div>

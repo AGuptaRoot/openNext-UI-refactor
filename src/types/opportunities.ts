@@ -12,6 +12,7 @@ export type OpportunityStage =
 
 export interface OpportunityProductLine {
   productName: string;
+  description?: string;
   quantity: number;
   unitPrice: number;
   tax: number;

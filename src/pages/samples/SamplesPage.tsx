@@ -47,7 +47,8 @@ export const SamplesPage: React.FC = () => {
       activeRole === 'sales-manager' ||
       activeRole === 'finance-manager');
 
-  const canApproveSamples = isSampleLifecycleManager && hasPermission('crm.samples.approve');
+  // Only the client can approve / reject sample requests (admin / staff must not).
+  const canApproveSamples = isClient;
   const canDispatchSamples = isSampleLifecycleManager && (hasPermission('crm.samples.write') || isAdmin);
   const canDeliverSamples = isSampleLifecycleManager && (hasPermission('crm.samples.write') || isAdmin);
   const canWriteSamples = hasPermission('crm.samples.write') && !isClient;
@@ -67,13 +68,11 @@ export const SamplesPage: React.FC = () => {
   const [approveOpen, setApproveOpen] = useState(false);
   const [approveAction, setApproveAction] = useState<'approve' | 'reject'>('approve');
   const [approveSample, setApproveSample] = useState<SampleItem | null>(null);
-  const [stockLocation, setStockLocation] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
 
   const [dispatchOpen, setDispatchOpen] = useState(false);
   const [dispatchSample, setDispatchSample] = useState<SampleItem | null>(null);
   const [courierName, setCourierName] = useState('');
-  const [trackingNumber, setTrackingNumber] = useState('');
   const [dispatchDate, setDispatchDate] = useState(localToday());
   const [etaDate, setEtaDate] = useState('');
 
@@ -126,24 +125,25 @@ export const SamplesPage: React.FC = () => {
       .catch(() => {});
   }, []);
 
-  const officeLocations = useMemo(() => {
-    const list: string[] = [];
-    if (settings?.office_address?.trim()) {
-      list.push(settings.office_address.trim());
-    }
-    if (Array.isArray(settings?.office_addresses)) {
-      settings.office_addresses.forEach((a) => {
-        const trimmed = String(a || '').trim();
-        if (trimmed && !list.includes(trimmed)) list.push(trimmed);
-      });
-    }
-    return list;
-  }, [settings]);
+  const courierOptions = useMemo(() => {
+    const fromSettings = (settings?.courier_carriers || [])
+      .map((c) => String(c || '').trim())
+      .filter(Boolean);
+    if (fromSettings.length) return fromSettings;
+    return [
+      'BlueDart Express',
+      'Delhivery Logistics',
+      'Shiprocket Direct',
+      'FedEx Express',
+      'DTDC Courier',
+      'Professional Courier',
+      'Custom Courier',
+    ];
+  }, [settings?.courier_carriers]);
 
   const openApprove = (sample: SampleItem, action: 'approve' | 'reject') => {
     setApproveSample(sample);
     setApproveAction(action);
-    setStockLocation(sample.stockLocation || (officeLocations[0] || ''));
     setRejectionReason('');
     setApproveOpen(true);
     setError('');
@@ -160,7 +160,6 @@ export const SamplesPage: React.FC = () => {
     try {
       const response = await crmApi.approveSample(approveSample._id, {
         action: approveAction,
-        stockLocation: stockLocation.trim() || undefined,
         rejectionReason: rejectionReason.trim() || undefined,
       });
       setSuccess(response.message || `Sample ${approveAction}d.`);
@@ -176,8 +175,8 @@ export const SamplesPage: React.FC = () => {
 
   const openDispatch = (sample: SampleItem) => {
     setDispatchSample(sample);
-    setCourierName(sample.courierName || '');
-    setTrackingNumber(sample.trackingNumber || '');
+    const existingCourier = String(sample.courierName || '').trim();
+    setCourierName(existingCourier || courierOptions[0] || '');
     setDispatchDate(sample.dispatchDate?.slice(0, 10) || localToday());
     setEtaDate(sample.estimatedDeliveryDate?.slice(0, 10) || '');
     setDispatchOpen(true);
@@ -187,15 +186,15 @@ export const SamplesPage: React.FC = () => {
   const submitDispatch = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!dispatchSample) return;
-    if (!courierName.trim() || !trackingNumber.trim()) {
-      return setError('Courier and AWB / tracking number are required.');
+    if (!courierName.trim()) {
+      return setError('Courier / carrier is required.');
     }
     setSaving(true);
     setBusyId(dispatchSample._id);
     try {
       const response = await crmApi.dispatchSample(dispatchSample._id, {
         courierName: courierName.trim(),
-        trackingNumber: trackingNumber.trim(),
+        trackingNumber: '',
         dispatchDate: dispatchDate || undefined,
         estimatedDeliveryDate: etaDate || undefined,
       });
@@ -625,44 +624,9 @@ export const SamplesPage: React.FC = () => {
                 </div>
               )}
               {approveAction === 'approve' ? (
-                <div className="space-y-2">
-                  <label className="block">
-                    <span className="mb-1.5 block text-xs font-semibold text-zinc-700">
-                      Add Stock Address (Optional)
-                    </span>
-                    {officeLocations.length > 0 && (
-                      <div className="mb-2">
-                        <span className="block text-[11px] text-zinc-500 mb-1">
-                          Choose office location from Settings:
-                        </span>
-                        <div className="flex flex-wrap gap-1.5">
-                          {officeLocations.map((loc, idx) => (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => setStockLocation(loc)}
-                              className={`text-[11px] rounded-md px-2 py-1 text-left border cursor-pointer transition-colors ${
-                                stockLocation === loc
-                                  ? 'bg-indigo-50 border-indigo-400 text-indigo-700 font-semibold'
-                                  : 'bg-zinc-50 border-zinc-200 text-zinc-700 hover:bg-zinc-100'
-                              }`}
-                            >
-                              📍 {loc.length > 40 ? loc.slice(0, 40) + '…' : loc}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    <textarea
-                      rows={2}
-                      className={fieldClass}
-                      maxLength={500}
-                      placeholder="Enter dispatch office / stock address…"
-                      value={stockLocation}
-                      onChange={(event) => setStockLocation(event.target.value)}
-                    />
-                  </label>
-                </div>
+                <p className="m-0 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
+                  Confirm you want to approve this sample request. Our team will prepare and dispatch it after approval.
+                </p>
               ) : (
                 <label className="block">
                   <span className="mb-1.5 block text-xs font-semibold text-zinc-700">
@@ -725,24 +689,22 @@ export const SamplesPage: React.FC = () => {
                 <span className="mb-1.5 block text-xs font-semibold text-zinc-700">
                   Courier / Carrier *
                 </span>
-                <input
+                <select
                   required
                   className={fieldClass}
-                  placeholder="DHL Express, BlueDart, FedEx…"
                   value={courierName}
                   onChange={(event) => setCourierName(event.target.value)}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-zinc-700">
-                  Tracking Number / AWB *
-                </span>
-                <input
-                  required
-                  className={`${fieldClass} font-mono`}
-                  value={trackingNumber}
-                  onChange={(event) => setTrackingNumber(event.target.value)}
-                />
+                >
+                  <option value="">Select courier / carrier…</option>
+                  {courierOptions.map((carrier) => (
+                    <option key={carrier} value={carrier}>
+                      {carrier}
+                    </option>
+                  ))}
+                  {courierName && !courierOptions.includes(courierName) ? (
+                    <option value={courierName}>{courierName}</option>
+                  ) : null}
+                </select>
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="block">

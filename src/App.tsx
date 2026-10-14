@@ -6,6 +6,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
 import { openNextTheme } from './theme/muiTheme';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { CurrencyProvider } from './context/CurrencyContext';
 import { TimerProvider } from './context/TimerContext';
 import { DialogProvider } from './context/DialogContext';
 import { Layout } from './components/Layout';
@@ -141,6 +142,7 @@ export const App: React.FC = () => {
   return (
     <ThemeProvider theme={openNextTheme}>
       <AuthProvider>
+        <CurrencyProvider>
         <DialogProvider>
           <TimerProvider>
             <HashRouter>
@@ -225,6 +227,7 @@ export const App: React.FC = () => {
             </HashRouter>
           </TimerProvider>
         </DialogProvider>
+        </CurrencyProvider>
       </AuthProvider>
     </ThemeProvider>
   );

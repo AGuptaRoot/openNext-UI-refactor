@@ -10,6 +10,7 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import PlaylistAddCheckIcon from '@mui/icons-material/PlaylistAddCheck';
 
 import { crmApi } from '../../services/api';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 import { useDialog } from '../../context/DialogContext';
 import {
   ProjectPriority,
@@ -36,6 +37,7 @@ export const ProjectTemplateModal: React.FC<ProjectTemplateModalProps> = ({
   showToast,
 }) => {
   const { confirm } = useDialog();
+  const settingsCurrency = useDefaultCurrency();
   const [viewMode, setViewMode] = useState<'list' | 'form'>('list');
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
   const [loading, setLoading] = useState(false);
@@ -49,7 +51,7 @@ export const ProjectTemplateModal: React.FC<ProjectTemplateModalProps> = ({
   const [priority, setPriority] = useState<ProjectPriority>('Medium');
   const [hoursEstimate, setHoursEstimate] = useState<string>('0');
   const [budget, setBudget] = useState<string>('0');
-  const [currency, setCurrency] = useState<string>('INR');
+  const [currency, setCurrency] = useState<string>(settingsCurrency);
   const [description, setDescription] = useState('');
 
   // Milestones & Tasks builders
@@ -99,7 +101,7 @@ export const ProjectTemplateModal: React.FC<ProjectTemplateModalProps> = ({
     setPriority('Medium');
     setHoursEstimate('80');
     setBudget('100000');
-    setCurrency('INR');
+    setCurrency(settingsCurrency);
     setDescription('');
     setMilestones([
       { name: 'Phase 1: Discovery & Architecture', dueDayOffset: 7, order: 0 },
@@ -150,7 +152,7 @@ export const ProjectTemplateModal: React.FC<ProjectTemplateModalProps> = ({
     setPriority(tpl.priority || 'Medium');
     setHoursEstimate(String(tpl.hoursEstimate || 0));
     setBudget(String(tpl.budget || 0));
-    setCurrency(tpl.currency || 'INR');
+    setCurrency(tpl.currency || settingsCurrency);
     setDescription(tpl.description || '');
 
     // Normalize milestones
@@ -264,7 +266,7 @@ export const ProjectTemplateModal: React.FC<ProjectTemplateModalProps> = ({
       priority,
       hoursEstimate: Number(hoursEstimate) || 0,
       budget: Number(budget) || 0,
-      currency: currency || 'INR',
+      currency: currency || settingsCurrency,
       description: description.trim() || undefined,
       milestones: milestones.map((m, idx) => ({
         name: m.name.trim() || `Milestone ${idx + 1}`,

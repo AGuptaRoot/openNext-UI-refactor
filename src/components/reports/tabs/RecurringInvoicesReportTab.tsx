@@ -10,13 +10,14 @@ import {
   formatDate,
   ReportEmptyState,
 } from '../ReportCharts';
+import { getRuntimeDefaultCurrency } from '../../../utils/currency';
 
 export interface RecurringInvoicesReportTabProps {
   data: RecurringInvoicesReportData;
 }
 
 export const RecurringInvoicesReportTab: React.FC<RecurringInvoicesReportTabProps> = ({ data }) => {
-  const currency = data.defaultCurrency || 'INR';
+  const currency = data.defaultCurrency || getRuntimeDefaultCurrency();
 
   const metrics = useMemo(() => {
     const totalActive = Number(data.totalActive ?? data.activeProfiles ?? 0) || 0;

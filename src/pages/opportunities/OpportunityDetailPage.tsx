@@ -26,18 +26,12 @@ import {
   formatAssignableUserLabel,
   isAssignableSalesRepresentative,
 } from '../../utils/permissions';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import { formatCrmMoney } from '../../utils/currency';
 
-function formatMoney(value?: number, currency = 'INR') {
+function formatMoney(value?: number, currency?: string) {
   if (value == null || Number.isNaN(Number(value))) return '—';
-  try {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 2,
-    }).format(Number(value));
-  } catch {
-    return `₹${Number(value).toLocaleString('en-IN')}`;
-  }
+  return formatCrmMoney(value, currency, { maximumFractionDigits: 2 });
 }
 
 function formatDate(value?: string | null) {
@@ -75,7 +69,7 @@ export const OpportunityDetailPage: React.FC = () => {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const { hasPermission, isClient, user, activeRole } = useAuth();
-  const { confirm } = useDialog();
+  const { alert, confirm } = useDialog();
 
   const canWrite =
     (hasPermission('crm.opportunities.write') || hasPermission('crm.leads.write')) && !isClient;
@@ -87,6 +81,7 @@ export const OpportunityDetailPage: React.FC = () => {
     !isClient;
   const canAssignOwner = canAssignOpportunityOwner(user, { isClient, activeRole });
   const opportunityStages = useOpportunityStages();
+  const settingsCurrency = useDefaultCurrency();
 
   const [item, setItem] = useState<OpportunityItem | null>(null);
   const [loading, setLoading] = useState(true);
@@ -189,8 +184,8 @@ export const OpportunityDetailPage: React.FC = () => {
     item?.probability ?? stageProbability(item?.stage || 'Discovery', opportunityStages);
   const financials = useMemo(
     () =>
-      computeOpportunityFinancials(products, item?.shippingCharge ?? 0, probability),
-    [products, item?.shippingCharge, probability]
+      computeOpportunityFinancials(products, 0, probability),
+    [products, probability]
   );
 
   const locked = item ? isOpportunityStageLocked(item) : false;
@@ -247,21 +242,42 @@ export const OpportunityDetailPage: React.FC = () => {
 
   const runConvertSalesOrder = async () => {
     if (!item) return;
+    if (item.generatedSalesOrderId) {
+      await alert({
+        title: 'Opportunity Converted',
+        message: 'This opportunity converted',
+      });
+      return;
+    }
     if (!(await confirm(`Generate sales order from "${item.title}"?`))) return;
     setBusy(true);
     setInfo('');
     try {
       const res = await crmApi.convertOpportunityToSalesOrder(item._id);
-      setInfo(res.message || 'Sales order generated successfully');
       await load();
+      await alert({
+        title: 'Opportunity Converted',
+        message: 'This opportunity converted',
+      });
+      setInfo('This opportunity converted');
       const salesOrderId =
         (res.data as { salesOrderId?: string })?.salesOrderId ||
         (res.data as { _id?: string })?._id;
       if (salesOrderId) {
-        window.setTimeout(() => navigate(`/sales-orders/${salesOrderId}`), 400);
+        navigate(`/sales-orders/${salesOrderId}`);
       }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Sales order conversion failed');
+      const msg = reason instanceof Error ? reason.message : 'Sales order conversion failed';
+      if (msg.toLowerCase().includes('converted')) {
+        await load();
+        await alert({
+          title: 'Opportunity Converted',
+          message: 'This opportunity converted',
+        });
+        setInfo('This opportunity converted');
+      } else {
+        setError(msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -317,6 +333,20 @@ export const OpportunityDetailPage: React.FC = () => {
           }`}
         >
           {error || info}
+        </div>
+      )}
+
+      {item.generatedSalesOrderId && (
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-semibold text-emerald-800">
+          <span>✓ This opportunity converted</span>
+          <span className="text-emerald-400">·</span>
+          <span>Sales Order generated</span>
+          <Link
+            to={`/sales-orders/${item.generatedSalesOrderId}`}
+            className="text-emerald-900 underline font-bold ml-auto no-underline hover:underline"
+          >
+            {item.generatedSalesOrderNo ? `View ${item.generatedSalesOrderNo}` : 'View Sales Order'} &rarr;
+          </Link>
         </div>
       )}
 
@@ -436,7 +466,6 @@ export const OpportunityDetailPage: React.FC = () => {
           { label: 'Deal value', value: formatMoney(dealValue, item.currency) },
           { label: 'Weighted forecast', value: formatMoney(weighted, item.currency) },
           { label: 'Probability', value: `${probability}%` },
-          { label: 'Shipping', value: formatMoney(item.shippingCharge ?? 0, item.currency) },
         ].map((card) => (
           <div key={card.label} className="bg-white border border-zinc-300 rounded-xl p-4">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -534,7 +563,7 @@ export const OpportunityDetailPage: React.FC = () => {
             </InfoRow>
             <InfoRow label="Expected close">{formatDate(item.expectedCloseDate)}</InfoRow>
             <InfoRow label="Closed at">{formatDateTime(item.closedAt)}</InfoRow>
-            <InfoRow label="Currency">{item.currency || 'INR'}</InfoRow>
+            <InfoRow label="Currency">{item.currency || settingsCurrency}</InfoRow>
             {item.source && <InfoRow label="Source">{item.source}</InfoRow>}
             {isOpportunityLostStage(item.stage) && (
               <InfoRow label="Lost reason">{item.lostReason || '—'}</InfoRow>
@@ -601,7 +630,10 @@ export const OpportunityDetailPage: React.FC = () => {
                       <tr key={`${line.productName}-${index}`} className="border-b border-zinc-100">
                         <td className="px-4 py-3 text-xs text-zinc-500">{index + 1}</td>
                         <td className="px-4 py-3 text-sm font-semibold text-zinc-950">
-                          {line.productName || '—'}
+                          <div>{line.productName || '—'}</div>
+                          {line.description && (
+                            <div className="text-xs text-zinc-500 font-normal mt-0.5">{line.description}</div>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-xs text-zinc-700">{line.quantity}</td>
                         <td className="px-4 py-3 text-xs text-zinc-700">
@@ -627,9 +659,6 @@ export const OpportunityDetailPage: React.FC = () => {
           <h2 className="text-sm font-bold text-zinc-950 m-0 mb-4">Shipping &amp; financials</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <InfoRow label="Destination state">{item.shippingState || '—'}</InfoRow>
-            <InfoRow label="Shipping charge">
-              {formatMoney(item.shippingCharge ?? 0, item.currency)}
-            </InfoRow>
             <InfoRow label="Products subtotal">
               {formatMoney(financials.subtotal, item.currency)}
             </InfoRow>

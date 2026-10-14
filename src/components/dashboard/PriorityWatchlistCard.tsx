@@ -4,18 +4,11 @@ import ReceiptOutlinedIcon from '@mui/icons-material/ReceiptOutlined';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { DashboardData, InvoiceItem } from '../../types/dashboard';
 import { dashboardListPath } from '../../utils/dashboardNavigation';
+import { formatCrmMoney, getRuntimeDefaultCurrency } from '../../utils/currency';
 
 interface PriorityWatchlistCardProps {
   data: DashboardData;
   onNavigateUnmigrated: (moduleName: string) => void;
-}
-
-function formatMoney(amount: number | undefined, currency = 'INR'): string {
-  const num = Number(amount || 0);
-  return `${currency} ${num.toLocaleString('en-IN', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
 }
 
 function invoiceIdOf(inv: InvoiceItem): string {
@@ -28,7 +21,7 @@ export const PriorityWatchlistCard: React.FC<PriorityWatchlistCardProps> = ({
 }) => {
   const navigate = useNavigate();
   const [tab, setTab] = useState<'invoices' | 'orders'>('invoices');
-  const currency = data.defaultCurrency || 'INR';
+  const currency = data.defaultCurrency || getRuntimeDefaultCurrency();
   const invoices: InvoiceItem[] = data.unpaidInvoicesList || [];
 
   const openInvoice = (inv: InvoiceItem) => {
@@ -137,7 +130,7 @@ export const PriorityWatchlistCard: React.FC<PriorityWatchlistCardProps> = ({
                     </div>
 
                     <div className="text-xs font-bold font-mono text-zinc-950 flex-shrink-0">
-                      {formatMoney(inv.balanceDue ?? inv.total, currency)}
+                      {formatCrmMoney(inv.balanceDue ?? inv.total, currency)}
                     </div>
                   </div>
                 );

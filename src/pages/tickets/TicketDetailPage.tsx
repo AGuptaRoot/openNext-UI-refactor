@@ -12,7 +12,6 @@ import {
   TICKET_STATUSES,
   evaluateSla,
   slaToneClass,
-  type CannedResponse,
   type TicketItem,
 } from '../../types/tickets';
 
@@ -67,7 +66,6 @@ export const TicketDetailPage: React.FC = () => {
 
   const [ticket, setTicket] = useState<TicketItem | null>(null);
   const [users, setUsers] = useState<AssignableUser[]>([]);
-  const [canned, setCanned] = useState<CannedResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -77,7 +75,6 @@ export const TicketDetailPage: React.FC = () => {
   const [replyType, setReplyType] = useState<'public' | 'internal'>('public');
   const [replyMessage, setReplyMessage] = useState('');
   const [attachmentUrl, setAttachmentUrl] = useState('');
-  const [cannedId, setCannedId] = useState('');
 
   const [modal, setModal] = useState<ModalKind>(null);
   const [resolveNotes, setResolveNotes] = useState('');
@@ -94,14 +91,12 @@ export const TicketDetailPage: React.FC = () => {
     setLoading(true);
     setError('');
     try {
-      const [ticketResponse, usersResponse, cannedResponse] = await Promise.all([
+      const [ticketResponse, usersResponse] = await Promise.all([
         crmApi.getTicket(id),
         crmApi.getAssignableUsers().catch(() => ({ data: [] as AssignableUser[] })),
-        crmApi.listCannedResponses().catch(() => ({ data: [] as CannedResponse[] })),
       ]);
       setTicket(ticketResponse.data);
       setUsers((usersResponse.data || []).filter((entry) => !entry.isClient && !entry.isClientUser));
-      setCanned(cannedResponse.data || []);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Failed to load ticket');
       setTicket(null);
@@ -200,20 +195,12 @@ export const TicketDetailPage: React.FC = () => {
       );
       setReplyMessage('');
       setAttachmentUrl('');
-      setCannedId('');
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Failed to send reply');
     } finally {
       setSaving(false);
     }
-  };
-
-  const insertCanned = (selectedId: string) => {
-    setCannedId(selectedId);
-    const item = canned.find((entry) => entry._id === selectedId);
-    if (!item) return;
-    setReplyMessage((current) => (current ? `${current}\n\n${item.body}` : item.body));
   };
 
   const submitResolve = async (event: React.FormEvent) => {
@@ -503,19 +490,6 @@ export const TicketDetailPage: React.FC = () => {
                       />
                       Internal Note
                     </label>
-                    <select
-                      id="select-canned-response-detail"
-                      className={`${fieldClass} max-w-xs`}
-                      value={cannedId}
-                      onChange={(e) => insertCanned(e.target.value)}
-                    >
-                      <option value="">Insert canned response…</option>
-                      {canned.map((item) => (
-                        <option key={item._id} value={item._id}>
-                          {item.title}
-                        </option>
-                      ))}
-                    </select>
                   </div>
                 )}
                 <textarea

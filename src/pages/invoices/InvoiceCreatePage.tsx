@@ -22,12 +22,13 @@ import { ClientSelect } from '../../components/clients/ClientSelect';
 import { DocumentUploadControl } from '../../components/common/DocumentUploadControl';
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
 import { useFinanceOptions } from '../../components/finance/useFinanceOptions';
-import { calculateFinanceTotals } from '../../utils/financeTotals';
+import { calculateFinanceTotals, clampDiscountValue } from '../../utils/financeTotals';
 import {
   consumeFinancePdfScanDraft,
   linesFromPdfExtract,
   normalizeTaxCalculationValue,
 } from '../../utils/financePdfScanDraft';
+import { normalizeCurrencyCode, useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 
 function localToday(): string {
   const d = new Date();
@@ -55,16 +56,46 @@ function linesFromSource(
   }));
 }
 
+export function isQuotationConverted(quote?: { status?: string } | null): boolean {
+  return String(quote?.status || '').trim().toLowerCase() === 'converted';
+}
+
+export function isSalesOrderDispatched(order?: {
+  status?: string;
+  deliveryStatus?: string;
+  dispatchedAt?: string | null;
+  shipments?: Array<{ deliveryStatus?: string }>;
+} | null): boolean {
+  if (!order) return false;
+  const status = String(order.status || '').trim().toLowerCase();
+  const deliveryStatus = String(order.deliveryStatus || '').trim().toLowerCase();
+  if (status === 'dispatched' || deliveryStatus === 'dispatched') return true;
+  if (deliveryStatus === 'in-transit' || deliveryStatus === 'delivered' || status === 'shipped') return true;
+  if (Boolean(order.dispatchedAt)) return true;
+  if (
+    Array.isArray(order.shipments) &&
+    order.shipments.some((s) => {
+      const sStat = String(s.deliveryStatus || '').trim().toLowerCase();
+      return sStat === 'dispatched' || sStat === 'in-transit' || sStat === 'delivered';
+    })
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export const InvoiceCreatePage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const fromScan = searchParams.get('fromScan') === '1';
   const { clients, projects } = useFinanceOptions();
   const { alert, prompt } = useDialog();
+  const settingsCurrency = useDefaultCurrency();
+  const currencyLockedRef = useRef(false);
   const [invoiceNo, setInvoiceNo] = useState('');
   const [issueDate, setIssueDate] = useState(localToday());
   const [dueDate, setDueDate] = useState(addDays(localToday(), 30));
-  const [currency, setCurrency] = useState('INR');
+  const [currency, setCurrency] = useState(settingsCurrency);
   const [exchangeRate, setExchangeRate] = useState(1);
   const [taxCalculation, setTaxCalculation] = useState<TaxCalculation>('after_discount');
   const [clientId, setClientId] = useState('');
@@ -94,7 +125,7 @@ export const InvoiceCreatePage: React.FC = () => {
   const [salesOrders, setSalesOrders] = useState<SalesOrderItem[]>([]);
   const [templates, setTemplates] = useState<InvoiceTemplateItem[]>([]);
   const [templateId, setTemplateId] = useState('');
-  const [catalogId, setCatalogId] = useState('');
+  /** Loaded only to help match PDF-scan line items — not shown as a picker. */
   const [catalog, setCatalog] = useState<
     Array<{ _id: string; name: string; description?: string; unitPrice: number; taxRate: number }>
   >([]);
@@ -109,11 +140,19 @@ export const InvoiceCreatePage: React.FC = () => {
   const scanClientNameRef = useRef('');
   const [catalogReady, setCatalogReady] = useState(false);
 
+  const convertedQuotations = useMemo(() => {
+    return quotations.filter(isQuotationConverted);
+  }, [quotations]);
+
+  const dispatchedSalesOrders = useMemo(() => {
+    return salesOrders.filter(isSalesOrderDispatched);
+  }, [salesOrders]);
+
   useEffect(() => {
     if (!fromScan) {
       crmApi.getNextInvoiceNumber().then((result) => setInvoiceNo(result.data.invoiceNo)).catch(() => setInvoiceNo(''));
     }
-    crmApi.listQuotations({ limit: 200 }).then((r) => setQuotations(r.data || [])).catch(() => setQuotations([]));
+    crmApi.listQuotations({ limit: 200, status: 'Converted' }).then((r) => setQuotations(r.data || [])).catch(() => setQuotations([]));
     crmApi.listSalesOrders({ limit: 200 }).then((r) => setSalesOrders(r.data || [])).catch(() => setSalesOrders([]));
     crmApi.listInvoiceTemplates().then((r) => setTemplates(r.data || [])).catch(() => setTemplates([]));
     crmApi
@@ -122,6 +161,11 @@ export const InvoiceCreatePage: React.FC = () => {
       .catch(() => setCatalog([]))
       .finally(() => setCatalogReady(true));
   }, [fromScan]);
+
+  useEffect(() => {
+    if (currencyLockedRef.current) return;
+    setCurrency(settingsCurrency);
+  }, [settingsCurrency]);
 
   useEffect(() => {
     if (!fromScan || !catalogReady || scanAppliedRef.current) return;
@@ -144,7 +188,8 @@ export const InvoiceCreatePage: React.FC = () => {
     }
     if (extracted.issueDate) setIssueDate(extracted.issueDate);
     if (extracted.dueDate) setDueDate(extracted.dueDate);
-    setCurrency((extracted.currency || 'INR').toUpperCase());
+    currencyLockedRef.current = true;
+    setCurrency(normalizeCurrencyCode(extracted.currency, settingsCurrency));
     setExchangeRate(Number(extracted.exchangeRate) > 0 ? Number(extracted.exchangeRate) : 1);
     setTaxCalculation(normalizeTaxCalculationValue(extracted.taxCalculation));
     if (extracted.paymentDetails?.trim()) setPaymentDetails(extracted.paymentDetails.trim());
@@ -156,7 +201,7 @@ export const InvoiceCreatePage: React.FC = () => {
     setScanNotice(
       `Filled from scanned PDF${extracted.documentNumber ? ` (#${extracted.documentNumber})` : ''}. Review required fields before saving.`
     );
-  }, [fromScan, catalogReady, catalog]);
+  }, [fromScan, catalogReady, catalog, settingsCurrency]);
 
   useEffect(() => {
     if (!fromScan || !scanClientNameRef.current || clientId || !clients.length) return;
@@ -205,8 +250,14 @@ export const InvoiceCreatePage: React.FC = () => {
     if (!id) return;
     try {
       const quote = (await crmApi.getQuotation(id)).data;
+      if (!isQuotationConverted(quote)) {
+        setError(`Cannot import quotation: only quotations with 'Converted' status can be imported into an invoice.`);
+        setQuotationId('');
+        return;
+      }
       if (quote.clientId) setClientId(quote.clientId);
-      setCurrency(quote.currency || 'INR');
+      currencyLockedRef.current = true;
+      setCurrency(normalizeCurrencyCode(quote.currency, settingsCurrency));
       setTaxCalculation(quote.taxCalculation || 'after_discount');
       setDiscountType(quote.discountType || 'percent');
       setDiscountValue(Number(quote.discountValue ?? quote.discountPercent ?? quote.discountAmount) || 0);
@@ -224,9 +275,15 @@ export const InvoiceCreatePage: React.FC = () => {
     if (!id) return;
     try {
       const order = (await crmApi.getSalesOrder(id)).data;
+      if (!isSalesOrderDispatched(order)) {
+        setError(`Cannot import sales order: only sales orders with status 'Dispatched' can be imported into an invoice.`);
+        setSalesOrderId('');
+        return;
+      }
       if (order.clientId) setClientId(order.clientId);
       if (order.projectId) setProjectId(order.projectId);
-      setCurrency((order as { currency?: string }).currency || 'INR');
+      currencyLockedRef.current = true;
+      setCurrency(normalizeCurrencyCode((order as { currency?: string }).currency, settingsCurrency));
       setShippingCharge(Number(order.shippingCharge) || 0);
       setDiscountType('amount');
       setDiscountValue(Number(order.discount || order.discountTotal) || 0);
@@ -284,7 +341,8 @@ export const InvoiceCreatePage: React.FC = () => {
     if (!id) return;
     try {
       const template = (await crmApi.getInvoiceTemplate(id)).data;
-      setCurrency(template.currency || 'INR');
+      currencyLockedRef.current = true;
+      setCurrency(normalizeCurrencyCode(template.currency, settingsCurrency));
       setTaxCalculation(template.taxCalculation || 'after_discount');
       setDueDate(addDays(issueDate, Number(template.paymentTermsDays) || 30));
       setShippingCharge(Number(template.shippingCharge) || 0);
@@ -333,24 +391,6 @@ export const InvoiceCreatePage: React.FC = () => {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Failed to save template');
     }
-  };
-
-  const addCatalogItem = (id: string) => {
-    setCatalogId(id);
-    const product = catalog.find((item) => item._id === id);
-    if (!product) return;
-    setLines((current) => [
-      ...current.filter((line) => line.name.trim() || line.rate > 0),
-      {
-        ...newEditableLine(),
-        name: product.name,
-        description: product.description || '',
-        qty: 1,
-        rate: product.unitPrice,
-        tax: product.taxRate,
-      },
-    ]);
-    setCatalogId('');
   };
 
   const submit = async (event: React.FormEvent) => {
@@ -406,7 +446,7 @@ export const InvoiceCreatePage: React.FC = () => {
           currency: currency.toUpperCase(),
           lineItems: linePayload,
           discountType,
-          discountValue,
+          discountValue: clampDiscountValue(discountType, discountValue),
           taxCalculation,
           paymentTermsDays: Math.max(
             0,
@@ -453,7 +493,7 @@ export const InvoiceCreatePage: React.FC = () => {
           days: reminderDays,
         },
         discountType,
-        discountValue,
+        discountValue: clampDiscountValue(discountType, discountValue),
         shippingCharge,
         attachmentUrl: attachmentUrl.trim() || undefined,
       });
@@ -488,25 +528,33 @@ export const InvoiceCreatePage: React.FC = () => {
           value={quotationId}
           onChange={(event) => importQuotation(event.target.value)}
         >
-          <option value="">Import from Quotation…</option>
-          {quotations.map((item) => (
-            <option key={item._id} value={item._id}>
-              {displayLabel(item.quotationNo, item.quotationNumber, item.number)} ·{' '}
-              {displayLabel(item.recipientName, item.clientName, item.customerName, item.customerLabel)}
-            </option>
-          ))}
+          <option value="">Import from Quotation (Converted only)…</option>
+          {convertedQuotations.length === 0 ? (
+            <option disabled value="">No converted quotations available</option>
+          ) : (
+            convertedQuotations.map((item) => (
+              <option key={item._id} value={item._id}>
+                {displayLabel(item.quotationNo, item.quotationNumber, item.number)} ·{' '}
+                {displayLabel(item.recipientName, item.clientName, item.customerName, item.customerLabel)}
+              </option>
+            ))
+          )}
         </select>
         <select
           className={`${financeFieldClass} lg:max-w-xs`}
           value={salesOrderId}
           onChange={(event) => importSalesOrder(event.target.value)}
         >
-          <option value="">Import from Sales Order…</option>
-          {salesOrders.map((item) => (
-            <option key={item._id} value={item._id}>
-              {item.orderNumber} · {displayLabel(item.clientName)}
-            </option>
-          ))}
+          <option value="">Import from Sales Order (Dispatched only)…</option>
+          {dispatchedSalesOrders.length === 0 ? (
+            <option disabled value="">No dispatched sales orders available</option>
+          ) : (
+            dispatchedSalesOrders.map((item) => (
+              <option key={item._id} value={item._id}>
+                {item.orderNumber} · {displayLabel(item.clientName)}
+              </option>
+            ))
+          )}
         </select>
         <button
           type="button"
@@ -565,8 +613,15 @@ export const InvoiceCreatePage: React.FC = () => {
               <input className={financeFieldClass} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
             </FormField>
             <FormField label="Currency" required>
-              <select className={financeFieldClass} value={currency} onChange={(e) => setCurrency(e.target.value)}>
-                {INVOICE_CURRENCIES.map((code) => (
+              <select
+                className={financeFieldClass}
+                value={currency}
+                onChange={(e) => {
+                  currencyLockedRef.current = true;
+                  setCurrency(e.target.value);
+                }}
+              >
+                {Array.from(new Set([...INVOICE_CURRENCIES, currency, settingsCurrency])).map((code) => (
                   <option key={code} value={code}>
                     {code}
                   </option>
@@ -653,23 +708,6 @@ export const InvoiceCreatePage: React.FC = () => {
         </div>
 
         <div data-tour="invoices-create-lines" className="bg-white border border-zinc-300 rounded-xl p-4">
-          <div className="mb-3 max-w-md">
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-semibold text-zinc-500 uppercase">Product catalog</span>
-              <select
-                className={financeFieldClass}
-                value={catalogId}
-                onChange={(e) => addCatalogItem(e.target.value)}
-              >
-                <option value="">Choose from catalog…</option>
-                {catalog.map((item) => (
-                  <option key={item._id} value={item._id}>
-                    {item.name} · {formatFinanceMoney(item.unitPrice, currency)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
           <LineItemsEditor lines={lines} setLines={setLines} />
         </div>
 
@@ -806,7 +844,13 @@ export const InvoiceCreatePage: React.FC = () => {
                 <select
                   className={financeFieldClass}
                   value={discountType}
-                  onChange={(e) => setDiscountType(e.target.value as DiscountType)}
+                  onChange={(e) => {
+                    const next = e.target.value as DiscountType;
+                    setDiscountType(next);
+                    if (next === 'percent') {
+                      setDiscountValue((prev) => Math.min(100, Math.max(0, Number(prev) || 0)));
+                    }
+                  }}
                 >
                   <option value="percent">Percent</option>
                   <option value="amount">Amount</option>
@@ -817,9 +861,17 @@ export const InvoiceCreatePage: React.FC = () => {
                   className={financeFieldClass}
                   type="number"
                   min={0}
+                  max={discountType === 'percent' ? 100 : undefined}
                   step="0.01"
                   value={discountValue}
-                  onChange={(e) => setDiscountValue(Number(e.target.value))}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    setDiscountValue(
+                      discountType === 'percent'
+                        ? Math.min(100, Math.max(0, next || 0))
+                        : Math.max(0, next || 0)
+                    );
+                  }}
                 />
               </FormField>
               <FormField label="Shipping charge">

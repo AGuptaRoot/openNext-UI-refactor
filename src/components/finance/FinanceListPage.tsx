@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { useNavigate } from 'react-router-dom';
+import { formatCrmMoney } from '../../utils/currency';
 
 export interface FinanceListColumn<T> {
   label: string;
@@ -96,10 +97,6 @@ export function FinanceListPage<T extends { _id: string }>({
   );
 }
 
-export function formatFinanceMoney(value: number, currency = 'INR') {
-  try {
-    return new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value || 0);
-  } catch {
-    return `${currency} ${Number(value || 0).toLocaleString('en-IN')}`;
-  }
+export function formatFinanceMoney(value: number, currency?: string) {
+  return formatCrmMoney(value, currency);
 }

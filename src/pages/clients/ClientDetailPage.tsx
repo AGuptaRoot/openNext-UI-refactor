@@ -1,4 +1,5 @@
 import { displayLabel, displayUserLabel } from '../../utils/displayLabels';
+import { formatCrmMoney } from '../../utils/currency';
 import { resolveClientAvatarColor, resolveClientMediaUrl, DEFAULT_CLIENT_AVATAR_COLOR } from '../../utils/clientAvatar';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -115,10 +116,8 @@ const statusPill = (status?: string) => {
   );
 };
 
-const moneyLabel = (amount: number | undefined, currency?: string) => {
-  const symbol = currency === 'USD' ? '$' : '₹';
-  return `${symbol}${Number(amount || 0).toLocaleString('en-IN')}`;
-};
+const moneyLabel = (amount: number | undefined, currency?: string) =>
+  formatCrmMoney(amount, currency);
 
 export const ClientDetailPage: React.FC = () => {
   const { id = '' } = useParams();

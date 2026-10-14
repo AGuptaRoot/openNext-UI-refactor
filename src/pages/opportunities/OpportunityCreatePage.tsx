@@ -10,7 +10,6 @@ import {
   OpportunityProductLine,
   DEAL_TEMPLATES,
   INDIAN_STATES,
-  DEFAULT_STATE_SHIPPING_RATES,
   stageProbability,
   isOpportunityLostStage,
 } from '../../types/opportunities';
@@ -20,6 +19,8 @@ import { ClientSelect } from '../../components/clients/ClientSelect';
 import { ContactSelect } from '../../components/contacts/ContactSelect';
 import { PersonContact, formatContactName } from '../../types/contacts';
 import { useOpportunityStages } from '../../hooks/useOpportunityStages';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import { formatCrmMoney, getCurrencySymbol } from '../../utils/currency';
 import {
   canAssignOpportunityOwner,
   formatAssignableUserLabel,
@@ -27,24 +28,18 @@ import {
 } from '../../utils/permissions';
 
 const DEFAULT_COMPANY_STATE = 'Maharashtra';
-const DEFAULT_FREE_SHIPPING_THRESHOLD = 5000;
-const TAX_OPTIONS = [0, 5, 12, 18, 28];
 
 type LineDraft = {
   key: string;
   productName: string;
-  quantity: number;
-  unitPrice: number;
-  tax: number;
+  description: string;
 };
 
 function newLine(partial?: Partial<LineDraft>): LineDraft {
   return {
     key: `line_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    productName: partial?.productName ?? 'General Product / Service Scope',
-    quantity: partial?.quantity ?? 1,
-    unitPrice: partial?.unitPrice ?? 10000,
-    tax: partial?.tax ?? 18,
+    productName: partial?.productName ?? '',
+    description: partial?.description ?? '',
   };
 }
 
@@ -67,6 +62,7 @@ export const OpportunityCreatePage: React.FC = () => {
     hasPermission('crm.opportunities.write') || hasPermission('crm.leads.write');
   const canAssignOwner = canAssignOpportunityOwner(user, { isClient, activeRole });
   const opportunityStages = useOpportunityStages();
+  const settingsCurrency = useDefaultCurrency();
   const defaultStage = opportunityStages[0];
 
   const [clients, setClients] = useState<ClientItem[]>([]);
@@ -75,11 +71,6 @@ export const OpportunityCreatePage: React.FC = () => {
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
-
-  // Settings
-  const [companyState, setCompanyState] = useState(DEFAULT_COMPANY_STATE);
-  const [freeShippingThreshold, setFreeShippingThreshold] = useState(DEFAULT_FREE_SHIPPING_THRESHOLD);
-  const [settingsRates, setSettingsRates] = useState<Record<string, number>>(DEFAULT_STATE_SHIPPING_RATES);
 
   // Form State
   const [title, setTitle] = useState('');
@@ -94,12 +85,9 @@ export const OpportunityCreatePage: React.FC = () => {
   const [probability, setProbability] = useState(defaultStage?.probability ?? 10);
   const [expectedCloseDate, setExpectedCloseDate] = useState(defaultCloseDate());
   const [lostReason, setLostReason] = useState('');
+  const [dealValue, setDealValue] = useState<number>(0);
   const [lines, setLines] = useState<LineDraft[]>([newLine()]);
   const [shippingState, setShippingState] = useState(DEFAULT_COMPANY_STATE);
-  const [shippingCharge, setShippingCharge] = useState(
-    DEFAULT_STATE_SHIPPING_RATES[DEFAULT_COMPANY_STATE] ?? 100
-  );
-  const [shippingOverridden, setShippingOverridden] = useState(false);
   const [leadPrefillDone, setLeadPrefillDone] = useState(false);
 
   const goBack = () => navigate(returnTo);
@@ -176,14 +164,7 @@ export const OpportunityCreatePage: React.FC = () => {
         if (settingsRes?.data) {
           const s = settingsRes.data;
           if (s.company_state) {
-            setCompanyState(s.company_state);
             setShippingState((curr) => (curr === DEFAULT_COMPANY_STATE ? s.company_state : curr));
-          }
-          if (s.free_shipping_threshold != null) {
-            setFreeShippingThreshold(Number(s.free_shipping_threshold));
-          }
-          if (s.state_shipping_rates && Object.keys(s.state_shipping_rates).length > 0) {
-            setSettingsRates(s.state_shipping_rates);
           }
         }
       } finally {
@@ -274,69 +255,42 @@ export const OpportunityCreatePage: React.FC = () => {
     || selectedLead?.company || selectedLead?.contactName || selectedLead?.name
     || '';
 
-  // Available states combining settings rates and standard Indian states
+  // Available states combining standard Indian states
   const statesList = useMemo(() => {
-    const fromRates = Object.keys(settingsRates);
-    const combined = Array.from(new Set([...fromRates, ...INDIAN_STATES]));
-    return combined.sort((a, b) => a.localeCompare(b));
-  }, [settingsRates]);
+    return [...INDIAN_STATES].sort((a, b) => a.localeCompare(b));
+  }, []);
 
-  const isIntra = shippingState.toLowerCase() === companyState.toLowerCase();
-
-  // Financial Totals: subtotal = sum(qty * unitPrice), gst = sum(rowBase * tax / 100)
+  // Financial Totals: subtotal = dealValue
   const totals = useMemo(() => {
-    let subtotal = 0;
-    let totalTax = 0;
     const validLines: OpportunityProductLine[] = [];
 
     for (const line of lines) {
       const name = line.productName.trim();
       if (!name) continue;
-      const qty = Math.max(1, Number(line.quantity) || 1);
-      const price = Math.max(0, Number(line.unitPrice) || 0);
-      const tax = Math.max(0, Number(line.tax) || 0);
-      const base = Math.round(qty * price * 100) / 100;
-      const taxAmt = (base * tax) / 100;
-
-      subtotal += base;
-      totalTax += taxAmt;
 
       validLines.push({
         productName: name,
-        quantity: qty,
-        unitPrice: price,
-        tax,
-        amount: base,
+        description: line.description.trim(),
+        quantity: 1,
+        unitPrice: 0,
+        tax: 0,
+        amount: 0,
       });
     }
 
-    const ship = Math.max(0, Number(shippingCharge) || 0);
-    const roundedSubtotal = Math.round(subtotal * 100) / 100;
-    const roundedTax = Math.round(totalTax * 100) / 100;
-    const grandTotal = Math.round((roundedSubtotal + roundedTax + ship) * 100) / 100;
-    const weightedForecast = Math.round(grandTotal * (probability / 100) * 100) / 100;
+    const value = Math.max(0, Number(dealValue) || 0);
+    const weightedForecast = Math.round(value * (probability / 100) * 100) / 100;
 
     return {
-      subtotal: roundedSubtotal,
-      totalTax: roundedTax,
-      shipping: ship,
-      grandTotal,
+      subtotal: value,
+      totalTax: 0,
+      shipping: 0,
+      grandTotal: value,
       weightedForecast,
       validLines,
-      expectedRevenue: roundedSubtotal,
+      expectedRevenue: value,
     };
-  }, [lines, shippingCharge, probability]);
-
-  // Dynamic Shipping Calculation based on state & free shipping threshold
-  useEffect(() => {
-    if (shippingOverridden) return;
-    const rate = settingsRates[shippingState] ?? (shippingState === companyState ? 100 : 150);
-    if (totals.subtotal >= freeShippingThreshold && totals.subtotal > 0) {
-      setShippingCharge(0);
-    } else {
-      setShippingCharge(rate);
-    }
-  }, [shippingState, totals.subtotal, shippingOverridden, settingsRates, companyState, freeShippingThreshold]);
+  }, [lines, dealValue, probability]);
 
   // Client Selection Handler
   const handleClientChange = (newClientId: string) => {
@@ -355,7 +309,6 @@ export const OpportunityCreatePage: React.FC = () => {
         );
         if (match) {
           setShippingState(match);
-          setShippingOverridden(false);
         }
       }
     }
@@ -428,13 +381,12 @@ export const OpportunityCreatePage: React.FC = () => {
       tpl.items.map((item) =>
         newLine({
           productName: item.name,
-          quantity: item.qty,
-          unitPrice: item.price,
-          tax: item.tax,
+          description: '',
         })
       )
     );
-    setShippingOverridden(false);
+    const estVal = tpl.items.reduce((acc, it) => acc + (it.qty || 1) * (it.price || 0), 0);
+    if (estVal > 0) setDealValue(estVal);
     showToast(`Loaded template: "${tpl.label}"`, 'info');
   };
 
@@ -462,20 +414,10 @@ export const OpportunityCreatePage: React.FC = () => {
 
   const removeLine = (key: string) => {
     if (lines.length <= 1) {
-      showToast('Opportunity must have at least one product row', 'info');
+      showToast('Opportunity must have at least one proposed item row', 'info');
       return;
     }
     setLines((prev) => prev.filter((l) => l.key !== key));
-  };
-
-  const stepQty = (key: string, delta: number) => {
-    setLines((prev) =>
-      prev.map((l) => {
-        if (l.key !== key) return l;
-        const next = Math.max(1, (Number(l.quantity) || 1) + delta);
-        return { ...l, quantity: next };
-      })
-    );
   };
 
   // Form Submission
@@ -495,7 +437,7 @@ export const OpportunityCreatePage: React.FC = () => {
       return;
     }
     if (!totals.validLines.length) {
-      showToast('Please add at least one product line item', 'error');
+      showToast('Please add at least one proposed item name', 'error');
       return;
     }
 
@@ -517,7 +459,7 @@ export const OpportunityCreatePage: React.FC = () => {
         products: totals.validLines,
         expectedRevenue: totals.expectedRevenue,
         value: totals.expectedRevenue,
-        currency: 'INR',
+        currency: settingsCurrency,
         shippingState,
         shippingCharge: totals.shipping,
         lostReason: isOpportunityLostStage(stage) ? lostReason.trim() : undefined,
@@ -559,12 +501,6 @@ export const OpportunityCreatePage: React.FC = () => {
     );
   }
 
-  const shippingRuleLabel =
-    totals.subtotal >= freeShippingThreshold && totals.subtotal > 0 && !shippingOverridden
-      ? `Free Shipping (≥ ₹${freeShippingThreshold.toLocaleString('en-IN')})`
-      : shippingOverridden
-        ? 'Manual Override'
-        : `${shippingState} Rate`;
 
   return (
     <div data-tour="opportunities-create-form" className="flex w-full flex-col gap-5 pb-16">
@@ -676,19 +612,35 @@ export const OpportunityCreatePage: React.FC = () => {
 
             {/* Title & account link (client OR lead) */}
             <div className="grid grid-cols-1 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                  Opportunity Deal Title *
-                </label>
-                <input
-                  type="text"
-                  className={fieldClass}
-                  placeholder="e.g. Enterprise CRM Software & Cloud Migration"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  maxLength={200}
-                  required
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                    Opportunity Deal Title *
+                  </label>
+                  <input
+                    type="text"
+                    className={fieldClass}
+                    placeholder="e.g. Enterprise CRM Software & Cloud Migration"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    maxLength={200}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                    Estimated Deal Value ({getCurrencySymbol(settingsCurrency)})
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={100}
+                    className={`${fieldClass} font-semibold`}
+                    placeholder="e.g. 50000"
+                    value={dealValue || ''}
+                    onChange={(e) => setDealValue(Math.max(0, Number(e.target.value) || 0))}
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1055,180 +1007,71 @@ export const OpportunityCreatePage: React.FC = () => {
                 onClick={() =>
                   setLines((prev) => [
                     ...prev,
-                    newLine({ productName: '', quantity: 1, unitPrice: 0, tax: 18 }),
+                    newLine({ productName: '', description: '' }),
                   ])
                 }
                 className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-xs font-semibold text-zinc-700 cursor-pointer transition-colors"
               >
                 <AddIcon sx={{ fontSize: 14 }} />
-                Add Line Item
+                Add Item
               </button>
             </div>
 
-            {/* Products Table */}
+            {/* Products Table with only Item Name and Description */}
             <div className="overflow-x-auto border border-zinc-200 rounded-lg">
-              <table className="w-full text-left min-w-[620px]">
+              <table className="w-full text-left">
                 <thead>
                   <tr className="bg-zinc-50 border-b border-zinc-200 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-                    <th className="px-3 py-2.5">Item / Product Description *</th>
-                    <th className="px-3 py-2.5 w-[110px]">Qty</th>
-                    <th className="px-3 py-2.5 w-[130px]">Unit Price (₹)</th>
-                    <th className="px-3 py-2.5 w-[100px]">Tax Rate</th>
-                    <th className="px-3 py-2.5 w-[120px] text-right">Amount (₹)</th>
-                    <th className="px-2 py-2.5 w-[40px]"></th>
+                    <th className="px-3 py-2.5 w-[50px] text-center">#</th>
+                    <th className="px-3 py-2.5 w-2/5">Item Name *</th>
+                    <th className="px-3 py-2.5">Description</th>
+                    <th className="px-2 py-2.5 w-[50px] text-center"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {lines.map((line) => {
-                    const rowSub =
-                      Math.max(1, Number(line.quantity) || 1) *
-                      Math.max(0, Number(line.unitPrice) || 0);
-                    return (
-                      <tr key={line.key} className="border-b border-zinc-100">
-                        <td className="px-3 py-2">
-                          <input
-                            type="text"
-                            value={line.productName}
-                            onChange={(e) =>
-                              updateLine(line.key, { productName: e.target.value })
-                            }
-                            placeholder="Item description / Service"
-                            className={fieldClass}
-                            required
-                          />
-                        </td>
-
-                        <td className="px-3 py-2">
-                          <div className="flex items-center border border-zinc-300 rounded-lg overflow-hidden bg-white h-9">
-                            <button
-                              type="button"
-                              onClick={() => stepQty(line.key, -1)}
-                              className="px-2.5 h-full bg-zinc-50 hover:bg-zinc-100 text-zinc-600 font-bold border-r border-zinc-200 cursor-pointer"
-                            >
-                              -
-                            </button>
-                            <input
-                              type="number"
-                              min={1}
-                              value={line.quantity}
-                              onChange={(e) =>
-                                updateLine(line.key, {
-                                  quantity: Math.max(1, Number(e.target.value) || 1),
-                                })
-                              }
-                              className="w-full text-center text-xs font-bold border-none outline-none p-0"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => stepQty(line.key, 1)}
-                              className="px-2.5 h-full bg-zinc-50 hover:bg-zinc-100 text-zinc-600 font-bold border-l border-zinc-200 cursor-pointer"
-                            >
-                              +
-                            </button>
-                          </div>
-                        </td>
-
-                        <td className="px-3 py-2">
-                          <input
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            value={line.unitPrice}
-                            onChange={(e) =>
-                              updateLine(line.key, {
-                                unitPrice: Math.max(0, Number(e.target.value) || 0),
-                              })
-                            }
-                            className={`${fieldClass} font-semibold`}
-                            required
-                          />
-                        </td>
-
-                        <td className="px-3 py-2">
-                          <select
-                            value={line.tax}
-                            onChange={(e) =>
-                              updateLine(line.key, { tax: Number(e.target.value) })
-                            }
-                            className={fieldClass}
-                          >
-                            {TAX_OPTIONS.map((t) => (
-                              <option key={t} value={t}>
-                                {t}%
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-
-                        <td className="px-3 py-2 text-right font-bold text-zinc-900 text-xs whitespace-nowrap">
-                          ₹{rowSub.toLocaleString('en-IN')}
-                        </td>
-
-                        <td className="px-2 py-2 text-center">
-                          <button
-                            type="button"
-                            onClick={() => removeLine(line.key)}
-                            disabled={lines.length <= 1}
-                            className="w-7 h-7 rounded border border-zinc-200 bg-white hover:bg-red-50 text-red-600 inline-flex items-center justify-center cursor-pointer disabled:opacity-30"
-                            title="Remove row"
-                          >
-                            <DeleteOutlineIcon sx={{ fontSize: 15 }} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {lines.map((line, idx) => (
+                    <tr key={line.key} className="border-b border-zinc-100 last:border-b-0">
+                      <td className="px-3 py-2 text-center text-xs font-semibold text-zinc-400">
+                        {idx + 1}
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          value={line.productName}
+                          onChange={(e) =>
+                            updateLine(line.key, { productName: e.target.value })
+                          }
+                          placeholder="Item name / Product name"
+                          className={fieldClass}
+                          required
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          value={line.description}
+                          onChange={(e) =>
+                            updateLine(line.key, { description: e.target.value })
+                          }
+                          placeholder="Item description / specifications (optional)"
+                          className={fieldClass}
+                        />
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => removeLine(line.key)}
+                          disabled={lines.length <= 1}
+                          className="w-7 h-7 rounded border border-zinc-200 bg-white hover:bg-red-50 text-red-600 inline-flex items-center justify-center cursor-pointer disabled:opacity-30 transition-colors"
+                          title="Remove item"
+                        >
+                          <DeleteOutlineIcon sx={{ fontSize: 15 }} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
-            </div>
-
-            {/* Destination State & Shipping Engine */}
-            <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3.5 grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
-              <div>
-                <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                  Destination State (GST &amp; Shipping) *
-                </label>
-                <select
-                  className={fieldClass}
-                  value={shippingState}
-                  onChange={(e) => {
-                    setShippingState(e.target.value);
-                    setShippingOverridden(false);
-                  }}
-                >
-                  {statesList.map((st) => {
-                    const isCompany = st.toLowerCase() === companyState.toLowerCase();
-                    const rate = settingsRates[st] !== undefined ? settingsRates[st] : 100;
-                    return (
-                      <option key={st} value={st}>
-                        {st} ({isCompany ? 'Intra-State: CGST+SGST' : 'Inter-State: IGST'} • ₹{rate})
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs font-semibold text-zinc-700">
-                    Shipping Charge (₹)
-                  </label>
-                  <span className="text-[10px] font-bold text-blue-600">
-                    {shippingRuleLabel}
-                  </span>
-                </div>
-                <input
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  value={shippingCharge}
-                  onChange={(e) => {
-                    setShippingOverridden(true);
-                    setShippingCharge(Math.max(0, Number(e.target.value) || 0));
-                  }}
-                  className={`${fieldClass} font-bold text-blue-900`}
-                />
-              </div>
             </div>
           </div>
 
@@ -1305,18 +1148,8 @@ export const OpportunityCreatePage: React.FC = () => {
               <hr className="border-0 border-t border-zinc-100 my-1" />
 
               <div className="flex justify-between text-zinc-500">
-                <span>Products Subtotal:</span>
-                <strong className="text-zinc-900 font-bold">₹{totals.subtotal.toLocaleString('en-IN')}</strong>
-              </div>
-
-              <div className="flex justify-between text-zinc-500">
-                <span>Estimated GST ({isIntra ? 'CGST+SGST' : 'IGST'}):</span>
-                <strong className="text-zinc-900 font-bold">₹{totals.totalTax.toLocaleString('en-IN')}</strong>
-              </div>
-
-              <div className="flex justify-between text-zinc-500">
-                <span>Shipping Charge:</span>
-                <strong className="text-zinc-900 font-bold">₹{totals.shipping.toLocaleString('en-IN')}</strong>
+                <span>Proposed Items:</span>
+                <strong className="text-zinc-900 font-bold">{totals.validLines.length} item(s)</strong>
               </div>
 
               {/* Total & Weighted Highlight */}
@@ -1324,7 +1157,7 @@ export const OpportunityCreatePage: React.FC = () => {
                 <div className="flex justify-between items-center">
                   <span className="text-[11px] font-bold uppercase text-sky-900">Total Deal Value</span>
                   <strong className="text-base font-extrabold text-sky-950">
-                    ₹{totals.grandTotal.toLocaleString('en-IN')}
+                    {formatCrmMoney(totals.grandTotal, settingsCurrency, { maximumFractionDigits: 0 })}
                   </strong>
                 </div>
 
@@ -1333,7 +1166,7 @@ export const OpportunityCreatePage: React.FC = () => {
                     Weighted Forecast ({probability}%):
                   </span>
                   <strong className="font-bold text-sky-950">
-                    ₹{totals.weightedForecast.toLocaleString('en-IN')}
+                    {formatCrmMoney(totals.weightedForecast, settingsCurrency, { maximumFractionDigits: 0 })}
                   </strong>
                 </div>
               </div>
@@ -1362,8 +1195,8 @@ export const OpportunityCreatePage: React.FC = () => {
                     <span>{totals.validLines.length > 0 ? '✅' : '❌'}</span>
                     <span>
                       {totals.validLines.length > 0
-                        ? `${totals.validLines.length} product line item(s)`
-                        : 'Valid line items added'}
+                        ? `${totals.validLines.length} proposed item(s)`
+                        : 'Proposed items added'}
                     </span>
                   </li>
                 </ul>

@@ -4,18 +4,11 @@ import AccessTimeOutlinedIcon from '@mui/icons-material/AccessTimeOutlined';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { DashboardData } from '../../types/dashboard';
 import { dashboardListPath } from '../../utils/dashboardNavigation';
+import { formatCrmMoney, getRuntimeDefaultCurrency } from '../../utils/currency';
 
 interface TimeLogReportCardProps {
   data: DashboardData;
   onNavigateUnmigrated: (moduleName: string) => void;
-}
-
-function formatMoney(amount: number | undefined, currency = 'INR'): string {
-  const num = Number(amount || 0);
-  return `${currency} ${num.toLocaleString('en-IN', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
 }
 
 export const TimeLogReportCard: React.FC<TimeLogReportCardProps> = ({
@@ -24,7 +17,7 @@ export const TimeLogReportCard: React.FC<TimeLogReportCardProps> = ({
 }) => {
   void _onNavigateUnmigrated;
   const navigate = useNavigate();
-  const currency = data.defaultCurrency || 'INR';
+  const currency = data.defaultCurrency || getRuntimeDefaultCurrency();
   const logged = data.loggedHoursThisMonth || 0;
   const billable = data.billableHoursThisMonth || 0;
   const billableAmount = data.billableAmountThisMonth || 0;
@@ -68,7 +61,7 @@ export const TimeLogReportCard: React.FC<TimeLogReportCardProps> = ({
               Accrued Revenue
             </span>
             <div className="text-xl font-bold font-mono text-zinc-950">
-              {formatMoney(billableAmount, currency)}
+              {formatCrmMoney(billableAmount, currency)}
             </div>
             <span className="text-[11px] text-emerald-600 font-semibold">
               Billable labor value

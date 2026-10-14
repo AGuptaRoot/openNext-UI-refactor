@@ -30,6 +30,12 @@ export interface SampleFeedback {
   submittedBy?: string | null;
 }
 
+export interface SampleProductItem {
+  productName: string;
+  quantity: number;
+  unit: string;
+}
+
 export interface SampleItem {
   _id: string;
   sampleNumber: string;
@@ -46,6 +52,7 @@ export interface SampleItem {
   productName: string;
   quantity: number;
   unit: string;
+  items?: SampleProductItem[];
   urgency: SampleUrgency | string;
   deliveryAddress?: string;
   notes?: string;
@@ -75,6 +82,7 @@ export interface SampleCreateInput {
   productName: string;
   quantity: number;
   unit: string;
+  items?: SampleProductItem[];
   urgency: SampleUrgency | string;
   deliveryAddress?: string;
   notes?: string;
@@ -134,14 +142,18 @@ export const SAMPLE_STATUSES: SampleStatus[] = [
 
 export const SAMPLE_UNITS = [
   'pcs',
-  'swatches',
-  'meters',
   'kg',
-  'grams',
+  'litre',
   'liters',
+  'meter',
+  'meters',
+  'box',
+  'boxes',
+  'packet',
+  'swatches',
+  'grams',
   'sets',
   'rolls',
-  'boxes',
 ] as const;
 
 export const SAMPLE_DEPARTMENTS: SampleRoutedDepartment[] = [

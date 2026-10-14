@@ -23,12 +23,13 @@ import {
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
 import { useFinanceOptions } from '../../components/finance/useFinanceOptions';
 import { ClientSelect } from '../../components/clients/ClientSelect';
-import { calculateFinanceTotals } from '../../utils/financeTotals';
+import { calculateFinanceTotals, clampDiscountValue } from '../../utils/financeTotals';
 import {
   consumeFinancePdfScanDraft,
   linesFromPdfExtract,
   normalizeTaxCalculationValue,
 } from '../../utils/financePdfScanDraft';
+import { normalizeCurrencyCode, useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 
 function safeReturnPath(raw: string | null): string {
   const value = String(raw || '').trim();
@@ -80,6 +81,8 @@ export const QuotationCreatePage: React.FC = () => {
   const { alert, prompt } = useDialog();
   const { hasAnyPermission, isClient } = useAuth();
   const canWriteFinance = hasAnyPermission('crm.quotes.write', 'crm.finance.write') && !isClient;
+  const settingsCurrency = useDefaultCurrency();
+  const currencyLockedRef = useRef(false);
 
   const [recipientType, setRecipientType] = useState<'lead' | 'client'>(presetLeadId ? 'lead' : 'lead');
   const [leadId, setLeadId] = useState(presetLeadId);
@@ -88,7 +91,7 @@ export const QuotationCreatePage: React.FC = () => {
   const [shippingState, setShippingState] = useState(COMPANY_STATE_DEFAULT);
   const [issueDate, setIssueDate] = useState(localToday());
   const [validTill, setValidTill] = useState(addDays(localToday(), 30));
-  const [currency, setCurrency] = useState('INR');
+  const [currency, setCurrency] = useState(settingsCurrency);
   const [taxCalculation, setTaxCalculation] = useState<TaxCalculation>('after_discount');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -103,7 +106,7 @@ export const QuotationCreatePage: React.FC = () => {
 
   const [templates, setTemplates] = useState<QuotationTemplateItem[]>([]);
   const [templateId, setTemplateId] = useState('');
-  const [catalogId, setCatalogId] = useState('');
+  /** Loaded only to help match PDF-scan line items — not shown as a picker. */
   const [catalog, setCatalog] = useState<
     Array<{ _id: string; name: string; description?: string; unitPrice: number; taxRate: number }>
   >([]);
@@ -116,6 +119,11 @@ export const QuotationCreatePage: React.FC = () => {
     setRecipientType('lead');
     setLeadId(presetLeadId);
   }, [presetLeadId]);
+
+  useEffect(() => {
+    if (currencyLockedRef.current) return;
+    setCurrency(settingsCurrency);
+  }, [settingsCurrency]);
 
   useEffect(() => {
     crmApi.listQuotationTemplates().then((r) => setTemplates(r.data || [])).catch(() => setTemplates([]));
@@ -139,7 +147,8 @@ export const QuotationCreatePage: React.FC = () => {
 
     if (extracted.issueDate) setIssueDate(extracted.issueDate);
     if (extracted.dueDate) setValidTill(extracted.dueDate);
-    setCurrency((extracted.currency || 'INR').toUpperCase());
+    currencyLockedRef.current = true;
+    setCurrency(normalizeCurrencyCode(extracted.currency, settingsCurrency));
     setTaxCalculation(normalizeTaxCalculationValue(extracted.taxCalculation));
     if (extracted.documentNumber?.trim()) {
       setTitle(`Quotation ${extracted.documentNumber.trim()}`);
@@ -161,7 +170,7 @@ export const QuotationCreatePage: React.FC = () => {
     setScanNotice(
       `Filled from scanned PDF${extracted.documentNumber ? ` (#${extracted.documentNumber})` : ''}. Review required fields before saving.`
     );
-  }, [fromScan, catalogReady, catalog]);
+  }, [fromScan, catalogReady, catalog, settingsCurrency]);
 
   useEffect(() => {
     if (!fromScan || !scanClientNameRef.current || !clients.length) return;
@@ -220,7 +229,8 @@ export const QuotationCreatePage: React.FC = () => {
     if (!id) return;
     try {
       const template = (await crmApi.getQuotationTemplate(id)).data;
-      setCurrency(template.currency || 'INR');
+      currencyLockedRef.current = true;
+      setCurrency(normalizeCurrencyCode(template.currency, settingsCurrency));
       setTaxCalculation(template.taxCalculation || 'after_discount');
       setDiscountType(template.discountType || 'percent');
       setDiscountValue(Number(template.discountValue) || 0);
@@ -268,24 +278,6 @@ export const QuotationCreatePage: React.FC = () => {
     }
   };
 
-  const addCatalogItem = (id: string) => {
-    setCatalogId(id);
-    const product = catalog.find((item) => item._id === id);
-    if (!product) return;
-    setLines((current) => [
-      ...current.filter((line) => line.name.trim() || line.rate > 0),
-      {
-        ...newEditableLine(),
-        name: product.name,
-        description: product.description || '',
-        qty: 1,
-        rate: product.unitPrice,
-        tax: product.taxRate,
-      },
-    ]);
-    setCatalogId('');
-  };
-
   const onSelectLead = (id: string) => {
     setLeadId(id);
     const lead = leads.find((item) => item._id === id);
@@ -324,7 +316,10 @@ export const QuotationCreatePage: React.FC = () => {
 
       if (opp.shippingState) setShippingState(opp.shippingState);
       if (opp.shippingCharge != null) setShippingCharge(Number(opp.shippingCharge) || 0);
-      if (opp.currency) setCurrency(String(opp.currency).toUpperCase());
+      if (opp.currency) {
+        currencyLockedRef.current = true;
+        setCurrency(normalizeCurrencyCode(opp.currency, settingsCurrency));
+      }
 
       const products = Array.isArray(opp.products) ? opp.products : [];
       if (products.length > 0) {
@@ -389,7 +384,7 @@ export const QuotationCreatePage: React.FC = () => {
           fileUrl: line.fileUrl?.trim() || undefined,
         })),
         discountType,
-        discountValue,
+        discountValue: clampDiscountValue(discountType, discountValue),
         shippingCharge,
         recipientNotes: recipientNotes.trim(),
       });
@@ -628,9 +623,12 @@ export const QuotationCreatePage: React.FC = () => {
               <select
                 className={financeFieldClass}
                 value={currency}
-                onChange={(e) => setCurrency(e.target.value)}
+                onChange={(e) => {
+                  currencyLockedRef.current = true;
+                  setCurrency(e.target.value);
+                }}
               >
-                {QUOTATION_CURRENCIES.map((code) => (
+                {Array.from(new Set([...QUOTATION_CURRENCIES, currency, settingsCurrency])).map((code) => (
                   <option key={code} value={code}>
                     {code}
                   </option>
@@ -670,25 +668,6 @@ export const QuotationCreatePage: React.FC = () => {
         </div>
 
         <div data-tour="quotations-create-lines" className="bg-white border border-zinc-300 rounded-xl p-4">
-          <div className="mb-3 max-w-md">
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-semibold text-zinc-500 uppercase">
-                Product catalog
-              </span>
-              <select
-                className={financeFieldClass}
-                value={catalogId}
-                onChange={(e) => addCatalogItem(e.target.value)}
-              >
-                <option value="">Choose from catalog…</option>
-                {catalog.map((item) => (
-                  <option key={item._id} value={item._id}>
-                    {item.name} · {formatFinanceMoney(item.unitPrice, currency)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
           <LineItemsEditor lines={lines} setLines={setLines} showFileUrl />
         </div>
 
@@ -713,7 +692,13 @@ export const QuotationCreatePage: React.FC = () => {
                 <select
                   className={financeFieldClass}
                   value={discountType}
-                  onChange={(e) => setDiscountType(e.target.value as DiscountType)}
+                  onChange={(e) => {
+                    const next = e.target.value as DiscountType;
+                    setDiscountType(next);
+                    if (next === 'percent') {
+                      setDiscountValue((prev) => Math.min(100, Math.max(0, Number(prev) || 0)));
+                    }
+                  }}
                 >
                   <option value="percent">Percent</option>
                   <option value="amount">Amount</option>
@@ -724,9 +709,17 @@ export const QuotationCreatePage: React.FC = () => {
                   className={financeFieldClass}
                   type="number"
                   min={0}
+                  max={discountType === 'percent' ? 100 : undefined}
                   step="0.01"
                   value={discountValue}
-                  onChange={(e) => setDiscountValue(Number(e.target.value))}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    setDiscountValue(
+                      discountType === 'percent'
+                        ? Math.min(100, Math.max(0, next || 0))
+                        : Math.max(0, next || 0)
+                    );
+                  }}
                 />
               </FormField>
               <FormField label="Shipping charge">

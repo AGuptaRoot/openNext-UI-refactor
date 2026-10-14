@@ -264,9 +264,9 @@ export const quotationsTourSteps = [
   step({
     id: 'quotations-create-lines',
     target: T('quotations-create-lines'),
-    title: 'Line items & catalog',
+    title: 'Line items',
     content:
-      'Add products from the catalog picker or enter lines manually (qty, rate, tax, description). Each line rolls into Summary & totals.',
+      'Enter line items manually (qty, rate, tax, description). Each line rolls into Summary & totals.',
     before: async () => {
       await ensurePath('/quotations/create');
     },

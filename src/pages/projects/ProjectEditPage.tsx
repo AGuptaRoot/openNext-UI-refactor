@@ -16,6 +16,7 @@ import { ClientOption } from '../../types/reports';
 import { AssignableUser } from '../../types/leads';
 import { ClientSelect } from '../../components/clients/ClientSelect';
 import { LiveLinkModal } from '../../components/projects/LiveLinkModal';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 
 const fieldClass =
   'h-9 px-3 text-sm border border-zinc-200 rounded-lg outline-none focus:border-zinc-400 w-full box-border bg-white';
@@ -25,6 +26,7 @@ export const ProjectEditPage: React.FC = () => {
   const navigate = useNavigate();
   const { hasPermission, isClient } = useAuth();
   const canWrite = hasPermission('crm.projects.write') && !isClient;
+  const settingsCurrency = useDefaultCurrency();
 
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [users, setUsers] = useState<AssignableUser[]>([]);
@@ -49,7 +51,7 @@ export const ProjectEditPage: React.FC = () => {
   const [statusBeforeLive, setStatusBeforeLive] = useState('Not Started');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [progressMethod, setProgressMethod] = useState<ProgressCalculationMethod>('tasks');
-  const [currency, setCurrency] = useState('INR');
+  const [currency, setCurrency] = useState(settingsCurrency);
   const [budget, setBudget] = useState('0');
   const [hoursEstimate, setHoursEstimate] = useState('0');
   const [progress, setProgress] = useState('0');
@@ -88,7 +90,7 @@ export const ProjectEditPage: React.FC = () => {
         setLiveUrl(p.liveUrl || '');
         setSelectedTags(p.tags || []);
         setProgressMethod(p.progressCalculationMethod || 'tasks');
-        setCurrency(p.currency || 'INR');
+        setCurrency(p.currency || settingsCurrency);
         setBudget(String(p.budget ?? 0));
         setHoursEstimate(String(p.hoursEstimate ?? 0));
         setProgress(String(p.progress ?? 0));

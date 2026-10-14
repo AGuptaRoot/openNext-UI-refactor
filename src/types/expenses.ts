@@ -1,3 +1,5 @@
+import { formatCrmMoney } from '../utils/currency';
+
 export type ExpenseStatus = 'Draft' | 'Submitted' | 'Approved' | 'Rejected';
 
 export type ExpensePaymentMode =
@@ -281,16 +283,8 @@ export interface RecurringForecastReport {
   entries: RecurringForecastEntry[];
 }
 
-export function formatExpenseMoney(amount: number, currency = 'INR'): string {
-  try {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `${currency} ${Number(amount || 0).toLocaleString('en-IN')}`;
-  }
+export function formatExpenseMoney(amount: number, currency?: string): string {
+  return formatCrmMoney(amount, currency);
 }
 
 export function frequencyLabel(frequency: RecurringExpenseFrequency | string): string {

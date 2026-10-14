@@ -34,6 +34,7 @@ import {
   financeTextAreaClass,
 } from '../../components/finance/FinanceFormElements';
 import { triggerFileDownload } from '../../utils/fileDownload';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 
 type MainTab = 'expenses' | 'recurring';
 type ArchiveView = 'active' | 'archived';
@@ -81,13 +82,13 @@ function endConditionLabel(value: RecurringEndCondition | string): string {
   return 'Never';
 }
 
-const emptyRecurringForm = (): RecurringExpenseCreateInput => ({
+const emptyRecurringForm = (currency: string): RecurringExpenseCreateInput => ({
   profileName: '',
   category: 'Other',
   itemName: '',
   vendorName: '',
   price: 0,
-  currency: 'INR',
+  currency,
   frequency: 'monthly',
   customIntervalDays: 30,
   startDate: localToday(),
@@ -107,6 +108,7 @@ export const ExpensesPage: React.FC = () => {
   const { hasPermission } = useAuth();
   const { confirm } = useDialog();
   const canApproveExpenses = hasPermission('crm.expenses.approve');
+  const settingsCurrency = useDefaultCurrency();
   const [tab, setTab] = useState<MainTab>('expenses');
   const [archiveView, setArchiveView] = useState<ArchiveView>('active');
 
@@ -168,7 +170,15 @@ export const ExpensesPage: React.FC = () => {
   const [rejectReason, setRejectReason] = useState('');
 
   const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [scheduleForm, setScheduleForm] = useState<RecurringExpenseCreateInput>(emptyRecurringForm);
+  const [scheduleForm, setScheduleForm] = useState<RecurringExpenseCreateInput>(() =>
+    emptyRecurringForm(settingsCurrency)
+  );
+
+  useEffect(() => {
+    setScheduleForm((current) =>
+      current.profileName.trim() ? current : { ...current, currency: settingsCurrency }
+    );
+  }, [settingsCurrency]);
   const [scheduleSaving, setScheduleSaving] = useState(false);
 
   const [logsItem, setLogsItem] = useState<RecurringExpenseItem | null>(null);
@@ -401,7 +411,7 @@ export const ExpensesPage: React.FC = () => {
           scheduleForm.frequency === 'custom' ? Number(scheduleForm.customIntervalDays) : undefined,
       });
       setScheduleOpen(false);
-      setScheduleForm(emptyRecurringForm());
+      setScheduleForm(emptyRecurringForm(settingsCurrency));
       setInfoMessage('Recurring schedule created.');
       await loadRecurring();
     } catch (reason) {
@@ -541,7 +551,7 @@ export const ExpensesPage: React.FC = () => {
             >
               <div className="text-[11px] font-semibold uppercase text-zinc-500">Base-currency total</div>
               <div className="mt-1 text-lg font-bold text-zinc-950">
-                {formatExpenseMoney(baseCurrencyTotal, 'INR')}
+                {formatExpenseMoney(baseCurrencyTotal, settingsCurrency)}
               </div>
             </div>
           )}
@@ -811,7 +821,7 @@ export const ExpensesPage: React.FC = () => {
                 type="button"
                 data-tour="expenses-recurring-new-btn"
                 onClick={() => {
-                  setScheduleForm(emptyRecurringForm());
+                  setScheduleForm(emptyRecurringForm(settingsCurrency));
                   setScheduleOpen(true);
                   setError('');
                 }}
@@ -1372,7 +1382,7 @@ export const ExpensesPage: React.FC = () => {
                   {[
                     {
                       label: 'Total projected',
-                      value: formatExpenseMoney(forecast.totalProjected || 0, 'INR'),
+                      value: formatExpenseMoney(forecast.totalProjected || 0, settingsCurrency),
                     },
                     {
                       label: 'Scheduled generations',

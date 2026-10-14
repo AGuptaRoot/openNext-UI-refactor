@@ -21,6 +21,11 @@ export interface CrmSettings {
   company_state: string;
   office_address?: string;
   office_addresses?: string[];
+  sample_units_of_measure?: string[];
+  /** Courier / carrier names available when dispatching sample requests. */
+  courier_carriers?: string[];
+  /** Optional tracking number / AWB presets suggested on sample dispatch. */
+  tracking_number_options?: string[];
   default_currency: string;
   tax_rate: number;
   free_shipping_threshold: number;

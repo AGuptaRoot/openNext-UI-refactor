@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { crmApi } from '../../services/api';
 import {
@@ -16,14 +16,22 @@ import {
   financeTextAreaClass,
   newEditableLine,
 } from '../../components/finance/FinanceFormElements';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 
 export const QuotationTemplateCreatePage: React.FC = () => {
   const navigate = useNavigate();
+  const settingsCurrency = useDefaultCurrency();
+  const currencyLockedRef = useRef(false);
   const [name, setName] = useState('');
   const [category, setCategory] = useState('General');
   const [description, setDescription] = useState('');
-  const [currency, setCurrency] = useState('INR');
+  const [currency, setCurrency] = useState(settingsCurrency);
   const [taxCalculation, setTaxCalculation] = useState<TaxCalculation>('after_discount');
+
+  useEffect(() => {
+    if (currencyLockedRef.current) return;
+    setCurrency(settingsCurrency);
+  }, [settingsCurrency]);
   const [shippingCharge, setShippingCharge] = useState(0);
   const [discountType, setDiscountType] = useState<DiscountType>('percent');
   const [discountValue, setDiscountValue] = useState(0);
@@ -121,13 +129,18 @@ export const QuotationTemplateCreatePage: React.FC = () => {
               <select
                 className={financeFieldClass}
                 value={currency}
-                onChange={(e) => setCurrency(e.target.value)}
+                onChange={(e) => {
+                  currencyLockedRef.current = true;
+                  setCurrency(e.target.value);
+                }}
               >
-                {QUOTATION_CURRENCIES.map((code) => (
-                  <option key={code} value={code}>
-                    {code}
-                  </option>
-                ))}
+                {Array.from(new Set([...QUOTATION_CURRENCIES, currency, settingsCurrency])).map(
+                  (code) => (
+                    <option key={code} value={code}>
+                      {code}
+                    </option>
+                  )
+                )}
               </select>
             </FormField>
             <FormField label="Tax calculation" required>
@@ -144,7 +157,13 @@ export const QuotationTemplateCreatePage: React.FC = () => {
               <select
                 className={financeFieldClass}
                 value={discountType}
-                onChange={(e) => setDiscountType(e.target.value as DiscountType)}
+                onChange={(e) => {
+                  const next = e.target.value as DiscountType;
+                  setDiscountType(next);
+                  if (next === 'percent') {
+                    setDiscountValue((prev) => Math.min(100, Math.max(0, Number(prev) || 0)));
+                  }
+                }}
               >
                 <option value="percent">Percent</option>
                 <option value="amount">Amount</option>
@@ -155,9 +174,17 @@ export const QuotationTemplateCreatePage: React.FC = () => {
                 className={financeFieldClass}
                 type="number"
                 min={0}
+                max={discountType === 'percent' ? 100 : undefined}
                 step="0.01"
                 value={discountValue}
-                onChange={(e) => setDiscountValue(Number(e.target.value))}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  setDiscountValue(
+                    discountType === 'percent'
+                      ? Math.min(100, Math.max(0, next || 0))
+                      : Math.max(0, next || 0)
+                  );
+                }}
               />
             </FormField>
             <FormField label="Shipping charge">

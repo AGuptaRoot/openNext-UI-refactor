@@ -10,6 +10,7 @@ import {
   formatMoney,
   ReportEmptyState,
 } from '../ReportCharts';
+import { getRuntimeDefaultCurrency } from '../../../utils/currency';
 
 export interface IncomeExpenseReportTabProps {
   data: IncomeExpenseReportData;
@@ -20,7 +21,7 @@ function round2(value: number): number {
 }
 
 export const IncomeExpenseReportTab: React.FC<IncomeExpenseReportTabProps> = ({ data }) => {
-  const currency = data.defaultCurrency || 'INR';
+  const currency = data.defaultCurrency || getRuntimeDefaultCurrency();
 
   const metrics = useMemo(() => {
     const income = Number(data.income ?? data.incomeTotal ?? 0) || 0;

@@ -282,9 +282,9 @@ export const invoicesTourSteps = [
   step({
     id: 'invoices-create-lines',
     target: T('invoices-create-lines'),
-    title: 'Line items & catalog',
+    title: 'Line items',
     content:
-      'Pick products from the catalog or enter lines manually (qty, rate, tax). Lines feed Summary & totals.',
+      'Enter line items manually (qty, rate, tax). Lines feed Summary & totals.',
     before: async () => {
       await ensurePath('/invoices/create');
     },

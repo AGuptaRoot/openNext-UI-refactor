@@ -10,6 +10,7 @@ import AccessTimeOutlinedIcon from '@mui/icons-material/AccessTimeOutlined';
 import { DashboardData, CrmRole } from '../../types/dashboard';
 import { useAuth } from '../../context/AuthContext';
 import { dashboardListPath } from '../../utils/dashboardNavigation';
+import { formatCrmMoney, getRuntimeDefaultCurrency } from '../../utils/currency';
 
 interface KpiScorecardsProps {
   data: DashboardData;
@@ -29,14 +30,6 @@ const ROLE_KPIS: Record<CrmRole, KpiId[]> = {
   client: ['projects', 'tasks', 'health'],
 };
 
-function formatMoney(amount: number | undefined, currency = 'INR'): string {
-  const num = Number(amount || 0);
-  return `${currency} ${num.toLocaleString('en-IN', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
 export const KpiScorecards: React.FC<KpiScorecardsProps> = ({
   data,
   onNavigateUnmigrated: _onNavigateUnmigrated,
@@ -49,7 +42,7 @@ export const KpiScorecards: React.FC<KpiScorecardsProps> = ({
     [activeRole]
   );
 
-  const currency = data.defaultCurrency || 'INR';
+  const currency = data.defaultCurrency || getRuntimeDefaultCurrency();
   const paymentsValue = data.totalPaymentsThisMonth || 0;
   const totalLeads = data.totalLeads || 0;
   const newLeads = data.newLeads || 0;
@@ -134,7 +127,7 @@ export const KpiScorecards: React.FC<KpiScorecardsProps> = ({
             </div>
           </div>
           <div className="text-2xl font-bold font-mono text-zinc-950 tracking-tight mb-1">
-            {formatMoney(paymentsValue, currency)}
+            {formatCrmMoney(paymentsValue, currency)}
           </div>
           <p className="text-xs text-zinc-500 m-0">
             <strong className="text-zinc-950 font-semibold">{data.paidInvoices || 0} invoices</strong>{' '}

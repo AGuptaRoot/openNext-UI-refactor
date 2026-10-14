@@ -381,9 +381,18 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
                     {index === 0 && (
                       <div className="rounded-lg bg-zinc-50 border border-zinc-200 p-2.5 text-xs text-zinc-700 space-y-1">
                         <div>
-                          <strong>Product:</strong> {sample.productName} ({sample.quantity}{' '}
-                          {sample.unit})
+                          <strong>{sample.items && sample.items.length > 1 ? 'Products:' : 'Product:'}</strong>{' '}
+                          {sample.productName} ({sample.quantity} {sample.unit})
                         </div>
+                        {sample.items && sample.items.length > 1 && (
+                          <div className="pl-2 border-l-2 border-zinc-300 text-[11px] text-zinc-600 space-y-0.5">
+                            {sample.items.map((it, i) => (
+                              <div key={i}>
+                                • {it.productName} ({it.quantity} {it.unit})
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         {sample.linkedName && (
                           <div>
                             <strong>Account:</strong> {sample.linkedName} ({sample.linkType})

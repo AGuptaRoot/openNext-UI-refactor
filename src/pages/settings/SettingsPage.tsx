@@ -7,6 +7,9 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import SearchIcon from '@mui/icons-material/Search';
 import { crmApi } from '../../services/api';
 import {
   CUSTOM_FIELD_TYPES,
@@ -32,6 +35,11 @@ import {
 } from '../../types/projects';
 import { mergeLeadStatusesWithBuiltins } from '../../services/mockLeadData';
 import { useAuth } from '../../context/AuthContext';
+import {
+  CRM_SETTINGS_CURRENCY_CHANGED,
+  getCurrencySymbol,
+  setRuntimeDefaultCurrency,
+} from '../../utils/currency';
 import { TourButton } from '../../ui/tour/TourButton';
 import { SwapDropGrid } from '../../components/dndkit';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
@@ -811,6 +819,125 @@ function CustomFieldBuilder({
   );
 }
 
+interface SettingsTabMeta {
+  id: SettingsTabId;
+  label: string;
+  icon: string;
+  subtitle: string;
+  keywords: string;
+}
+
+interface SettingsTabGroup {
+  groupId: string;
+  title: string;
+  tabs: SettingsTabMeta[];
+}
+
+const SETTINGS_TAB_GROUPS: SettingsTabGroup[] = [
+  {
+    groupId: 'core',
+    title: 'General & Organization',
+    tabs: [
+      {
+        id: 'general',
+        label: 'General Profile',
+        icon: '🏢',
+        subtitle: 'Company details, office address & UoMs',
+        keywords: 'company name tax gst state address office branch unit of measure uom pcs kg litre',
+      },
+      {
+        id: 'shipping',
+        label: 'Shipping & Logistics',
+        icon: '🚚',
+        subtitle: 'Origin state & regional freight tariffs',
+        keywords: 'shipping origin state freight weight rate courier logistics tier delivery',
+      },
+      {
+        id: 'finance',
+        label: 'Finance & Banking',
+        icon: '💰',
+        subtitle: 'Currencies, banking accounts & terms',
+        keywords: 'finance currency inr usd bank account bank name ifsc iban account number payment terms',
+      },
+      {
+        id: 'email',
+        label: 'Email & SMTP',
+        icon: '✉️',
+        subtitle: 'Relay server & transactional routing',
+        keywords: 'email smtp host port tls authentication sender from test email relay notification',
+      },
+      {
+        id: 'integrations',
+        label: 'Integrations & AI',
+        icon: '🔌',
+        subtitle: 'Groq OCR LLM & Google Maps Places API',
+        keywords: 'integrations groq ocr ai google maps places api key autocomplete vision model',
+      },
+    ],
+  },
+  {
+    groupId: 'crm',
+    title: 'Sales & Pipelines',
+    tabs: [
+      {
+        id: 'leads',
+        label: 'Leads & Funnels',
+        icon: '🎯',
+        subtitle: 'Lead sources, categories & tags',
+        keywords: 'leads sources categories tags stages custom fields qualification capture',
+      },
+      {
+        id: 'qualification-match',
+        label: 'Qualification Match',
+        icon: '📐',
+        subtitle: 'Commercial request types & budget bounds',
+        keywords: 'qualification match request types budget min max budget commercial requirements dynamic forms',
+      },
+      {
+        id: 'opportunities',
+        label: 'Opportunity Pipelines',
+        icon: '💼',
+        subtitle: 'Sales pipelines & conversion stages',
+        keywords: 'opportunity deal pipeline stages kanban win probability stages revenue forecast',
+      },
+      {
+        id: 'clients',
+        label: 'Clients & Accounts',
+        icon: '👥',
+        subtitle: 'Client categories, tags & attributes',
+        keywords: 'clients accounts categories tags custom fields customer company directory',
+      },
+    ],
+  },
+  {
+    groupId: 'operations',
+    title: 'Projects & Workspace',
+    tabs: [
+      {
+        id: 'projects',
+        label: 'Projects & Delivery',
+        icon: '📁',
+        subtitle: 'Project categories & priority ratings',
+        keywords: 'projects categories custom fields priorities billing delivery collaboration',
+      },
+      {
+        id: 'project-statuses',
+        label: 'Project Statuses',
+        icon: '📌',
+        subtitle: 'Custom delivery lifecycle stages',
+        keywords: 'project statuses stages workflow planning in-progress on-hold completed cancelled',
+      },
+      {
+        id: 'users',
+        label: 'Users & Designations',
+        icon: '🛡️',
+        subtitle: 'Workspace team roles & permissions',
+        keywords: 'users designations roles permissions rbac team members designations access security',
+      },
+    ],
+  },
+];
+
 export const SettingsPage: React.FC = () => {
   const { hasPermission, loading: authLoading } = useAuth();
   const canManageSettings = hasPermission('crm.settings.manage');
@@ -819,6 +946,9 @@ export const SettingsPage: React.FC = () => {
   const activeTab: SettingsTabId = SETTINGS_TABS.some((tab) => tab.id === tabParam)
     ? (tabParam as SettingsTabId)
     : 'general';
+
+  const [tabFilter, setTabFilter] = useState('');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const [settings, setSettings] = useState<CrmSettings | null>(null);
   const [users, setUsers] = useState<SettingsWorkspaceUser[]>([]);
@@ -832,6 +962,48 @@ export const SettingsPage: React.FC = () => {
   const [permsUser, setPermsUser] = useState<SettingsWorkspaceUser | null>(null);
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+
+  const filteredTabGroups = useMemo(() => {
+    const query = tabFilter.trim().toLowerCase();
+    if (!query) return SETTINGS_TAB_GROUPS;
+    return SETTINGS_TAB_GROUPS.map((group) => ({
+      ...group,
+      tabs: group.tabs.filter(
+        (t) =>
+          t.label.toLowerCase().includes(query) ||
+          t.subtitle.toLowerCase().includes(query) ||
+          t.keywords.toLowerCase().includes(query)
+      ),
+    })).filter((group) => group.tabs.length > 0);
+  }, [tabFilter]);
+
+  const filteredTabsCount = useMemo(() => {
+    return filteredTabGroups.reduce((acc, g) => acc + g.tabs.length, 0);
+  }, [filteredTabGroups]);
+
+  const currentTabMeta = useMemo(() => {
+    for (const group of SETTINGS_TAB_GROUPS) {
+      const found = group.tabs.find((t) => t.id === activeTab);
+      if (found) return found;
+    }
+    const fallback = SETTINGS_TABS.find((t) => t.id === activeTab);
+    return fallback
+      ? {
+          id: fallback.id,
+          label: fallback.label,
+          icon: fallback.icon,
+          subtitle: 'Settings & Preferences',
+          keywords: '',
+        }
+      : null;
+  }, [activeTab]);
+
+  const currentGroupTitle = useMemo(() => {
+    for (const group of SETTINGS_TAB_GROUPS) {
+      if (group.tabs.some((t) => t.id === activeTab)) return group.title;
+    }
+    return 'Configuration';
+  }, [activeTab]);
 
   const setTab = useCallback(
     (tab: SettingsTabId) => {
@@ -868,6 +1040,9 @@ export const SettingsPage: React.FC = () => {
       setSettings(data);
       const known = SETTINGS_CURRENCIES.some((item) => item.code === data.default_currency);
       setCurrencySelect(known ? data.default_currency : 'CUSTOM');
+      if (data?.default_currency) {
+        setRuntimeDefaultCurrency(data.default_currency);
+      }
       setUsers(Array.isArray(usersRes.data) ? usersRes.data : []);
       setEmailStatus(emailRes.data);
       setDirty(false);
@@ -915,11 +1090,25 @@ export const SettingsPage: React.FC = () => {
     if (activeTab === 'general') {
       const companyName = settings.company_name.trim();
       const companyState = settings.company_state.trim();
+      // Prefer the Select value when not CUSTOM so USD/EUR is never lost on save.
+      const currency = String(
+        currencySelect && currencySelect !== 'CUSTOM'
+          ? currencySelect
+          : settings.default_currency || ''
+      )
+        .trim()
+        .toUpperCase();
       if (!companyName) {
         return setMessage({ kind: 'error', text: 'Company name is required.' });
       }
       if (!companyState) {
         return setMessage({ kind: 'error', text: 'Company state is required.' });
+      }
+      if (!/^[A-Z]{3}$/.test(currency || 'INR')) {
+        return setMessage({ kind: 'error', text: 'Currency must be a three-letter code.' });
+      }
+      if (settings.tax_rate < 0 || settings.tax_rate > 100) {
+        return setMessage({ kind: 'error', text: 'Tax rate must be between 0 and 100.' });
       }
       payload.company_name = companyName;
       payload.company_state = companyState;
@@ -927,22 +1116,25 @@ export const SettingsPage: React.FC = () => {
       payload.office_addresses = (settings.office_addresses || [])
         .map((a) => String(a || '').trim())
         .filter(Boolean);
+      // Currency + tax live on General tab UI — must persist here (not only Finance).
+      payload.default_currency = currency || 'INR';
+      payload.tax_rate = Number(settings.tax_rate);
+      payload.sample_units_of_measure = (settings.sample_units_of_measure || [])
+        .map((u) => String(u || '').trim())
+        .filter(Boolean);
+      payload.courier_carriers = (settings.courier_carriers || [])
+        .map((c) => String(c || '').trim())
+        .filter(Boolean);
+      payload.tracking_number_options = (settings.tracking_number_options || [])
+        .map((t) => String(t || '').trim())
+        .filter(Boolean);
     } else if (activeTab === 'shipping') {
       payload.state_shipping_rates = settings.state_shipping_rates || {};
       payload.free_shipping_threshold = Number(settings.free_shipping_threshold) || 0;
     } else if (activeTab === 'finance') {
-      const currency = settings.default_currency.trim().toUpperCase();
-      if (!/^[A-Z]{3}$/.test(currency || 'INR')) {
-        return setMessage({ kind: 'error', text: 'Currency must be a three-letter code.' });
-      }
-      if (settings.tax_rate < 0 || settings.tax_rate > 100) {
-        return setMessage({ kind: 'error', text: 'Tax rate must be between 0 and 100.' });
-      }
       if (!settings.expense_categories?.length) {
         return setMessage({ kind: 'error', text: 'Expense categories cannot be empty.' });
       }
-      payload.default_currency = currency || 'INR';
-      payload.tax_rate = Number(settings.tax_rate);
       payload.default_hourly_rate = Number(settings.default_hourly_rate) || 0;
       payload.quotation_valid_days = Number(settings.quotation_valid_days) || 30;
       payload.quotation_prefix = settings.quotation_prefix || 'QUO-';
@@ -997,12 +1189,40 @@ export const SettingsPage: React.FC = () => {
 
     setSaving(true);
     try {
-      const response = await crmApi.updateSettings(payload);
-      setSettings((current) =>
-        current ? { ...current, ...(response.data || payload) } : response.data || null
-      );
+      await crmApi.updateSettings(payload);
+      // Re-load from API so UI reflects what was actually persisted (not stale INR).
+      const refreshed = await crmApi.getSettings();
+      const data = refreshed.data;
+      setSettings(data);
+      if (data?.default_currency) {
+        const code = String(data.default_currency).trim().toUpperCase();
+        const known = SETTINGS_CURRENCIES.some((item) => item.code === code);
+        setCurrencySelect(known ? code : 'CUSTOM');
+        setRuntimeDefaultCurrency(code);
+        window.dispatchEvent(
+          new CustomEvent(CRM_SETTINGS_CURRENCY_CHANGED, {
+            detail: {
+              default_currency: code,
+              defaultCurrencyCode: code,
+              defaultCurrencySymbol: getCurrencySymbol(code),
+            },
+          })
+        );
+      } else if (payload.default_currency) {
+        const code = String(payload.default_currency).trim().toUpperCase();
+        setRuntimeDefaultCurrency(code);
+        window.dispatchEvent(
+          new CustomEvent(CRM_SETTINGS_CURRENCY_CHANGED, {
+            detail: {
+              default_currency: code,
+              defaultCurrencyCode: code,
+              defaultCurrencySymbol: getCurrencySymbol(code),
+            },
+          })
+        );
+      }
       setDirty(false);
-      setMessage({ kind: 'success', text: response.message || 'Settings saved successfully.' });
+      setMessage({ kind: 'success', text: refreshed.message || 'Settings saved successfully.' });
     } catch (reason) {
       setMessage({
         kind: 'error',
@@ -1141,26 +1361,220 @@ export const SettingsPage: React.FC = () => {
         </div>
       )}
 
-      <div
-        data-tour="settings-tabs"
-        className="flex flex-wrap gap-1 rounded-xl border border-zinc-300 bg-white p-2"
-      >
-        {SETTINGS_TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            data-tour={`settings-tab-${tab.id}`}
-            onClick={() => setTab(tab.id)}
-            className={`rounded-lg border-0 px-3 py-2 text-sm font-semibold ${
-              activeTab === tab.id
-                ? 'bg-slate-950 text-white'
-                : 'bg-transparent text-zinc-600 hover:bg-zinc-100'
-            }`}
+      <div className="flex flex-col lg:flex-row items-start gap-6">
+        {/* Left: Vertical Navigation Sidebar */}
+        <aside
+          data-tour="settings-tabs"
+          className="w-full lg:w-72 xl:w-80 shrink-0 lg:sticky lg:top-4 z-20 space-y-3"
+        >
+          {/* Mobile Collapsible Header Bar (visible on < lg screens) */}
+          <div className="block lg:hidden rounded-2xl border border-zinc-200/90 bg-white p-3 shadow-xs">
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen((prev) => !prev)}
+              className="flex w-full items-center justify-between gap-3 text-left cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-950 text-base text-white">
+                  {currentTabMeta?.icon || '⚙️'}
+                </span>
+                <div className="min-w-0">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                    Active Section ({currentGroupTitle})
+                  </span>
+                  <span className="block truncate text-sm font-bold text-zinc-900">
+                    {currentTabMeta?.label || activeTab}
+                  </span>
+                </div>
+              </div>
+              <span className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700">
+                {mobileNavOpen ? 'Close Menu' : 'Switch Section'}
+                <KeyboardArrowDownIcon
+                  sx={{ fontSize: 18 }}
+                  className={`transition-transform duration-200 ${mobileNavOpen ? 'rotate-180' : ''}`}
+                />
+              </span>
+            </button>
+          </div>
+
+          {/* Full Vertical Navigation Card */}
+          <div
+            className={`${
+              mobileNavOpen ? 'block' : 'hidden'
+            } lg:block rounded-2xl border border-zinc-200/90 bg-white p-3 shadow-xs space-y-3`}
           >
-            {tab.icon} {tab.label}
-          </button>
-        ))}
-      </div>
+            {/* Header & Filter Search */}
+            <div className="space-y-2 pb-2 border-b border-zinc-100">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                  Navigation
+                </span>
+                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600">
+                  {filteredTabsCount} / {SETTINGS_TABS.length} tabs
+                </span>
+              </div>
+              <div className="relative">
+                <SearchIcon
+                  sx={{ fontSize: 16 }}
+                  className="absolute left-2.5 top-2.5 text-zinc-400"
+                />
+                <input
+                  type="text"
+                  placeholder="Filter settings..."
+                  value={tabFilter}
+                  onChange={(e) => setTabFilter(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 bg-zinc-50/70 pl-8 pr-7 py-1.5 text-xs text-zinc-900 placeholder:text-zinc-400 outline-none focus:border-zinc-400 focus:bg-white transition-colors"
+                />
+                {tabFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setTabFilter('')}
+                    className="absolute right-2 top-2 text-zinc-400 hover:text-zinc-600 cursor-pointer"
+                    title="Clear filter"
+                  >
+                    <CloseIcon sx={{ fontSize: 14 }} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Grouped Vertical Tabs */}
+            <nav className="space-y-3.5 max-h-[calc(100vh-230px)] overflow-y-auto pr-0.5">
+              {filteredTabGroups.length === 0 ? (
+                <div className="p-4 text-center text-xs text-zinc-400">
+                  No settings match &ldquo;{tabFilter}&rdquo;.
+                </div>
+              ) : (
+                filteredTabGroups.map((group) => (
+                  <div key={group.groupId} className="space-y-1">
+                    <div className="px-2 pt-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                      {group.title}
+                    </div>
+                    <div className="space-y-0.5">
+                      {group.tabs.map((tab) => {
+                        const isActive = activeTab === tab.id;
+                        return (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            data-tour={`settings-tab-${tab.id}`}
+                            onClick={() => {
+                              setTab(tab.id);
+                              setMobileNavOpen(false);
+                            }}
+                            className={`group relative flex w-full items-center justify-between gap-2.5 rounded-xl px-2.5 py-2 text-left transition-all cursor-pointer ${
+                              isActive
+                                ? 'bg-zinc-950 text-white shadow-xs'
+                                : 'bg-transparent text-zinc-700 hover:bg-zinc-100/90 hover:text-zinc-950'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span
+                                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm transition-colors ${
+                                  isActive
+                                    ? 'bg-white/15 text-white'
+                                    : 'bg-zinc-100 text-zinc-700 group-hover:bg-zinc-200/80 group-hover:text-zinc-950'
+                                }`}
+                              >
+                                {tab.icon}
+                              </span>
+                              <div className="min-w-0">
+                                <span
+                                  className={`block truncate text-xs font-semibold ${
+                                    isActive ? 'text-white' : 'text-zinc-900'
+                                  }`}
+                                >
+                                  {tab.label}
+                                </span>
+                                <span
+                                  className={`block truncate text-[10px] ${
+                                    isActive
+                                      ? 'text-zinc-300'
+                                      : 'text-zinc-400 group-hover:text-zinc-500'
+                                  }`}
+                                >
+                                  {tab.subtitle}
+                                </span>
+                              </div>
+                            </div>
+                            <span
+                              className={`shrink-0 transition-transform ${
+                                isActive
+                                  ? 'text-white opacity-100 translate-x-0'
+                                  : 'text-zinc-400 opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5'
+                              }`}
+                            >
+                              <ChevronRightIcon sx={{ fontSize: 16 }} />
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))
+              )}
+            </nav>
+
+            {/* Footer status / quick save */}
+            <div className="pt-2.5 border-t border-zinc-100 flex items-center justify-between text-[11px] text-zinc-500 px-1">
+              <span className="flex items-center gap-1.5">
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    dirty ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
+                  }`}
+                />
+                {dirty ? 'Unsaved changes' : 'All synced'}
+              </span>
+              {!hideGlobalSave && dirty && (
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void save()}
+                  className="text-xs font-semibold text-zinc-950 hover:underline cursor-pointer disabled:opacity-50"
+                >
+                  {saving ? 'Saving...' : 'Save now'}
+                </button>
+              )}
+            </div>
+          </div>
+        </aside>
+
+        {/* Right: Active Settings Section Content */}
+        <main className="flex-1 min-w-0 w-full space-y-5">
+          {/* Active Tab Hero / Context Banner */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs">
+            <div className="flex items-center gap-3.5 min-w-0">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-950 text-xl text-white shadow-xs">
+                {currentTabMeta?.icon || '⚙️'}
+              </span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                  <span>Settings</span>
+                  <span>/</span>
+                  <span className="text-zinc-600">{currentGroupTitle}</span>
+                </div>
+                <h2 className="m-0 text-base font-bold text-zinc-950 truncate">
+                  {currentTabMeta?.label || activeTab}
+                </h2>
+                <p className="m-0 text-xs text-zinc-500 truncate">
+                  {currentTabMeta?.subtitle || 'Configure settings and preferences'}
+                </p>
+              </div>
+            </div>
+            {!hideGlobalSave && (
+              <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void save()}
+                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border-0 bg-zinc-950 px-3.5 text-xs font-semibold text-white shadow-xs hover:bg-zinc-800 disabled:opacity-50 cursor-pointer"
+                >
+                  <SaveOutlinedIcon sx={{ fontSize: 16 }} />
+                  {saving ? 'Saving…' : 'Save Section'}
+                </button>
+              </div>
+            )}
+          </div>
 
       {activeTab === 'general' && (
         <section data-tour="settings-general-profile" className={cardClass}>
@@ -1303,6 +1717,49 @@ export const SettingsPage: React.FC = () => {
                 onChange={(e) => update('tax_rate', Number(e.target.value))}
               />
             </label>
+            <div className="sm:col-span-2 lg:col-span-3 border-t border-zinc-100 pt-4 mt-2">
+              <ChipListEditor
+                icon="📏"
+                title="Sample Request - Units of Measure (UoM)"
+                description="Configure units of measure available when adding sample products (e.g. pcs, kg, litre, meter, box, packet). These will be available in the sample request creation form."
+                value={settings.sample_units_of_measure || ['pcs', 'kg', 'litre', 'meter', 'box', 'packet', 'roll', 'set', 'swatch', 'gram']}
+                onChange={(next: string[]) => update('sample_units_of_measure', next)}
+                placeholder="Add new unit (e.g. carton, pair, drum)…"
+                accent="bg-emerald-50 text-emerald-800"
+              />
+            </div>
+            <div className="sm:col-span-2 lg:col-span-3 border-t border-zinc-100 pt-4 mt-2">
+              <ChipListEditor
+                icon="🚚"
+                title="Courier / Carrier Options"
+                description="Configure courier and carrier names available when dispatching sample requests (e.g. BlueDart Express, Delhivery, FedEx)."
+                value={
+                  settings.courier_carriers || [
+                    'BlueDart Express',
+                    'Delhivery Logistics',
+                    'Shiprocket Direct',
+                    'FedEx Express',
+                    'DTDC Courier',
+                    'Professional Courier',
+                    'Custom Courier',
+                  ]
+                }
+                onChange={(next: string[]) => update('courier_carriers', next)}
+                placeholder="Add courier / carrier name…"
+                accent="bg-sky-50 text-sky-800"
+              />
+            </div>
+            <div className="sm:col-span-2 lg:col-span-3 border-t border-zinc-100 pt-4 mt-2">
+              <ChipListEditor
+                icon="🔢"
+                title="Tracking Number Options"
+                description="Optional AWB / tracking number presets suggested when dispatching sample requests. Users can still enter a custom tracking number."
+                value={settings.tracking_number_options || []}
+                onChange={(next: string[]) => update('tracking_number_options', next)}
+                placeholder="Add tracking number preset / prefix…"
+                accent="bg-amber-50 text-amber-800"
+              />
+            </div>
           </div>
         </section>
       )}
@@ -1346,7 +1803,9 @@ export const SettingsPage: React.FC = () => {
           </div>
           <div data-tour="settings-shipping-threshold" className="mt-4 max-w-sm">
             <label>
-              <span className={labelClass}>Free Shipping Threshold Amount (₹)</span>
+              <span className={labelClass}>
+                Free Shipping Threshold Amount ({getCurrencySymbol(settings.default_currency)})
+              </span>
               <input
                 type="number"
                 min={0}
@@ -2032,6 +2491,8 @@ export const SettingsPage: React.FC = () => {
           </div>
         </div>
       )}
+        </main>
+      </div>
 
       {permsUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

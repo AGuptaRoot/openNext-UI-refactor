@@ -42,6 +42,8 @@ import {
 import type { RequestType } from '../../types/request-types';
 import { displayLabel } from '../../utils/displayLabels';
 import { reverseGeocode } from '../../utils/reverseGeocode';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import { getCurrencySymbol } from '../../utils/currency';
 
 const CONTACT_SEARCH_LIMIT = 8;
 
@@ -75,6 +77,7 @@ export const LeadCreatePage: React.FC = () => {
   const canWrite = hasPermission('crm.leads.write');
   const canAssignOthers = canAssignToOtherUsers(user, { isClient, activeRole });
   const currentUserId = String(user?.userId || '').trim();
+  const settingsCurrency = useDefaultCurrency();
 
   // Metadata
   const [pipelineStages, setPipelineStages] = useState<string[]>([]);
@@ -422,7 +425,7 @@ export const LeadCreatePage: React.FC = () => {
       requestType: requestType.trim(),
       requestTypeId: requestTypeId.startsWith('legacy_') ? null : requestTypeId,
       value: value !== '' ? Number(value) : 0,
-      currency: 'INR',
+      currency: settingsCurrency,
       tags: selectedTags,
       address: address.trim() || undefined,
       city: city.trim() || undefined,
@@ -1259,7 +1262,9 @@ export const LeadCreatePage: React.FC = () => {
             </div>
 
             <div data-tour="leads-field-value" className="sm:col-span-3">
-              <label className={labelCls}>Deal Value (INR)</label>
+              <label className={labelCls}>
+                Deal Value ({getCurrencySymbol(settingsCurrency)})
+              </label>
               <input
                 type="number"
                 min="0"

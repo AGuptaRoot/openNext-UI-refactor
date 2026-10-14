@@ -18,6 +18,7 @@ import {
   financeTextAreaClass,
 } from '../../components/finance/FinanceFormElements';
 import { displayLabel, displayUserLabel } from '../../utils/displayLabels';
+import { getRuntimeDefaultCurrency } from '../../utils/currency';
 import { DocumentUploadControl } from '../../components/common/DocumentUploadControl';
 
 function statusClass(status: string): string {

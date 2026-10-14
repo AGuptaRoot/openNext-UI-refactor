@@ -26,6 +26,7 @@ import {
 } from '../../types/invoices';
 import { triggerFileDownload } from '../../utils/fileDownload';
 import { displayLabel } from '../../utils/displayLabels';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 
 type MainTab = 'invoices' | 'recurring';
 
@@ -50,7 +51,7 @@ function statusClass(status: string): string {
   return map[status] || 'bg-zinc-100 text-zinc-700';
 }
 
-function emptyScheduleForm(): RecurringInvoiceCreateInput {
+function emptyScheduleForm(currency: string): RecurringInvoiceCreateInput {
   const today = new Date().toISOString().slice(0, 10);
   return {
     profileName: '',
@@ -63,7 +64,7 @@ function emptyScheduleForm(): RecurringInvoiceCreateInput {
     endCondition: 'never',
     endDate: null,
     totalCycles: null,
-    currency: 'INR',
+    currency,
     paymentTermsDays: 30,
     lineItems: [{ name: '', description: '', qty: 1, rate: 0, tax: 18 }],
     discountType: 'percent',
@@ -83,6 +84,7 @@ export const InvoicesPage: React.FC = () => {
   const { confirm } = useDialog();
   const canWriteFinance = hasPermission('crm.finance.write') && !isClient;
   const { clients, projects } = useFinanceOptions();
+  const settingsCurrency = useDefaultCurrency();
 
   const tabParam = searchParams.get('tab');
   const tab: MainTab = tabParam === 'recurring' ? 'recurring' : 'invoices';
@@ -105,7 +107,15 @@ export const InvoicesPage: React.FC = () => {
   const [recurring, setRecurring] = useState<RecurringInvoiceItem[]>([]);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [pdfScanOpen, setPdfScanOpen] = useState(false);
-  const [scheduleForm, setScheduleForm] = useState<RecurringInvoiceCreateInput>(emptyScheduleForm());
+  const [scheduleForm, setScheduleForm] = useState<RecurringInvoiceCreateInput>(() =>
+    emptyScheduleForm(settingsCurrency)
+  );
+
+  useEffect(() => {
+    setScheduleForm((current) =>
+      current.profileName?.trim() ? current : { ...current, currency: settingsCurrency }
+    );
+  }, [settingsCurrency]);
   const [forecastOpen, setForecastOpen] = useState(false);
   const [forecastDays, setForecastDays] = useState(30);
   const [forecastItems, setForecastItems] = useState<
@@ -338,7 +348,7 @@ export const InvoicesPage: React.FC = () => {
       };
       await crmApi.createRecurringInvoice(payload);
       setScheduleOpen(false);
-      setScheduleForm(emptyScheduleForm());
+      setScheduleForm(emptyScheduleForm(settingsCurrency));
       setInfoMessage('Recurring invoice profile created.');
       setTab('recurring');
       await loadRecurring();
@@ -581,7 +591,7 @@ export const InvoicesPage: React.FC = () => {
                 type="button"
                 data-tour="invoices-recurring-new-btn"
                 onClick={() => {
-                  setScheduleForm(emptyScheduleForm());
+                  setScheduleForm(emptyScheduleForm(settingsCurrency));
                   setScheduleOpen(true);
                   setError('');
                 }}

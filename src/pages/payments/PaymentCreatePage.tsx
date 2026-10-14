@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -21,6 +21,7 @@ import { useFinanceOptions } from '../../components/finance/useFinanceOptions';
 import { ClientSelect } from '../../components/clients/ClientSelect';
 import { DocumentUploadControl } from '../../components/common/DocumentUploadControl';
 import { CrmFeatures } from '../../utils/featureFlags';
+import { normalizeCurrencyCode, useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 
 interface AllocRow {
   invoiceId: string;
@@ -58,11 +59,13 @@ export const PaymentCreatePage: React.FC = () => {
   const canWriteFinance = hasPermission('crm.finance.write') && !isClient;
   const canRecordManualPayment = canWriteFinance && CrmFeatures.isManualPaymentEnabled();
   const { clients, projects, invoices } = useFinanceOptions();
+  const settingsCurrency = useDefaultCurrency();
+  const currencyLockedRef = useRef(false);
   const [clientId, setClientId] = useState(searchParams.get('clientId') || '');
   const [projectId, setProjectId] = useState(searchParams.get('projectId') || '');
   const [invoiceId, setInvoiceId] = useState(searchParams.get('invoiceId') || '');
   const [amount, setAmount] = useState(0);
-  const [currency, setCurrency] = useState('INR');
+  const [currency, setCurrency] = useState(settingsCurrency);
   const [exchangeRate, setExchangeRate] = useState(1);
   const [paymentDate, setPaymentDate] = useState(localToday());
   const [mode, setMode] = useState<PaymentMode>('Bank Transfer');
@@ -94,6 +97,11 @@ export const PaymentCreatePage: React.FC = () => {
   }, [canRecordManualPayment, navigate]);
 
   useEffect(() => {
+    if (currencyLockedRef.current) return;
+    setCurrency(settingsCurrency);
+  }, [settingsCurrency]);
+
+  useEffect(() => {
     if (!clientId) {
       setRows([]);
       return;
@@ -117,7 +125,8 @@ export const PaymentCreatePage: React.FC = () => {
     if (!invoiceId) return;
     const invoice = openInvoices.find((item) => item._id === invoiceId);
     if (!invoice) return;
-    setCurrency(invoice.currency || 'INR');
+    currencyLockedRef.current = true;
+    setCurrency(normalizeCurrencyCode(invoice.currency, settingsCurrency));
     setExchangeRate(Number(invoice.exchangeRate) || 1);
     setRows((current) =>
       current.map((row) => ({
@@ -127,7 +136,7 @@ export const PaymentCreatePage: React.FC = () => {
       }))
     );
     setAmount(invoiceBalance(invoice));
-  }, [invoiceId, openInvoices]);
+  }, [invoiceId, openInvoices, settingsCurrency]);
 
   const multiMode = Boolean(clientId) && !invoiceId && rows.length > 0;
   const allocatedTotal = rows.reduce((sum, row) => sum + (row.selected ? Number(row.amount) || 0 : 0), 0);
@@ -313,8 +322,19 @@ export const PaymentCreatePage: React.FC = () => {
               </div>
             </FormField>
             <FormField label="Currency" required>
-              <select className={financeFieldClass} value={currency} onChange={(e) => setCurrency(e.target.value)}>
-                {PAYMENT_CURRENCIES.map((code) => <option key={code}>{code}</option>)}
+              <select
+                className={financeFieldClass}
+                value={currency}
+                onChange={(e) => {
+                  currencyLockedRef.current = true;
+                  setCurrency(e.target.value);
+                }}
+              >
+                {Array.from(new Set([...PAYMENT_CURRENCIES, currency, settingsCurrency])).map((code) => (
+                  <option key={code} value={code}>
+                    {code}
+                  </option>
+                ))}
               </select>
             </FormField>
             <FormField label="Exchange rate" required>

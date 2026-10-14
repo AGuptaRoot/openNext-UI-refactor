@@ -9,6 +9,7 @@ import { ApiError, crmApi } from '../../services/api';
 import type { FinancePdfDocumentType, FinancePdfOcrExtractResult } from '../../types/financePdfOcr';
 import { pdfFileToImageDataUrls } from '../../utils/pdfToImages';
 import { saveFinancePdfScanDraft } from '../../utils/financePdfScanDraft';
+import { getRuntimeDefaultCurrency } from '../../utils/currency';
 
 interface FinancePdfScanModalProps {
   open: boolean;

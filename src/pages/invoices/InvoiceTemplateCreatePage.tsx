@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { crmApi } from '../../services/api';
 import type { TaxCalculation } from '../../types/quotations';
@@ -14,14 +14,22 @@ import {
   financeTextAreaClass,
   newEditableLine,
 } from '../../components/finance/FinanceFormElements';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 
 export const InvoiceTemplateCreatePage: React.FC = () => {
   const navigate = useNavigate();
+  const settingsCurrency = useDefaultCurrency();
+  const currencyLockedRef = useRef(false);
   const [name, setName] = useState('');
   const [category, setCategory] = useState('General');
   const [description, setDescription] = useState('');
-  const [currency, setCurrency] = useState('INR');
+  const [currency, setCurrency] = useState(settingsCurrency);
   const [paymentTermsDays, setPaymentTermsDays] = useState(30);
+
+  useEffect(() => {
+    if (currencyLockedRef.current) return;
+    setCurrency(settingsCurrency);
+  }, [settingsCurrency]);
   const [taxCalculation, setTaxCalculation] = useState<TaxCalculation>('after_discount');
   const [shippingCharge, setShippingCharge] = useState(0);
   const [shippingState, setShippingState] = useState('');
@@ -122,8 +130,15 @@ export const InvoiceTemplateCreatePage: React.FC = () => {
               />
             </FormField>
             <FormField label="Currency" required>
-              <select className={financeFieldClass} value={currency} onChange={(e) => setCurrency(e.target.value)}>
-                {INVOICE_CURRENCIES.map((code) => (
+              <select
+                className={financeFieldClass}
+                value={currency}
+                onChange={(e) => {
+                  currencyLockedRef.current = true;
+                  setCurrency(e.target.value);
+                }}
+              >
+                {Array.from(new Set([...INVOICE_CURRENCIES, currency, settingsCurrency])).map((code) => (
                   <option key={code} value={code}>
                     {code}
                   </option>

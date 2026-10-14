@@ -1078,6 +1078,17 @@ const DEFAULT_ADMIN_SETTINGS: CrmSettings = {
   company_state: 'Maharashtra',
   office_address: 'Plot 42, Tech Park, Andheri East, Mumbai, Maharashtra - 400069',
   office_addresses: ['Plot 42, Tech Park, Andheri East, Mumbai, Maharashtra - 400069'],
+  sample_units_of_measure: ['pcs', 'kg', 'litre', 'meter', 'box', 'packet', 'roll', 'set', 'swatch', 'gram'],
+  courier_carriers: [
+    'BlueDart Express',
+    'Delhivery Logistics',
+    'Shiprocket Direct',
+    'FedEx Express',
+    'DTDC Courier',
+    'Professional Courier',
+    'Custom Courier',
+  ],
+  tracking_number_options: [],
   default_currency: 'INR',
   tax_rate: 18,
   free_shipping_threshold: 5000,
@@ -1154,6 +1165,17 @@ function normalizeCrmSettings(raw?: Partial<CrmSettings> | null): CrmSettings {
       Array.isArray(raw?.office_addresses)
         ? raw.office_addresses.map((a) => String(a || '').trim()).filter(Boolean)
         : DEFAULT_ADMIN_SETTINGS.office_addresses || [],
+    sample_units_of_measure:
+      raw?.sample_units_of_measure?.length
+        ? raw.sample_units_of_measure.map((u) => String(u || '').trim()).filter(Boolean)
+        : DEFAULT_ADMIN_SETTINGS.sample_units_of_measure || [],
+    courier_carriers:
+      raw?.courier_carriers?.length
+        ? raw.courier_carriers.map((c) => String(c || '').trim()).filter(Boolean)
+        : DEFAULT_ADMIN_SETTINGS.courier_carriers || [],
+    tracking_number_options: Array.isArray(raw?.tracking_number_options)
+      ? raw.tracking_number_options.map((t) => String(t || '').trim()).filter(Boolean)
+      : DEFAULT_ADMIN_SETTINGS.tracking_number_options || [],
     default_currency:
       String(raw?.default_currency ?? '').trim().toUpperCase() ||
       DEFAULT_ADMIN_SETTINGS.default_currency,
@@ -9933,11 +9955,14 @@ export const crmApi = {
     }
   },
 
-  generateInvoiceFromSalesOrder: async (id: string): Promise<ApiResponse<InvoiceItem>> => {
+  generateInvoiceFromSalesOrder: async (
+    id: string,
+    body: { sendEmail?: boolean; clientEmail?: string; emailMessage?: string } = {}
+  ): Promise<ApiResponse<InvoiceItem>> => {
     try {
       return await request<InvoiceItem>(`/sales-orders/${encodeURIComponent(id)}/generate-invoice`, {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify(body),
       });
     } catch (error) {
       rethrowUnlessMockFallback(error);
@@ -9947,6 +9972,17 @@ export const crmApi = {
       const order = items[index];
       if (order.convertedInvoiceId) {
         const existing = await crmApi.getInvoice(order.convertedInvoiceId);
+        if (body.sendEmail) {
+          try {
+            await crmApi.sendInvoice(order.convertedInvoiceId, {
+              email: body.clientEmail,
+              message: body.emailMessage,
+            });
+            existing.data.status = 'Sent';
+          } catch {
+            // ignore mock email dispatch error
+          }
+        }
         return existing;
       }
       const due = order.deliveryTargetDate
@@ -9982,6 +10018,19 @@ export const crmApi = {
         salesOrderId: order._id,
         salesOrderNo: order.orderNumber,
       });
+
+      if (body.sendEmail && invoice.data._id) {
+        try {
+          await crmApi.sendInvoice(invoice.data._id, {
+            email: body.clientEmail,
+            message: body.emailMessage,
+          });
+          invoice.data.status = 'Sent';
+        } catch {
+          // ignore mock email dispatch error
+        }
+      }
+
       items[index] = {
         ...order,
         convertedInvoiceId: invoice.data._id,
@@ -10406,12 +10455,21 @@ export const crmApi = {
 
   convertOpportunityToSalesOrder: async (
     id: string
-  ): Promise<ApiResponse<{ salesOrderId: string; opportunity: OpportunityItem }>> => {
+  ): Promise<ApiResponse<{ salesOrderId: string; opportunity?: OpportunityItem }>> => {
     try {
-      return await request<{ salesOrderId: string; opportunity: OpportunityItem }>(
+      const res = await request<{ salesOrderId: string; order?: { _id?: string }; opportunity?: OpportunityItem }>(
         `/sales-orders/from-opportunity/${encodeURIComponent(id)}`,
         { method: 'POST', body: JSON.stringify({}) }
       );
+      const salesOrderId = res.data?.salesOrderId || res.data?.order?._id || '';
+      return {
+        ...res,
+        data: {
+          salesOrderId,
+          opportunity: res.data?.opportunity,
+        },
+        message: res.message || 'This opportunity converted',
+      };
     } catch (error) {
       rethrowUnlessMockFallback(error);
       const items = getLocalOpportunitiesRaw();
@@ -10422,7 +10480,7 @@ export const crmApi = {
         throw new ApiError('Only Won opportunities can be converted to sales orders', 400);
       }
       if (opportunity.generatedSalesOrderId) {
-        throw new ApiError('Sales order already generated for this opportunity', 400);
+        throw new ApiError('This opportunity converted', 400);
       }
       if (!opportunity.clientId) throw new ApiError('Opportunity must be linked to a client', 400);
       const products = opportunity.products || [];
@@ -10457,7 +10515,7 @@ export const crmApi = {
       return {
         success: true,
         data: { salesOrderId: order.data._id, opportunity: items[idx] },
-        message: 'Sales order generated from opportunity',
+        message: 'This opportunity converted',
       };
     }
   },
@@ -15429,7 +15487,11 @@ export const crmApi = {
         method: 'PUT',
         body: JSON.stringify(body),
       });
-      return { ...response, data: normalizeCrmSettings({ ...(response.data || {}), ...body }) };
+      // Prefer request body for keys we just saved (e.g. default_currency), then API map.
+      return {
+        ...response,
+        data: normalizeCrmSettings({ ...(response.data || {}), ...body }),
+      };
     } catch (error) {
       rethrowUnlessMockFallback(error);
       const current = getLocalCrmSettings();

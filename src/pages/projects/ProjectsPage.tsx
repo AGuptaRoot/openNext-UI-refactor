@@ -28,20 +28,13 @@ import {
 import { ProjectTemplateModal } from '../../components/projects/ProjectTemplateModal';
 import { ProjectKanbanView } from '../../components/projects/ProjectKanbanView';
 import { LiveLinkModal } from '../../components/projects/LiveLinkModal';
+import { formatCrmMoney } from '../../utils/currency';
 
 const VIEW_KEY = 'crm-projects-view';
 
-function formatMoney(value?: number, currency = 'INR') {
-  if (value == null) return '—';
-  try {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 0,
-    }).format(value);
-  } catch {
-    return `₹${Number(value).toLocaleString('en-IN')}`;
-  }
+function formatMoney(value?: number, currency?: string) {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  return formatCrmMoney(value, currency, { maximumFractionDigits: 0 });
 }
 
 function isOverdue(p: ProjectItem) {

@@ -179,6 +179,8 @@ export interface SalesOrderItem {
   opportunityId?: string | null;
   clientId: string;
   clientName?: string;
+  clientEmail?: string;
+  customerEmail?: string;
   projectId?: string | null;
   projectName?: string;
   leadId?: string | null;

@@ -248,7 +248,7 @@ export const salesOrdersTourSteps = [
     target: T('sales-orders-create-form'),
     title: 'New Sales Order form',
     content:
-      'Fill order & client details, addresses, catalogue / line items, financial summary, and notes. Header Save and footer Create Sales Order both submit. We will not save during the tour.',
+      'Fill order & client details, addresses, line items, financial summary, and notes. Header Save and footer Create Sales Order both submit. We will not save during the tour.',
     skipBeacon: true,
     before: async () => {
       await ensureCreateOrSkip();
@@ -280,23 +280,11 @@ export const salesOrdersTourSteps = [
   }),
 
   step({
-    id: 'sales-orders-create-catalog',
-    target: T('sales-orders-create-catalog'),
-    title: 'Product catalogue',
-    content:
-      'Pick a catalogue product to add a priced line, or use Add item for a blank row you fill manually.',
-    before: async () => {
-      await ensureCreateOrSkip();
-      await waitForSelector(T('sales-orders-create-catalog'), 4000);
-    },
-  }),
-
-  step({
     id: 'sales-orders-create-lines',
     target: T('sales-orders-create-lines'),
     title: 'Line items',
     content:
-      'Columns: Description *, SKU, Qty *, Rate *, Tax %, Amount, delete. Use Add line for more rows. At least one valid line is required to create.',
+      'Columns: Description *, SKU, Qty *, Rate *, Tax %, Amount, delete. Use Add item / Add line for more rows. At least one valid line is required to create.',
     before: async () => {
       await ensureCreateOrSkip();
       await waitForSelector(T('sales-orders-create-lines'), 4000);
@@ -345,7 +333,7 @@ export const salesOrdersTourSteps = [
     target: T('sales-orders-detail-actions'),
     title: 'Fulfilment actions',
     content:
-      'Status- and permission-gated: Email order status, Email RMA status, Reserve stock, Add shipment, Request RMA, Generate / Open invoice, Cancel order, Delete (Draft only). Soft-skips buttons hidden for this order.',
+      'Status- and permission-gated: Email order status, Email RMA status, Approved, Add shipment, Request RMA, Generate / Open invoice, Cancel order, Delete (Draft only). Soft-skips buttons hidden for this order.',
     before: async () => {
       if (!(await guardSalesOrderDetail())) return;
       await waitForSelector(T('sales-orders-detail-actions'), 4000);

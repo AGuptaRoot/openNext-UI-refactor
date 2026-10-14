@@ -25,6 +25,7 @@ import { ProjectTemplateModal } from '../../components/projects/ProjectTemplateM
 import { LiveLinkModal } from '../../components/projects/LiveLinkModal';
 import { ClientSelect } from '../../components/clients/ClientSelect';
 import { resolveClientAvatarColor } from '../../utils/clientAvatar';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 
 const fieldClass =
   'h-9 px-3 text-xs border border-zinc-200 rounded-lg outline-none focus:border-zinc-400 w-full box-border bg-white text-zinc-900 transition-colors';
@@ -65,6 +66,7 @@ export const ProjectCreatePage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const { hasPermission, isClient } = useAuth();
   const canWrite = hasPermission('crm.projects.write') && !isClient;
+  const settingsCurrency = useDefaultCurrency();
 
   // Metadata states
   const [clients, setClients] = useState<ClientItem[]>([]);
@@ -94,7 +96,7 @@ export const ProjectCreatePage: React.FC = () => {
   const [statusBeforeLive, setStatusBeforeLive] = useState('Not Started');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [progressMethod, setProgressMethod] = useState<ProgressCalculationMethod>('tasks');
-  const [currency, setCurrency] = useState('INR');
+  const [currency, setCurrency] = useState(settingsCurrency);
   const [budget, setBudget] = useState('0');
   const [hoursEstimate, setHoursEstimate] = useState('0');
   const [startDate, setStartDate] = useState('');
@@ -349,7 +351,7 @@ export const ProjectCreatePage: React.FC = () => {
         status: status || 'Not Started',
         liveUrl: liveUrl.trim() || undefined,
         progressCalculationMethod: progressMethod || 'tasks',
-        currency: currency || 'INR',
+        currency: currency || settingsCurrency,
         budget: Number(budget) || 0,
         hoursEstimate: Number(hoursEstimate) || 0,
         startDate: startDate || null,

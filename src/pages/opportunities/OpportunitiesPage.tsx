@@ -34,9 +34,10 @@ import {
   canCreateOpportunityQuotation,
 } from '../../types/opportunities';
 import { useOpportunityStages } from '../../hooks/useOpportunityStages';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import { formatCrmMoney } from '../../utils/currency';
 
 const DEFAULT_COMPANY_STATE = 'Maharashtra';
-const DEFAULT_FREE_SHIPPING_THRESHOLD = 5000;
 const TAX_OPTIONS = [0, 5, 12, 18, 28];
 
 type QuickLine = {
@@ -47,17 +48,9 @@ type QuickLine = {
   tax: number;
 };
 
-function formatMoney(value?: number, currency = 'INR') {
+function formatMoney(value?: number, currency?: string) {
   if (value == null || Number.isNaN(Number(value))) return '—';
-  try {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 0,
-    }).format(Number(value));
-  } catch {
-    return `₹${Number(value).toLocaleString('en-IN')}`;
-  }
+  return formatCrmMoney(value, currency, { maximumFractionDigits: 0 });
 }
 
 function dealValue(item: OpportunityItem): number {
@@ -89,12 +82,13 @@ export const OpportunitiesPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasPermission } = useAuth();
-  const { confirm } = useDialog();
+  const { alert, confirm } = useDialog();
   const canWrite =
     hasPermission('crm.opportunities.write') || hasPermission('crm.leads.write');
   const canDelete =
     hasPermission('crm.opportunities.delete') || hasPermission('crm.leads.delete');
   const opportunityStages = useOpportunityStages();
+  const settingsCurrency = useDefaultCurrency();
   const defaultStageKey = opportunityStages[0]?.key || 'Discovery';
 
   const [items, setItems] = useState<OpportunityItem[]>([]);
@@ -125,9 +119,6 @@ export const OpportunitiesPage: React.FC = () => {
     DEFAULT_STATE_SHIPPING_RATES
   );
   const [companyState, setCompanyState] = useState(DEFAULT_COMPANY_STATE);
-  const [freeShippingThreshold, setFreeShippingThreshold] = useState(
-    DEFAULT_FREE_SHIPPING_THRESHOLD
-  );
   const [qcTitle, setQcTitle] = useState('');
   const [qcClientId, setQcClientId] = useState('');
   const [qcLeadId, setQcLeadId] = useState('');
@@ -137,10 +128,6 @@ export const OpportunitiesPage: React.FC = () => {
   const [qcContactEmail, setQcContactEmail] = useState('');
   const [qcContactMobile, setQcContactMobile] = useState('');
   const [qcShippingState, setQcShippingState] = useState(DEFAULT_COMPANY_STATE);
-  const [qcShippingCharge, setQcShippingCharge] = useState(
-    DEFAULT_STATE_SHIPPING_RATES[DEFAULT_COMPANY_STATE] ?? 100
-  );
-  const [qcShippingOverridden, setQcShippingOverridden] = useState(false);
   const [qcLines, setQcLines] = useState<QuickLine[]>([newQuickLine()]);
   const [metaLoaded, setMetaLoaded] = useState(false);
 
@@ -222,9 +209,6 @@ export const OpportunitiesPage: React.FC = () => {
           setCompanyState(s.company_state);
           setQcShippingState(s.company_state);
         }
-        if (s.free_shipping_threshold != null) {
-          setFreeShippingThreshold(Number(s.free_shipping_threshold));
-        }
         if (s.state_shipping_rates && Object.keys(s.state_shipping_rates).length > 0) {
           setSettingsRates({ ...DEFAULT_STATE_SHIPPING_RATES, ...s.state_shipping_rates });
         }
@@ -274,10 +258,10 @@ export const OpportunitiesPage: React.FC = () => {
     () =>
       computeOpportunityFinancials(
         qcProducts,
-        Number(qcShippingCharge) || 0,
+        0,
         stageProbability(qcStage, opportunityStages)
       ),
-    [qcProducts, qcShippingCharge, qcStage, opportunityStages]
+    [qcProducts, qcStage, opportunityStages]
   );
 
   useEffect(() => {
@@ -286,26 +270,6 @@ export const OpportunitiesPage: React.FC = () => {
       opportunityStages.some((s) => s.key === prev) ? prev : opportunityStages[0].key
     );
   }, [opportunityStages]);
-
-  useEffect(() => {
-    if (!quickOpen || qcShippingOverridden) return;
-    const rate =
-      settingsRates[qcShippingState] ??
-      (qcShippingState === companyState ? 100 : 150);
-    if (qcFinancials.subtotal >= freeShippingThreshold && qcFinancials.subtotal > 0) {
-      setQcShippingCharge(0);
-    } else {
-      setQcShippingCharge(rate);
-    }
-  }, [
-    quickOpen,
-    qcShippingState,
-    qcFinancials.subtotal,
-    qcShippingOverridden,
-    settingsRates,
-    companyState,
-    freeShippingThreshold,
-  ]);
 
   const resetQuickForm = () => {
     setQcTitle('');
@@ -317,8 +281,6 @@ export const OpportunitiesPage: React.FC = () => {
     setQcContactEmail('');
     setQcContactMobile('');
     setQcShippingState(companyState);
-    setQcShippingCharge(settingsRates[companyState] ?? 100);
-    setQcShippingOverridden(false);
     setQcLines([newQuickLine()]);
   };
 
@@ -342,7 +304,6 @@ export const OpportunitiesPage: React.FC = () => {
         })
       )
     );
-    setQcShippingOverridden(false);
   };
 
   const applyStageChange = async (
@@ -408,14 +369,35 @@ export const OpportunitiesPage: React.FC = () => {
   };
 
   const handleConvertSalesOrder = async (item: OpportunityItem) => {
+    if (item.generatedSalesOrderId) {
+      await alert({
+        title: 'Opportunity Converted',
+        message: 'This opportunity converted',
+      });
+      return;
+    }
     if (!(await confirm(`Generate sales order from "${item.title}"?`))) return;
     setConvertingId(item._id);
     try {
-      const res = await crmApi.convertOpportunityToSalesOrder(item._id);
-      showToast(res.message || 'Sales order generated successfully');
-      load();
+      await crmApi.convertOpportunityToSalesOrder(item._id);
+      await load();
+      await alert({
+        title: 'Opportunity Converted',
+        message: 'This opportunity converted',
+      });
+      showToast('This opportunity converted', 'success');
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Sales order conversion failed', 'error');
+      const msg = err instanceof Error ? err.message : 'Sales order conversion failed';
+      if (msg.toLowerCase().includes('converted')) {
+        await load();
+        await alert({
+          title: 'Opportunity Converted',
+          message: 'This opportunity converted',
+        });
+        showToast('This opportunity converted', 'success');
+      } else {
+        showToast(msg, 'error');
+      }
     } finally {
       setConvertingId(null);
     }
@@ -484,11 +466,11 @@ export const OpportunitiesPage: React.FC = () => {
         contactEmail: qcContactEmail.trim() || undefined,
         contactMobile: qcContactMobile.trim() || undefined,
         shippingState: qcShippingState,
-        shippingCharge: Number(qcShippingCharge) || 0,
+        shippingCharge: 0,
         products: qcProducts,
         expectedRevenue: qcFinancials.expectedRevenue,
         value: qcFinancials.expectedRevenue,
-        currency: 'INR',
+        currency: settingsCurrency,
       });
       showToast('Opportunity created');
       setQuickOpen(false);
@@ -514,11 +496,6 @@ export const OpportunitiesPage: React.FC = () => {
               1000
           ) / 10
         : 0;
-
-  const freeShippingApplied =
-    !qcShippingOverridden &&
-    qcFinancials.subtotal >= freeShippingThreshold &&
-    qcFinancials.subtotal > 0;
 
   return (
     <div data-tour="opportunities-tour-landing" className="flex flex-col gap-5">
@@ -709,7 +686,6 @@ export const OpportunitiesPage: React.FC = () => {
                     'Value',
                     'Weighted Value',
                     'Probability',
-                    'Shipping Charge',
                     'Close Date',
                     'Owner',
                     'Actions',
@@ -813,9 +789,6 @@ export const OpportunitiesPage: React.FC = () => {
                           </span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-xs font-semibold text-zinc-600">
-                        {formatMoney(item.shippingCharge ?? 0, item.currency)}
-                      </td>
                       <td className="px-4 py-3 text-xs text-zinc-600">
                         {item.expectedCloseDate
                           ? new Date(item.expectedCloseDate).toLocaleDateString()
@@ -860,6 +833,16 @@ export const OpportunitiesPage: React.FC = () => {
                                 Sales Order
                               </button>
                             )}
+                          {item.generatedSalesOrderId && (
+                            <Link
+                              to={`/sales-orders/${item.generatedSalesOrderId}`}
+                              title={item.generatedSalesOrderNo ? `Open Sales Order ${item.generatedSalesOrderNo}` : 'Open Sales Order'}
+                              className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-[11px] font-semibold text-emerald-800 no-underline"
+                            >
+                              <ShoppingCartOutlinedIcon sx={{ fontSize: 14 }} />
+                              SO
+                            </Link>
+                          )}
                           {canDelete && (
                             <button
                               type="button"
@@ -1039,7 +1022,6 @@ export const OpportunitiesPage: React.FC = () => {
                         );
                         if (match) {
                           setQcShippingState(match);
-                          setQcShippingOverridden(false);
                         }
                       }
                       if (!qcContactPerson && (client.contactPerson || client.primaryContact?.name)) {
@@ -1129,10 +1111,7 @@ export const OpportunitiesPage: React.FC = () => {
                 <select
                   className={fieldClass}
                   value={qcShippingState}
-                  onChange={(e) => {
-                    setQcShippingState(e.target.value);
-                    setQcShippingOverridden(false);
-                  }}
+                  onChange={(e) => setQcShippingState(e.target.value)}
                   required
                 >
                   {statesList.map((s) => (
@@ -1141,33 +1120,6 @@ export const OpportunitiesPage: React.FC = () => {
                     </option>
                   ))}
                 </select>
-              </label>
-
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-semibold text-zinc-500 uppercase">
-                  Shipping Charge (₹)
-                  {freeShippingApplied && (
-                    <span className="ml-1 normal-case font-medium text-emerald-600">
-                      · Free shipping
-                    </span>
-                  )}
-                  {qcShippingOverridden && (
-                    <span className="ml-1 normal-case font-medium text-zinc-500">
-                      · Manual override
-                    </span>
-                  )}
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  className={fieldClass}
-                  value={qcShippingCharge}
-                  onChange={(e) => {
-                    setQcShippingCharge(Number(e.target.value) || 0);
-                    setQcShippingOverridden(true);
-                  }}
-                />
               </label>
 
               <label className="flex flex-col gap-1">

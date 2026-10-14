@@ -27,7 +27,7 @@ import {
 import { useFinanceOptions } from '../../components/finance/useFinanceOptions';
 import { ClientSelect } from '../../components/clients/ClientSelect';
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
-import { calculateFinanceTotals } from '../../utils/financeTotals';
+import { calculateFinanceTotals, clampDiscountValue } from '../../utils/financeTotals';
 
 const CREATE_STATUSES: SalesOrderStatus[] = ['Approved', 'Draft', 'Processing', 'Cancelled'];
 
@@ -66,11 +66,6 @@ export const SalesOrderCreatePage: React.FC = () => {
   const [freeThreshold, setFreeThreshold] = useState(FREE_SHIPPING_THRESHOLD_DEFAULT);
   const [settingsSnapshot, setSettingsSnapshot] = useState<CrmSettings | null>(null);
 
-  const [catalogId, setCatalogId] = useState('');
-  const [catalog, setCatalog] = useState<
-    Array<{ _id: string; name: string; description?: string; unitPrice: number; taxRate: number; sku?: string }>
-  >([]);
-
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [newSourceName, setNewSourceName] = useState('');
   const [stateModalOpen, setStateModalOpen] = useState(false);
@@ -79,7 +74,6 @@ export const SalesOrderCreatePage: React.FC = () => {
   const [modalSaving, setModalSaving] = useState(false);
 
   useEffect(() => {
-    crmApi.listCatalogProducts().then((r) => setCatalog(r.data || [])).catch(() => setCatalog([]));
     crmApi
       .getSettings()
       .then((r) => {
@@ -171,30 +165,6 @@ export const SalesOrderCreatePage: React.FC = () => {
     }
   };
 
-  const addCatalogItem = (id: string) => {
-    setCatalogId(id);
-    const product = catalog.find((item) => item._id === id);
-    if (!product) return;
-    setLines((current) => {
-      const blankOnly =
-        current.length === 1 &&
-        !current[0].description.trim() &&
-        !current[0].name.trim() &&
-        current[0].rate === 0;
-      const nextLine: EditableLine = {
-        ...newEditableLine(),
-        description: product.name,
-        name: product.name,
-        sku: product.sku || '',
-        qty: 1,
-        rate: product.unitPrice,
-        tax: product.taxRate ?? 18,
-      };
-      return blankOnly ? [nextLine] : [...current, nextLine];
-    });
-    setCatalogId('');
-  };
-
   const saveNewSource = async () => {
     const name = newSourceName.trim();
     if (!name) {
@@ -279,6 +249,7 @@ export const SalesOrderCreatePage: React.FC = () => {
         shippingState: shippingState.trim(),
         billingAddress: billingAddress.trim(),
         shippingAddress: shippingAddress.trim(),
+        currency: settingsSnapshot?.default_currency || undefined,
         lineItems: validLines.map((line) => ({
           description: line.description.trim(),
           sku: line.sku?.trim() || undefined,
@@ -287,7 +258,7 @@ export const SalesOrderCreatePage: React.FC = () => {
           tax: line.tax,
         })),
         discountType,
-        discountValue,
+        discountValue: clampDiscountValue(discountType, discountValue),
         shippingCharge,
         notes: notes.trim(),
       });
@@ -477,24 +448,8 @@ export const SalesOrderCreatePage: React.FC = () => {
         </FormSection>
         </div>
 
-        <div data-tour="sales-orders-create-catalog">
-        <FormSection title="Product catalogue">
-          <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
-            <label className="flex flex-col gap-1 flex-1">
-              <span className="text-[11px] font-semibold text-zinc-500 uppercase">Catalogue picker</span>
-              <select
-                className={financeFieldClass}
-                value={catalogId}
-                onChange={(event) => addCatalogItem(event.target.value)}
-              >
-                <option value="">Select a product to add…</option>
-                {catalog.map((product) => (
-                  <option key={product._id} value={product._id}>
-                    {product.name} — {formatFinanceMoney(product.unitPrice)}
-                  </option>
-                ))}
-              </select>
-            </label>
+        <div data-tour="sales-orders-create-lines">
+          <div className="mb-3 flex justify-end">
             <button
               type="button"
               onClick={() => setLines((current) => [...current, newEditableLine()])}
@@ -503,10 +458,6 @@ export const SalesOrderCreatePage: React.FC = () => {
               <AddIcon sx={{ fontSize: 14 }} /> Add item
             </button>
           </div>
-        </FormSection>
-        </div>
-
-        <div data-tour="sales-orders-create-lines">
           <LineItemsEditor lines={lines} setLines={setLines} orderMode />
         </div>
 
@@ -517,7 +468,13 @@ export const SalesOrderCreatePage: React.FC = () => {
               <select
                 className={financeFieldClass}
                 value={discountType}
-                onChange={(event) => setDiscountType(event.target.value as 'percent' | 'amount')}
+                onChange={(event) => {
+                  const next = event.target.value as 'percent' | 'amount';
+                  setDiscountType(next);
+                  if (next === 'percent') {
+                    setDiscountValue((prev) => Math.min(100, Math.max(0, Number(prev) || 0)));
+                  }
+                }}
               >
                 <option value="percent">Percent %</option>
                 <option value="amount">Amount ₹</option>
@@ -528,9 +485,17 @@ export const SalesOrderCreatePage: React.FC = () => {
                 className={financeFieldClass}
                 type="number"
                 min="0"
+                max={discountType === 'percent' ? 100 : undefined}
                 step="0.01"
                 value={discountValue}
-                onChange={(event) => setDiscountValue(Number(event.target.value))}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setDiscountValue(
+                    discountType === 'percent'
+                      ? Math.min(100, Math.max(0, next || 0))
+                      : Math.max(0, next || 0)
+                  );
+                }}
               />
             </FormField>
             <FormField label="Shipping charge">

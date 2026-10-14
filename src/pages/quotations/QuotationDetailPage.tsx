@@ -41,7 +41,7 @@ export const QuotationDetailPage: React.FC = () => {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const { alert, confirm } = useDialog();
-  const { hasPermission, hasAnyPermission, isClient, isAdmin, activeRole } = useAuth();
+  const { hasPermission, hasAnyPermission, isClient } = useAuth();
   const canWriteQuotes =
     hasAnyPermission('crm.quotes.write', 'crm.finance.write') && !isClient;
   const canWriteFinance = hasPermission('crm.finance.write') && !isClient;
@@ -248,9 +248,9 @@ export const QuotationDetailPage: React.FC = () => {
   }
 
   const locked = ['Converted'].includes(quote.status) || quote.isArchived;
-  // Only client, admin, and sales manager can accept or reject quotations (sales representatives cannot accept).
+  // Only the client portal user can accept or reject quotations (admin / staff must not).
   // Quotations must be in 'Sent' status to be accepted or rejected (Drafts cannot be accepted/rejected).
-  const canDecideQuote = isClient || isAdmin || activeRole === 'sales-manager';
+  const canDecideQuote = isClient;
   const canAccept = canDecideQuote && quote.status === 'Sent' && !locked;
   const canReject = canDecideQuote && quote.status === 'Sent' && !locked;
   const canRevise = ['Accepted', 'Expired', 'Rejected', 'Sent'].includes(quote.status);

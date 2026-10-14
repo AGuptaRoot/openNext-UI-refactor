@@ -8,18 +8,11 @@ import {
   leadsStagePath,
   opportunitiesStagePath,
 } from '../../utils/dashboardNavigation';
+import { formatCrmMoney, getRuntimeDefaultCurrency } from '../../utils/currency';
 
 interface SalesPipelineCardProps {
   data: DashboardData;
   onNavigateUnmigrated: (moduleName: string) => void;
-}
-
-function formatMoney(amount: number | undefined, currency = 'INR'): string {
-  const num = Number(amount || 0);
-  return `${currency} ${num.toLocaleString('en-IN', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  })}`;
 }
 
 export const SalesPipelineCard: React.FC<SalesPipelineCardProps> = ({
@@ -28,7 +21,7 @@ export const SalesPipelineCard: React.FC<SalesPipelineCardProps> = ({
 }) => {
   void _onNavigateUnmigrated;
   const navigate = useNavigate();
-  const currency = data.defaultCurrency || 'INR';
+  const currency = data.defaultCurrency || getRuntimeDefaultCurrency();
   const opps = data.opportunitiesSummary;
   const totalValue = Number(
     opps?.totalPipelineValue ?? opps?.pipelineValue ?? 0
@@ -87,7 +80,7 @@ export const SalesPipelineCard: React.FC<SalesPipelineCardProps> = ({
               Total Pipeline
             </span>
             <div className="text-lg font-bold font-mono text-zinc-950">
-              {formatMoney(totalValue, currency)}
+              {formatCrmMoney(totalValue, currency)}
             </div>
             <span className="text-[11px] text-zinc-400">
               {totalCount} open deals
@@ -105,7 +98,7 @@ export const SalesPipelineCard: React.FC<SalesPipelineCardProps> = ({
               Weighted Forecast
             </span>
             <div className="text-lg font-bold font-mono text-zinc-950">
-              {formatMoney(weightedValue, currency)}
+              {formatCrmMoney(weightedValue, currency)}
             </div>
             <span className="text-[11px] text-emerald-600 font-medium flex items-center gap-0.5">
               <TrendingUpIcon sx={{ fontSize: 12 }} /> Expected Revenue
@@ -127,7 +120,7 @@ export const SalesPipelineCard: React.FC<SalesPipelineCardProps> = ({
               Closed Won
             </span>
             <div className="text-lg font-bold font-mono text-emerald-600">
-              {formatMoney(wonValue, currency)}
+              {formatCrmMoney(wonValue, currency)}
             </div>
             <span className="text-[11px] text-zinc-400">
               {wonCount} deals converted
@@ -167,7 +160,7 @@ export const SalesPipelineCard: React.FC<SalesPipelineCardProps> = ({
                       <span className="text-[11px] text-zinc-400">({stg.count} deals)</span>
                     </div>
                     <span className="text-xs font-semibold font-mono text-zinc-950">
-                      {formatMoney(stg.value, currency)}
+                      {formatCrmMoney(stg.value, currency)}
                     </span>
                   </div>
                   <div className="w-full h-1.5 bg-zinc-200 rounded-full overflow-hidden">

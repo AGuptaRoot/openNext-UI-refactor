@@ -11,6 +11,7 @@ import {
   formatDate,
   ReportEmptyState,
 } from '../ReportCharts';
+import { getRuntimeDefaultCurrency } from '../../../utils/currency';
 
 export interface AgeingReportTabProps {
   data: InvoiceAgeingReportData;
@@ -29,7 +30,7 @@ function bucketListPath(b: { bucket?: string; label?: string; key?: string }): s
 }
 
 export const AgeingReportTab: React.FC<AgeingReportTabProps> = ({ data }) => {
-  const currency = data.defaultCurrency || 'INR';
+  const currency = data.defaultCurrency || getRuntimeDefaultCurrency();
   const buckets = data.buckets || [];
   const invoices = data.invoices || [];
 

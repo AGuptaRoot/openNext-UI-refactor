@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { crmApi } from '../../services/api';
 import { ClientItem } from '../../types/clients';
 import { LeadItem } from '../../types/leads';
 import { OpportunityItem } from '../../types/opportunities';
+import { CrmSettings } from '../../types/admin';
 import { ClientSelect } from '../../components/clients/ClientSelect';
 import {
   SAMPLE_PRODUCT_PRESETS,
@@ -14,6 +17,8 @@ import {
   sampleUrgencyTone,
   type SampleCreateInput,
   type SampleLinkType,
+  type SampleProductItem,
+  type SampleProductPreset,
   type SampleUrgency,
 } from '../../types/samples';
 
@@ -57,9 +62,13 @@ export const SampleCreatePage: React.FC = () => {
   const [clients, setClients] = useState<ClientItem[]>([]);
   const [leads, setLeads] = useState<LeadItem[]>([]);
   const [opportunities, setOpportunities] = useState<OpportunityItem[]>([]);
+  const [settings, setSettings] = useState<CrmSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [items, setItems] = useState<SampleProductItem[]>([
+    { productName: '', quantity: 1, unit: 'pcs' },
+  ]);
   const [form, setForm] = useState<SampleCreateInput>({
     linkType: resolveInitialLinkType(searchParams),
     leadId: searchParams.get('leadId') || '',
@@ -73,16 +82,35 @@ export const SampleCreatePage: React.FC = () => {
     notes: '',
   });
 
+  const availableUnits = useMemo(() => {
+    const list = settings?.sample_units_of_measure;
+    if (Array.isArray(list) && list.length > 0) {
+      return list;
+    }
+    return Array.from(SAMPLE_UNITS);
+  }, [settings]);
+
   useEffect(() => {
     Promise.all([
       crmApi.listClients({ limit: 200 }).catch(() => ({ data: [] as ClientItem[] })),
       crmApi.getLeads({ limit: 200 }).catch(() => ({ data: [] as LeadItem[] })),
       crmApi.listOpportunities({ limit: 200 }).catch(() => ({ data: [] as OpportunityItem[] })),
+      crmApi.getSettings().catch(() => ({ data: null })),
     ])
-      .then(([clientResponse, leadResponse, oppResponse]) => {
+      .then(([clientResponse, leadResponse, oppResponse, settingsResponse]) => {
         setClients(clientResponse.data || []);
         setLeads(leadResponse.data || []);
         setOpportunities(oppResponse.data || []);
+        if (settingsResponse?.data) {
+          setSettings(settingsResponse.data);
+          const firstUnit = settingsResponse.data.sample_units_of_measure?.[0];
+          if (firstUnit) {
+            setItems((curr) =>
+              curr.map((it) => (it.unit === 'pcs' ? { ...it, unit: firstUnit } : it))
+            );
+            setForm((curr) => (curr.unit === 'pcs' ? { ...curr, unit: firstUnit } : curr));
+          }
+        }
       })
       .catch((reason) =>
         setError(reason instanceof Error ? reason.message : 'Failed to load linked records')
@@ -190,23 +218,58 @@ export const SampleCreatePage: React.FC = () => {
     }));
   };
 
-  const handleOpportunityChange = (opportunityId: string) => {
-    const opp = opportunities.find((item) => item._id === opportunityId) || null;
-    setForm((current) => {
-      const next: SampleCreateInput = {
-        ...current,
-        opportunityId,
-        leadId: opp?.leadId || '',
-        clientId: opp?.clientId || '',
-      };
-      // Prefill product from first opportunity line when empty.
-      if (!current.productName.trim() && opp?.products?.length) {
-        const first = opp.products[0];
-        next.productName = first.productName || '';
-        next.quantity = Math.max(1, Number(first.quantity) || 1);
-      }
+  const updateItem = (index: number, patch: Partial<SampleProductItem>) => {
+    setItems((curr) => {
+      const next = [...curr];
+      next[index] = { ...next[index], ...patch };
       return next;
     });
+  };
+
+  const addItem = (preset?: Partial<SampleProductItem>) => {
+    setItems((curr) => [
+      ...curr,
+      {
+        productName: preset?.productName || '',
+        quantity: Math.max(1, Number(preset?.quantity) || 1),
+        unit: preset?.unit || availableUnits[0] || 'pcs',
+      },
+    ]);
+  };
+
+  const removeItem = (index: number) => {
+    setItems((curr) => (curr.length > 1 ? curr.filter((_, i) => i !== index) : curr));
+  };
+
+  const applyPreset = (preset: SampleProductPreset) => {
+    setItems((curr) => {
+      if (curr.length === 1 && !curr[0].productName.trim()) {
+        return [{ productName: preset.productName, quantity: preset.quantity, unit: preset.unit }];
+      }
+      return [
+        ...curr,
+        { productName: preset.productName, quantity: preset.quantity, unit: preset.unit },
+      ];
+    });
+  };
+
+  const handleOpportunityChange = (opportunityId: string) => {
+    const opp = opportunities.find((item) => item._id === opportunityId) || null;
+    setForm((current) => ({
+      ...current,
+      opportunityId,
+      leadId: opp?.leadId || '',
+      clientId: opp?.clientId || '',
+    }));
+    if (opp?.products?.length) {
+      setItems(
+        opp.products.map((p) => ({
+          productName: p.productName || '',
+          quantity: Math.max(1, Number(p.quantity) || 1),
+          unit: availableUnits[0] || 'pcs',
+        }))
+      );
+    }
   };
 
   const copyAddress = () => {
@@ -217,8 +280,9 @@ export const SampleCreatePage: React.FC = () => {
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError('');
-    if (!linkedId || !form.productName.trim() || form.quantity < 1) {
-      return setError('Linked record, product name, and a valid quantity are required.');
+    const validItems = items.filter((item) => item.productName.trim());
+    if (!linkedId || validItems.length === 0) {
+      return setError('Linked record and at least one product / item name are required.');
     }
     setSaving(true);
     try {
@@ -231,6 +295,10 @@ export const SampleCreatePage: React.FC = () => {
               selectedOpportunity?.title
             : selectedClient?.contactPerson || selectedClient?.name;
 
+      const totalQty = validItems.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0);
+      const combinedProductName = validItems.map((it) => it.productName.trim()).join(', ');
+      const primaryUnit = validItems[0]?.unit || 'pcs';
+
       const created = await crmApi.createSample({
         ...form,
         leadId: form.linkType === 'lead' ? form.leadId : form.linkType === 'opportunity' ? form.leadId || undefined : undefined,
@@ -241,7 +309,10 @@ export const SampleCreatePage: React.FC = () => {
               ? form.clientId || undefined
               : undefined,
         opportunityId: form.linkType === 'opportunity' ? form.opportunityId : undefined,
-        productName: form.productName.trim(),
+        productName: combinedProductName,
+        quantity: totalQty,
+        unit: primaryUnit,
+        items: validItems,
         recipientName: recipient,
       });
       const returnTo = searchParams.get('returnTo');
@@ -271,13 +342,13 @@ export const SampleCreatePage: React.FC = () => {
       empty: 'Target Lead, Opportunity, or Client selected',
     },
     {
-      ok: Boolean(form.productName.trim()),
-      label: `Product: ${form.productName.trim()}`,
+      ok: Boolean(items.some((i) => i.productName.trim())),
+      label: `Items: ${items.map((i) => i.productName.trim()).filter(Boolean).join(', ') || 'None entered'}`,
       empty: 'Product / Item name filled',
     },
     {
-      ok: form.quantity > 0,
-      label: `Quantity: ${form.quantity} ${form.unit}`,
+      ok: items.every((i) => i.quantity > 0),
+      label: `Total Quantity: ${items.reduce((s, i) => s + i.quantity, 0)} (${items.map((i) => `${i.quantity} ${i.unit}`).join(', ')})`,
       empty: 'Quantity must be > 0',
     },
   ];
@@ -415,85 +486,140 @@ export const SampleCreatePage: React.FC = () => {
 
             <section
               data-tour="samples-create-product"
-              className="rounded-xl border border-zinc-300 bg-white p-5"
+              className="rounded-xl border border-zinc-300 bg-white p-5 space-y-4"
             >
-              <h2 className="mt-0 text-base font-bold text-zinc-950">
-                2. Product & Sample Specifications
-              </h2>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {SAMPLE_PRODUCT_PRESETS.map((preset) => (
-                  <button
-                    key={preset.label}
-                    type="button"
-                    onClick={() =>
-                      setForm((current) => ({
-                        ...current,
-                        productName: preset.productName,
-                        quantity: preset.quantity,
-                        unit: preset.unit,
-                      }))
-                    }
-                    className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-100 pb-3">
+                <div>
+                  <h2 className="m-0 text-base font-bold text-zinc-950">
+                    2. Product & Sample Specifications
+                  </h2>
+                  <p className="m-0 mt-0.5 text-xs text-zinc-500">
+                    Specify items, requested quantities, and choose Unit of Measure configured from Settings.
+                  </p>
+                </div>
+                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-600">
+                  {items.length} {items.length === 1 ? 'Item' : 'Items'}
+                </span>
+              </div>
+
+              {/* Quick Presets */}
+              <div>
+                <span className="mb-1.5 block text-xs font-semibold text-zinc-500">Quick Presets</span>
+                <div className="flex flex-wrap gap-2">
+                  {SAMPLE_PRODUCT_PRESETS.map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => applyPreset(preset)}
+                      className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 cursor-pointer"
+                    >
+                      + {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Items List */}
+              <div className="space-y-3">
+                {items.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-3.5 space-y-3 transition hover:border-zinc-300"
                   >
-                    + {preset.label}
-                  </button>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-bold text-zinc-800">
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-zinc-200 text-[11px] font-bold text-zinc-700">
+                          {idx + 1}
+                        </span>
+                        Item #{idx + 1}
+                      </span>
+                      {items.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeItem(idx)}
+                          className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-100 transition cursor-pointer"
+                          title="Remove item"
+                        >
+                          <DeleteOutlineIcon sx={{ fontSize: 15 }} /> Remove
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
+                      <div className="sm:col-span-6">
+                        <span className={labelClass}>Product / Item Name *</span>
+                        <input
+                          required
+                          maxLength={200}
+                          className={fieldClass}
+                          placeholder="e.g. Cotton fabric sample, Grade A polymer…"
+                          value={item.productName}
+                          onChange={(e) => updateItem(idx, { productName: e.target.value })}
+                        />
+                      </div>
+
+                      <div className="sm:col-span-3">
+                        <span className={labelClass}>Quantity *</span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => updateItem(idx, { quantity: Math.max(1, item.quantity - 1) })}
+                            className="inline-flex h-10 w-9 items-center justify-center rounded-lg border border-zinc-300 bg-white text-base font-semibold text-zinc-700 hover:bg-zinc-50 cursor-pointer"
+                          >
+                            −
+                          </button>
+                          <input
+                            required
+                            type="number"
+                            min={1}
+                            max={99999}
+                            className={`${fieldClass} text-center px-1 font-semibold`}
+                            value={item.quantity}
+                            onChange={(e) =>
+                              updateItem(idx, { quantity: Math.max(1, Number(e.target.value) || 1) })
+                            }
+                          />
+                          <button
+                            type="button"
+                            onClick={() => updateItem(idx, { quantity: Math.min(99999, item.quantity + 1) })}
+                            className="inline-flex h-10 w-9 items-center justify-center rounded-lg border border-zinc-300 bg-white text-base font-semibold text-zinc-700 hover:bg-zinc-50 cursor-pointer"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="sm:col-span-3">
+                        <span className={labelClass}>Unit of Measure *</span>
+                        <select
+                          className={fieldClass}
+                          value={item.unit}
+                          onChange={(e) => updateItem(idx, { unit: e.target.value })}
+                        >
+                          {availableUnits.map((u) => (
+                            <option key={u} value={u}>
+                              {u}
+                            </option>
+                          ))}
+                          {!availableUnits.includes(item.unit) && item.unit && (
+                            <option value={item.unit}>{item.unit}</option>
+                          )}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
                 ))}
               </div>
-              <label className="mt-4 block">
-                <span className={labelClass}>Product / Item Name *</span>
-                <input
-                  required
-                  maxLength={200}
-                  className={fieldClass}
-                  value={form.productName}
-                  onChange={(event) => update('productName', event.target.value)}
-                />
-              </label>
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[auto_1fr_1fr]">
-                <div>
-                  <span className={labelClass}>Quantity *</span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => update('quantity', Math.max(1, form.quantity - 1))}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-300 bg-white text-lg font-semibold"
-                    >
-                      −
-                    </button>
-                    <input
-                      required
-                      type="number"
-                      min={1}
-                      max={99999}
-                      className={fieldClass}
-                      value={form.quantity}
-                      onChange={(event) =>
-                        update('quantity', Math.max(1, Number(event.target.value) || 1))
-                      }
-                    />
-                    <button
-                      type="button"
-                      onClick={() => update('quantity', Math.min(99999, form.quantity + 1))}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-300 bg-white text-lg font-semibold"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-                <label className="sm:col-span-2">
-                  <span className={labelClass}>Unit of Measure</span>
-                  <input
-                    list="sample-units"
-                    className={fieldClass}
-                    value={form.unit}
-                    onChange={(event) => update('unit', event.target.value)}
-                  />
-                  <datalist id="sample-units">
-                    {SAMPLE_UNITS.map((unit) => (
-                      <option key={unit} value={unit} />
-                    ))}
-                  </datalist>
-                </label>
+
+              {/* Add New Item Button */}
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => addItem()}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-dashed border-zinc-400 bg-white px-3.5 text-xs font-semibold text-zinc-800 shadow-sm hover:border-zinc-950 hover:bg-zinc-50 transition cursor-pointer"
+                >
+                  <AddIcon sx={{ fontSize: 16 }} /> + Add New Item
+                </button>
               </div>
             </section>
 

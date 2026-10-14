@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { crmApi } from '../../services/api';
@@ -19,6 +19,7 @@ import {
 } from '../../components/finance/FinanceFormElements';
 import { ClientSelect } from '../../components/clients/ClientSelect';
 import { DocumentUploadControl } from '../../components/common/DocumentUploadControl';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 
 function localToday(): string {
   const d = new Date();
@@ -29,6 +30,8 @@ export const ExpenseCreatePage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialProjectId = searchParams.get('projectId') || '';
+  const settingsCurrency = useDefaultCurrency();
+  const currencyLockedRef = useRef(false);
 
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [clients, setClients] = useState<ClientOption[]>([]);
@@ -43,7 +46,7 @@ export const ExpenseCreatePage: React.FC = () => {
     itemName: '',
     category: 'Other',
     price: 0,
-    currency: 'INR',
+    currency: settingsCurrency,
     exchangeRate: 1,
     purchaseDate: localToday(),
     purchasedFrom: '',
@@ -58,6 +61,11 @@ export const ExpenseCreatePage: React.FC = () => {
     receiptUrl: '',
     description: '',
   });
+
+  useEffect(() => {
+    if (currencyLockedRef.current) return;
+    setForm((current) => ({ ...current, currency: settingsCurrency }));
+  }, [settingsCurrency]);
 
   useEffect(() => {
     Promise.all([
@@ -124,7 +132,10 @@ export const ExpenseCreatePage: React.FC = () => {
     if (!(Number(form.price) >= 0.01)) return setError('Price must be at least 0.01.');
     if (!(Number(form.exchangeRate) >= 0.0001)) return setError('Exchange rate must be at least 0.0001.');
     if (!form.purchaseDate) return setError('Purchase date is required.');
-    if (!EXPENSE_CURRENCIES.includes(form.currency as (typeof EXPENSE_CURRENCIES)[number])) {
+    if (
+      !EXPENSE_CURRENCIES.includes(form.currency as (typeof EXPENSE_CURRENCIES)[number]) &&
+      form.currency !== settingsCurrency
+    ) {
       return setError('Select a valid currency.');
     }
 
@@ -141,7 +152,7 @@ export const ExpenseCreatePage: React.FC = () => {
         category: form.category,
         price: Number(form.price),
         amount: Number(form.price),
-        currency: form.currency || 'INR',
+        currency: form.currency || settingsCurrency,
         exchangeRate: Number(form.exchangeRate),
         purchaseDate: form.purchaseDate,
         expenseDate: form.purchaseDate,
@@ -244,10 +255,15 @@ export const ExpenseCreatePage: React.FC = () => {
                 <select
                   className={financeFieldClass}
                   value={form.currency}
-                  onChange={(e) => update('currency', e.target.value)}
+                  onChange={(e) => {
+                    currencyLockedRef.current = true;
+                    update('currency', e.target.value);
+                  }}
                   required
                 >
-                  {EXPENSE_CURRENCIES.map((code) => (
+                  {Array.from(
+                    new Set([...EXPENSE_CURRENCIES, form.currency, settingsCurrency])
+                  ).map((code) => (
                     <option key={code} value={code}>
                       {code}
                     </option>

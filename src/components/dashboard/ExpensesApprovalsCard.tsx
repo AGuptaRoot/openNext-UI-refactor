@@ -4,18 +4,11 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { DashboardData } from '../../types/dashboard';
 import { dashboardListPath } from '../../utils/dashboardNavigation';
+import { formatCrmMoney, getRuntimeDefaultCurrency } from '../../utils/currency';
 
 interface ExpensesApprovalsCardProps {
   data: DashboardData;
   onNavigateUnmigrated: (moduleName: string) => void;
-}
-
-function formatMoney(amount: number | undefined, currency = 'INR'): string {
-  const num = Number(amount || 0);
-  return `${currency} ${num.toLocaleString('en-IN', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
 }
 
 export const ExpensesApprovalsCard: React.FC<ExpensesApprovalsCardProps> = ({
@@ -24,7 +17,7 @@ export const ExpensesApprovalsCard: React.FC<ExpensesApprovalsCardProps> = ({
 }) => {
   void _onNavigateUnmigrated;
   const navigate = useNavigate();
-  const currency = data.defaultCurrency || 'INR';
+  const currency = data.defaultCurrency || getRuntimeDefaultCurrency();
   const pendingApprovals = data.pendingExpenseApprovals || 0;
   const approvedMonth = data.approvedExpensesThisMonth || 0;
 
@@ -98,7 +91,7 @@ export const ExpensesApprovalsCard: React.FC<ExpensesApprovalsCardProps> = ({
               Approved This Month
             </span>
             <div className="text-xl font-bold font-mono text-zinc-950">
-              {formatMoney(approvedMonth, currency)}
+              {formatCrmMoney(approvedMonth, currency)}
             </div>
           </div>
           <span className="text-[10px] font-medium px-2 py-0.5 rounded border border-zinc-200 bg-zinc-100 text-zinc-500">

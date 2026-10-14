@@ -1,4 +1,5 @@
 import type { DiscountType, TaxCalculation } from '../types/quotations';
+import { getCurrencySymbol } from './currency';
 
 export interface FinanceLineInput {
   qty: number;
@@ -30,6 +31,18 @@ export interface FinanceTotalsResult {
 
 const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
+/** Percent discounts cannot exceed 100; amount discounts stay non-negative. */
+export function clampDiscountValue(
+  discountType: DiscountType | string | undefined,
+  value: number | string | null | undefined
+): number {
+  const raw = Math.max(0, Number(value) || 0);
+  if ((discountType || 'percent') === 'percent') {
+    return Math.min(100, raw);
+  }
+  return raw;
+}
+
 /**
  * Tax/discount engine aligned with INVOICE_MODULE_REFERENCE.md §2.3
  */
@@ -40,11 +53,11 @@ export function calculateFinanceTotals(input: FinanceTotalsInput): FinanceTotals
   );
 
   const discountType = input.discountType || 'percent';
-  const discountValue = Math.max(0, Number(input.discountValue) || 0);
+  const discountValue = clampDiscountValue(discountType, input.discountValue);
   const discount =
     discountType === 'amount'
       ? round2(Math.min(subtotal, discountValue))
-      : round2(Math.min(subtotal, (subtotal * discountValue) / 100));
+      : round2((subtotal * discountValue) / 100);
 
   const taxCalculation = input.taxCalculation || 'after_discount';
   const taxBase = taxCalculation === 'before_discount' ? subtotal : round2(Math.max(0, subtotal - discount));
@@ -83,17 +96,6 @@ export function calculateFinanceTotals(input: FinanceTotalsInput): FinanceTotals
   };
 }
 
-export function currencySymbol(currency: string): string {
-  const map: Record<string, string> = {
-    INR: '₹',
-    USD: '$',
-    EUR: '€',
-    GBP: '£',
-    AED: 'د.إ',
-    CAD: '$',
-    AUD: '$',
-    SGD: '$',
-    JPY: '¥',
-  };
-  return map[currency] || currency;
+export function currencySymbol(currency?: string): string {
+  return getCurrencySymbol(currency);
 }

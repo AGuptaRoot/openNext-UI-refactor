@@ -23,6 +23,7 @@ import {
   ExportResultModal,
   ExportResult,
 } from '../../components/leads/ExportResultModal';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 
 const REASON_LABELS: Record<string, string> = {
   email: 'Same email',
@@ -66,6 +67,7 @@ const emptySummary: DataQualitySummary = {
 
 export const DataQualityPage: React.FC = () => {
   const navigate = useNavigate();
+  const settingsCurrency = useDefaultCurrency();
 
   // Primary data state
   const [issues, setIssues] = useState<DataQualityIssue[]>([]);
@@ -339,7 +341,7 @@ export const DataQualityPage: React.FC = () => {
         requestType: rt.requestType,
         requestTypeId: rt.requestTypeId,
         value: 0,
-        currency: 'INR',
+        currency: settingsCurrency,
         tags: ['Inbound'],
         notes: `Created from Data Quality duplicate review (source record ${reviewItem.id}).`,
         allowExactDuplicate: true,

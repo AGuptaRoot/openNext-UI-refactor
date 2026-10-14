@@ -54,6 +54,7 @@ import {
 } from '../../services/mockLeadData';
 import type { RequestType } from '../../types/request-types';
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
+import { getRuntimeDefaultCurrency } from '../../utils/currency';
 
 const LEAD_DOC_ACCEPT =
   '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.md,.markdown,.txt,.csv,.rtf,image/jpeg,image/png,image/webp,image/gif,application/pdf';

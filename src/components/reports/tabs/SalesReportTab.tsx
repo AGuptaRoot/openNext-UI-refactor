@@ -13,6 +13,7 @@ import {
   formatMoney,
   ReportEmptyState,
 } from '../ReportCharts';
+import { getRuntimeDefaultCurrency } from '../../../utils/currency';
 
 export interface SalesReportTabProps {
   data: SalesReportData;
@@ -26,7 +27,7 @@ function withClient(path: string, clientId?: string): string {
 }
 
 export const SalesReportTab: React.FC<SalesReportTabProps> = ({ data, perms }) => {
-  const currency = data.defaultCurrency || 'INR';
+  const currency = data.defaultCurrency || getRuntimeDefaultCurrency();
   const clientId = data.clientId;
   const pipeline = data.pipeline || [];
   const leadsByPeriod = data.leadsByPeriod || [];

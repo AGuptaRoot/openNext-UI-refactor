@@ -2,25 +2,18 @@ import React from 'react';
 import AssessmentOutlinedIcon from '@mui/icons-material/AssessmentOutlined';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { DashboardData } from '../../types/dashboard';
+import { formatCrmMoney, getRuntimeDefaultCurrency } from '../../utils/currency';
 
 interface PerformanceAnalyticsCardProps {
   data: DashboardData;
   onNavigateUnmigrated: (moduleName: string) => void;
 }
 
-function formatMoney(amount: number | undefined, currency = 'INR'): string {
-  const num = Number(amount || 0);
-  return `${currency} ${num.toLocaleString('en-IN', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  })}`;
-}
-
 export const PerformanceAnalyticsCard: React.FC<PerformanceAnalyticsCardProps> = ({
   data,
   onNavigateUnmigrated,
 }) => {
-  const currency = data.defaultCurrency || 'INR';
+  const currency = data.defaultCurrency || getRuntimeDefaultCurrency();
   const totalLeads = data.totalLeads || 0;
   const wonLeads = data.wonLeads || 0;
   const conversionRate = totalLeads > 0 ? Math.round((wonLeads / totalLeads) * 100) : 0;
@@ -65,7 +58,7 @@ export const PerformanceAnalyticsCard: React.FC<PerformanceAnalyticsCardProps> =
               Total Revenue
             </span>
             <div className="text-lg font-bold text-zinc-950 font-mono my-0.5">
-              {formatMoney(totalPayments, currency)}
+              {formatCrmMoney(totalPayments, currency)}
             </div>
             <span className="text-[11px] text-emerald-600 font-semibold">
               Settled this period

@@ -219,7 +219,9 @@ export const InvoiceDetailPage: React.FC = () => {
         const options = {
           key: keyId,
           amount: Number(order.amount || payload.amount),
-          currency: String(order.currency || payload.currency || invoice.currency || 'INR'),
+          currency: String(
+            order.currency || payload.currency || invoice.currency || getRuntimeDefaultCurrency()
+          ),
           name: payload.businessName || 'Invoice Payment',
           description: `Invoice ${invoice.invoiceNo}`,
           order_id: order.id,

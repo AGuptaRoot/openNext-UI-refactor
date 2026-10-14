@@ -16,6 +16,7 @@ import { CompanyDiscrepancyModal } from '../common/CompanyDiscrepancyModal';
 import { CONTACT_EMAIL_RE, CONTACT_PHONE_RE } from '../contacts/ContactFormFields';
 import { LiveCameraCapture } from '../common/LiveCameraCapture';
 import { fileToVisionDataUrl } from '../../utils/imageDataUrl';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 
 const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif';
 const MAX_BYTES = 12 * 1024 * 1024;
@@ -143,6 +144,7 @@ export const VisitingCardLeadCaptureModal: React.FC<VisitingCardLeadCaptureModal
   onLeadCreated,
   onOpenLead,
 }) => {
+  const settingsCurrency = useDefaultCurrency();
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const previewUrlRef = useRef<string | null>(null);
 
@@ -336,7 +338,7 @@ export const VisitingCardLeadCaptureModal: React.FC<VisitingCardLeadCaptureModal
       requestType: fields.requestTypeName || 'Project (software)',
       requestTypeId: fields.requestTypeId.startsWith('legacy_') ? null : fields.requestTypeId,
       value: 0,
-      currency: 'INR',
+      currency: settingsCurrency,
       tags: ['Inbound'],
       address: fields.address || undefined,
       city: fields.city || undefined,

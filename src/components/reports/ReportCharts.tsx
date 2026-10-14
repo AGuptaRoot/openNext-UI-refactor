@@ -17,6 +17,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import {
+  formatCrmMoney,
+  getRuntimeDefaultCurrency,
+  normalizeCurrencyCode,
+} from '../../utils/currency';
 
 export const CHART_GREYS = ['#09090b', '#27272a', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8'];
 
@@ -32,9 +37,15 @@ const emptyState = (message: string) => (
   <div className="py-8 text-center text-xs text-zinc-400">{message}</div>
 );
 
-export function formatMoney(amount: number | undefined, currency = 'INR'): string {
+export function formatMoney(amount: number | undefined, currency?: string): string {
+  const code = normalizeCurrencyCode(currency, getRuntimeDefaultCurrency());
+  // Keep compact "USD 1,234.00" style used by reports, but follow CRM default.
   const num = Number(amount || 0);
-  return `${currency} ${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  try {
+    return `${code} ${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  } catch {
+    return formatCrmMoney(amount, code);
+  }
 }
 
 export function formatDate(value: string | undefined): string {

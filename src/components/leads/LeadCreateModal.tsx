@@ -25,6 +25,8 @@ import { useAuth } from '../../context/AuthContext';
 import { canAssignToOtherUsers } from '../../utils/permissions';
 
 import { reverseGeocode } from '../../utils/reverseGeocode';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import { getCurrencySymbol } from '../../utils/currency';
 
 
 
@@ -75,6 +77,7 @@ export const LeadCreateModal: React.FC<LeadCreateModalProps> = ({
   const canAssignOthers = canAssignToOtherUsers(user, { isClient, activeRole });
 
   const currentUserId = String(user?.userId || '').trim();
+  const settingsCurrency = useDefaultCurrency();
 
   const [name, setName] = useState('');
 
@@ -313,7 +316,7 @@ export const LeadCreateModal: React.FC<LeadCreateModalProps> = ({
 
     value: value ? Number(value) : 0,
 
-    currency: 'INR',
+    currency: settingsCurrency,
 
     assignedTo: canAssignOthers
       ? assignedTo || assignableUsers[0]?.id || currentUserId || ''
@@ -916,7 +919,7 @@ export const LeadCreateModal: React.FC<LeadCreateModalProps> = ({
 
               <label className="block text-[11px] font-semibold text-zinc-600 mb-1">
 
-                Deal Value (INR)
+                Deal Value ({getCurrencySymbol(settingsCurrency)})
 
               </label>
 

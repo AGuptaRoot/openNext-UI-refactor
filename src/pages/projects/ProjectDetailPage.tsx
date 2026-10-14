@@ -24,6 +24,8 @@ import { crmApi } from '../../services/api';
 import { DocumentUploadControl } from '../../components/common/DocumentUploadControl';
 import { downloadAttachment } from '../../components/common/AttachmentPreviewModal';
 import { displayUserLabel } from '../../utils/displayLabels';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import { formatCrmMoney } from '../../utils/currency';
 import { canFullyManageTasks } from '../../utils/permissions';
 import {
   CLIENT_FEEDBACK_STATUSES,
@@ -113,17 +115,9 @@ const emptyTaskModal = (): TaskModalState => ({
   description: '',
 });
 
-function formatMoney(value?: number, currency = 'INR') {
-  if (value == null) return '—';
-  try {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 0,
-    }).format(value);
-  } catch {
-    return `₹${Number(value).toLocaleString('en-IN')}`;
-  }
+function formatMoney(value?: number, currency?: string) {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  return formatCrmMoney(value, currency, { maximumFractionDigits: 0 });
 }
 
 function toDateInput(value?: string | null) {
@@ -197,6 +191,7 @@ export const ProjectDetailPage: React.FC = () => {
   const canTimeWrite = (hasPermission('crm.time.write') || hasPermission('crm.projects.write')) && !isClient;
   const canExpenseWrite = (hasPermission('crm.expenses.write') || hasPermission('crm.projects.write')) && !isClient;
   const canExpenseApprove = hasPermission('crm.expenses.approve');
+  const settingsCurrency = useDefaultCurrency();
 
   const [tab, setTab] = useState<TabId>('overview');
 
@@ -329,7 +324,7 @@ export const ProjectDetailPage: React.FC = () => {
   const [docLinkSaving, setDocLinkSaving] = useState(false);
 
   const isReadOnly = Boolean(project?.isArchived || project?.isDropped);
-  const currency = overview?.currency || project?.currency || 'INR';
+  const currency = overview?.currency || project?.currency || settingsCurrency;
 
   const showToast = useCallback((text: string, type: 'success' | 'error' = 'success') => {
     setToast({ text, type });

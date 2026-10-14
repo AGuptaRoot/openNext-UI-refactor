@@ -19,6 +19,7 @@ import CancelOutlinedIcon from '@mui/icons-material/CancelOutlined';
 
 import { useAuth } from '../../context/AuthContext';
 import { displayUserLabel } from '../../utils/displayLabels';
+import { formatCrmMoney, getRuntimeDefaultCurrency } from '../../utils/currency';
 import { crmApi } from '../../services/api';
 import { useDialog } from '../../context/DialogContext';
 import { useTimer } from '../../context/TimerContext';

@@ -10,6 +10,7 @@ import { isLeadConvertibleStage } from '../../utils/leadPipeline';
 import { displayUserLabel } from '../../utils/displayLabels';
 import { getLeadStatusChipClass } from '../../utils/leadStatusStyle';
 import { KanbanBoard, KanbanCard, KanbanColumn, KanbanColumnDropHint } from '../dndkit';
+import { formatCrmMoney, getRuntimeDefaultCurrency } from '../../utils/currency';
 
 export interface LeadKanbanViewProps {
   leads: LeadItem[];
@@ -22,11 +23,6 @@ export interface LeadKanbanViewProps {
   onConvertLead: (lead: LeadItem) => void;
   canWrite?: boolean;
   canConvert?: boolean;
-}
-
-function formatMoney(amount: number | undefined, currency = 'INR'): string {
-  const num = Number(amount || 0);
-  return `${currency} ${num.toLocaleString('en-IN')}`;
 }
 
 const getStatusBadgeStyle = getLeadStatusChipClass;
@@ -147,7 +143,7 @@ function LeadCardBody({
           </div>
         </div>
         <span className="text-[11px] font-mono font-bold text-zinc-900 bg-zinc-50 border border-zinc-200 px-1.5 py-0.5 rounded flex-shrink-0">
-          {formatMoney(lead.value, lead.currency || 'INR')}
+          {formatCrmMoney(lead.value, lead.currency || getRuntimeDefaultCurrency())}
         </span>
       </div>
 
@@ -441,7 +437,7 @@ export const LeadKanbanView: React.FC<LeadKanbanViewProps> = ({
                   </span>
                 </div>
                 <span className="text-[11px] font-mono font-semibold text-zinc-600">
-                  {formatMoney(totalValue)}
+                  {formatCrmMoney(totalValue)}
                 </span>
               </div>
             </div>
