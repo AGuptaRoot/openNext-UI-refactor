@@ -8,6 +8,7 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import CloseIcon from '@mui/icons-material/Close';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import { AlertTriangle, Settings } from 'lucide-react';
 
 import { ApiError, crmApi } from '../../services/api';
 import { TourButton } from '../../ui/tour';
@@ -533,7 +534,7 @@ export const DataQualityPage: React.FC = () => {
           data-tour="data-quality-warning-banner"
           className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-xs text-amber-900 flex items-center gap-2"
         >
-          <span>⚠️</span>
+          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
           <span>{warningMessage}</span>
         </div>
       )}
@@ -838,7 +839,10 @@ export const DataQualityPage: React.FC = () => {
                                   key={reason}
                                   className="text-[11px] font-semibold px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200"
                                 >
-                                  ⚠️ {REASON_LABELS[reason] || reason}
+                                  <span className="inline-flex items-center gap-1">
+                                    <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+                                    {REASON_LABELS[reason] || reason}
+                                  </span>
                                 </span>
                               ))
                             ) : (
@@ -850,7 +854,10 @@ export const DataQualityPage: React.FC = () => {
                                 key={idx}
                                 className="text-[11px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200"
                               >
-                                ⚠️ {label}
+                                <span className="inline-flex items-center gap-1">
+                                  <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+                                  {label}
+                                </span>
                               </span>
                             ))
                           ) : (
@@ -1057,7 +1064,7 @@ export const DataQualityPage: React.FC = () => {
             {/* Modal Header */}
             <div className="p-4 sm:p-5 border-b border-zinc-200 flex items-center justify-between bg-zinc-50">
               <div className="flex items-center gap-2.5">
-                <span className="text-lg">⚙️</span>
+                <Settings className="h-[18px] w-[18px] shrink-0 text-zinc-600" aria-hidden />
                 <h3 className="text-base font-bold text-zinc-950 m-0">
                   Configurable Data-Quality Rules &amp; Score Weights
                 </h3>

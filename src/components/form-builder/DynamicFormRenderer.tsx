@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import AddIcon from '@mui/icons-material/Add';
+import { AlertTriangle } from 'lucide-react';
 import {
   isSelectableFieldType,
   type DynamicFieldValues,
@@ -8,6 +9,7 @@ import {
   type RequestTypeOption,
 } from '../../types/request-types';
 import { AddLeadFieldOptionModal } from './AddLeadFieldOptionModal';
+import { getDefaultCurrencySymbol } from '../../utils/currency';
 
 const inputClass =
   'h-9 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-400 disabled:bg-zinc-50';
@@ -99,6 +101,7 @@ export const DynamicFormRenderer: React.FC<DynamicFormRendererProps> = ({
   minBudget,
   maxBudget,
 }) => {
+  const currencySym = getDefaultCurrencySymbol();
   const [addForField, setAddForField] = useState<RequestTypeField | null>(null);
 
   const setValue = (key: string, value: string | number | string[] | null) => {
@@ -152,11 +155,11 @@ export const DynamicFormRenderer: React.FC<DynamicFormRendererProps> = ({
                 {field.type === 'number' && (effMin != null || effMax != null) ? (
                   <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 border border-blue-200/80 font-mono">
                     {effMin != null && effMax != null
-                      ? `Allowed: ₹${effMin.toLocaleString()} – ₹${effMax.toLocaleString()}`
+                      ? `Allowed: ${currencySym}${effMin.toLocaleString()} – ${currencySym}${effMax.toLocaleString()}`
                       : effMin != null
-                        ? `Min: ₹${effMin.toLocaleString()}`
+                        ? `Min: ${currencySym}${effMin.toLocaleString()}`
                         : effMax != null
-                          ? `Max: ₹${effMax.toLocaleString()}`
+                          ? `Max: ${currencySym}${effMax.toLocaleString()}`
                           : ''}
                   </span>
                 ) : null}
@@ -198,11 +201,11 @@ export const DynamicFormRenderer: React.FC<DynamicFormRendererProps> = ({
                     placeholder={
                       field.placeholder ||
                       (effMin != null && effMax != null
-                        ? `Enter amount between ₹${effMin.toLocaleString()} and ₹${effMax.toLocaleString()}`
+                        ? `Enter amount between ${currencySym}${effMin.toLocaleString()} and ${currencySym}${effMax.toLocaleString()}`
                         : effMin != null
-                          ? `Enter amount (min ₹${effMin.toLocaleString()})`
+                          ? `Enter amount (min ${currencySym}${effMin.toLocaleString()})`
                           : effMax != null
-                            ? `Enter amount (max ₹${effMax.toLocaleString()})`
+                            ? `Enter amount (max ${currencySym}${effMax.toLocaleString()})`
                             : 'Enter number')
                     }
                     value={value == null || value === '' ? '' : Number(value)}
@@ -212,17 +215,17 @@ export const DynamicFormRenderer: React.FC<DynamicFormRendererProps> = ({
                   />
                   {hasRangeError && (
                     <p className="m-0 text-[11px] font-semibold text-red-600 flex items-center gap-1">
-                      <span>⚠</span>
+                      <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
                       {isBelowMin
-                        ? `Amount must be at least ₹${effMin!.toLocaleString()}. Current: ₹${numVal!.toLocaleString()}`
-                        : `Amount cannot exceed ₹${effMax!.toLocaleString()}. Current: ₹${numVal!.toLocaleString()}`}
+                        ? `Amount must be at least ${currencySym}${effMin!.toLocaleString()}. Current: ${currencySym}${numVal!.toLocaleString()}`
+                        : `Amount cannot exceed ${currencySym}${effMax!.toLocaleString()}. Current: ${currencySym}${numVal!.toLocaleString()}`}
                     </p>
                   )}
                   {(effMin != null || effMax != null) && !hasRangeError && (
                     <p className="m-0 text-[10px] text-zinc-500">
                       Amount must be between{' '}
-                      {effMin != null ? `₹${effMin.toLocaleString()}` : '₹0'} and{' '}
-                      {effMax != null ? `₹${effMax.toLocaleString()}` : 'unlimited'}.
+                      {effMin != null ? `${currencySym}${effMin.toLocaleString()}` : `${currencySym}0`} and{' '}
+                      {effMax != null ? `${currencySym}${effMax.toLocaleString()}` : 'unlimited'}.
                     </p>
                   )}
                 </div>

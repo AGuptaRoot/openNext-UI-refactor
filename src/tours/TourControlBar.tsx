@@ -9,6 +9,10 @@ import {
   markClientsTourCompleted,
 } from './clientsTourState.js';
 import {
+  getContactsTourProgress,
+  markContactsTourCompleted,
+} from './contactsTourState.js';
+import {
   getProjectsTourProgress,
   markProjectsTourCompleted,
 } from './projectsTourState.js';
@@ -90,6 +94,10 @@ function isClientsTourRoute(pathname: string) {
     pathname === '/projects' ||
     pathname.startsWith('/projects/')
   );
+}
+
+function isContactsTourRoute(pathname: string) {
+  return pathname === '/contacts' || pathname.startsWith('/contacts/');
 }
 
 function isProjectsTourRoute(pathname: string) {
@@ -199,6 +207,7 @@ function isSettingsTourRoute(pathname: string) {
 type ActiveTour =
   | { kind: 'leads'; stepIndex: number; offRoute: boolean }
   | { kind: 'clients'; stepIndex: number; offRoute: boolean }
+  | { kind: 'contacts'; stepIndex: number; offRoute: boolean }
   | { kind: 'projects'; stepIndex: number; offRoute: boolean }
   | { kind: 'tasks'; stepIndex: number; offRoute: boolean }
   | { kind: 'time-logs'; stepIndex: number; offRoute: boolean }
@@ -231,6 +240,14 @@ function readActiveTour(pathname: string): ActiveTour | null {
       kind: 'clients',
       stepIndex: Number(clients.stepIndex) || 0,
       offRoute: !isClientsTourRoute(pathname),
+    };
+  }
+  const contacts = getContactsTourProgress();
+  if (contacts?.active) {
+    return {
+      kind: 'contacts',
+      stepIndex: Number(contacts.stepIndex) || 0,
+      offRoute: !isContactsTourRoute(pathname),
     };
   }
   const projects = getProjectsTourProgress();
@@ -399,6 +416,9 @@ export const TourControlBar: React.FC = () => {
     } else if (tour?.kind === 'clients') {
       markClientsTourCompleted();
       window.dispatchEvent(new CustomEvent('crm-clients-tour-skip'));
+    } else if (tour?.kind === 'contacts') {
+      markContactsTourCompleted();
+      window.dispatchEvent(new CustomEvent('crm-contacts-tour-skip'));
     } else if (tour?.kind === 'projects') {
       markProjectsTourCompleted();
       window.dispatchEvent(new CustomEvent('crm-projects-tour-skip'));
@@ -461,6 +481,9 @@ export const TourControlBar: React.FC = () => {
     } else if (tour?.kind === 'clients') {
       navigate('/clients');
       window.dispatchEvent(new CustomEvent('crm-clients-tour-resume'));
+    } else if (tour?.kind === 'contacts') {
+      navigate('/contacts');
+      window.dispatchEvent(new CustomEvent('crm-contacts-tour-resume'));
     } else if (tour?.kind === 'projects') {
       navigate('/projects');
       window.dispatchEvent(new CustomEvent('crm-projects-tour-resume'));
@@ -522,7 +545,11 @@ export const TourControlBar: React.FC = () => {
         ? tour.offRoute
           ? 'Clients tour paused — you left the tour pages.'
           : `Clients tour in progress (step ${tour.stepIndex + 1}).`
-        : tour.kind === 'projects'
+        : tour.kind === 'contacts'
+          ? tour.offRoute
+            ? 'Contacts tour paused — you left the tour pages.'
+            : `Contacts tour in progress (step ${tour.stepIndex + 1}).`
+          : tour.kind === 'projects'
           ? tour.offRoute
             ? 'Projects tour paused — you left the tour pages.'
             : `Projects tour in progress (step ${tour.stepIndex + 1}).`

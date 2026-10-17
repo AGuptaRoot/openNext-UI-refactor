@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DownloadIcon from '@mui/icons-material/Download';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import DocumentScannerOutlinedIcon from '@mui/icons-material/DocumentScannerOutlined';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
@@ -107,6 +108,8 @@ export const InvoicesPage: React.FC = () => {
   const [recurring, setRecurring] = useState<RecurringInvoiceItem[]>([]);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [pdfScanOpen, setPdfScanOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
   const [scheduleForm, setScheduleForm] = useState<RecurringInvoiceCreateInput>(() =>
     emptyScheduleForm(settingsCurrency)
   );
@@ -299,7 +302,19 @@ export const InvoicesPage: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (!exportOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [exportOpen]);
+
   const exportData = async (format: 'csv' | 'json') => {
+    setExportOpen(false);
     try {
       const response = await crmApi.exportInvoices({
         search: search || undefined,
@@ -407,14 +422,36 @@ export const InvoicesPage: React.FC = () => {
           </button>
           {tab === 'invoices' && (
             <>
-              <button
-                type="button"
-                data-tour="invoices-export-btn"
-                onClick={() => exportData('csv')}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold"
-              >
-                <DownloadIcon sx={{ fontSize: 15 }} /> Export CSV
-              </button>
+              <div className="relative" ref={exportRef} data-tour="invoices-export-btn">
+                <button
+                  type="button"
+                  onClick={() => setExportOpen((open) => !open)}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold"
+                >
+                  <DownloadIcon sx={{ fontSize: 15 }} /> Export
+                  <ExpandMoreIcon sx={{ fontSize: 16 }} />
+                </button>
+                {exportOpen && (
+                  <div className="absolute right-0 z-20 mt-1 w-36 overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-lg">
+                    <button
+                      type="button"
+                      data-tour="invoices-export-csv"
+                      onClick={() => void exportData('csv')}
+                      className="w-full cursor-pointer border-0 bg-transparent px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-50"
+                    >
+                      Export CSV
+                    </button>
+                    <button
+                      type="button"
+                      data-tour="invoices-export-json"
+                      onClick={() => void exportData('json')}
+                      className="w-full cursor-pointer border-0 border-t border-zinc-100 bg-transparent px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-50"
+                    >
+                      Export JSON
+                    </button>
+                  </div>
+                )}
+              </div>
               <button
                 type="button"
                 data-tour="invoices-templates-btn"

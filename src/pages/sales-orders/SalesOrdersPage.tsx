@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DownloadIcon from '@mui/icons-material/Download';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { crmApi } from '../../services/api';
@@ -70,6 +71,8 @@ export const SalesOrdersPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
 
   const statusParam = activeTab === 'All Orders' ? undefined : activeTab;
 
@@ -134,7 +137,19 @@ export const SalesOrdersPage: React.FC = () => {
     };
   }, [kpiSource, pagination]);
 
+  useEffect(() => {
+    if (!exportOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [exportOpen]);
+
   const exportData = async (format: 'csv' | 'json') => {
+    setExportOpen(false);
     try {
       const response = await crmApi.exportSalesOrders({
         search: search || undefined,
@@ -185,22 +200,36 @@ export const SalesOrdersPage: React.FC = () => {
             <RefreshIcon sx={{ fontSize: 15 }} /> Refresh
           </button>
           {!isClient && (
-            <>
+            <div className="relative" ref={exportRef} data-tour="sales-orders-export-btn">
               <button
                 type="button"
-                onClick={() => exportData('csv')}
+                onClick={() => setExportOpen((open) => !open)}
                 className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer"
               >
-                <DownloadIcon sx={{ fontSize: 15 }} /> Export CSV
+                <DownloadIcon sx={{ fontSize: 15 }} /> Export
+                <ExpandMoreIcon sx={{ fontSize: 16 }} />
               </button>
-              <button
-                type="button"
-                onClick={() => exportData('json')}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer"
-              >
-                <DownloadIcon sx={{ fontSize: 15 }} /> Export JSON
-              </button>
-            </>
+              {exportOpen && (
+                <div className="absolute right-0 z-20 mt-1 w-36 overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-lg">
+                  <button
+                    type="button"
+                    data-tour="sales-orders-export-csv"
+                    onClick={() => void exportData('csv')}
+                    className="w-full cursor-pointer border-0 bg-transparent px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-50"
+                  >
+                    Export CSV
+                  </button>
+                  <button
+                    type="button"
+                    data-tour="sales-orders-export-json"
+                    onClick={() => void exportData('json')}
+                    className="w-full cursor-pointer border-0 border-t border-zinc-100 bg-transparent px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-50"
+                  >
+                    Export JSON
+                  </button>
+                </div>
+              )}
+            </div>
           )}
           {canWriteOrders && (
             <button

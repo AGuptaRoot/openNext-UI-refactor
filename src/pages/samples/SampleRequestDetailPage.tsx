@@ -14,6 +14,7 @@ import PhoneIcon from '@mui/icons-material/Phone';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import NotesIcon from '@mui/icons-material/Notes';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import { CheckCircle2, Star } from 'lucide-react';
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useDialog } from '../../context/DialogContext';
@@ -64,8 +65,10 @@ export const SampleRequestDetailPage: React.FC = () => {
       activeRole === 'sales-manager' ||
       activeRole === 'finance-manager');
 
-  // Only the client can approve / reject sample requests (admin / staff must not).
-  const canApproveSamples = isClient;
+  // Only Sales Manager (or CRM admin) can approve / reject sample requests — not clients.
+  const canApproveSamples =
+    !isClient &&
+    (isAdmin || activeRole === 'sales-manager' || activeRole === 'crm-manager');
   const canDispatchSamples = isSampleLifecycleManager && (hasPermission('crm.samples.write') || isAdmin);
   const canDeliverSamples = isSampleLifecycleManager && (hasPermission('crm.samples.write') || isAdmin);
   const canManageStockAddress = isSampleLifecycleManager;
@@ -539,7 +542,14 @@ export const SampleRequestDetailPage: React.FC = () => {
             )}
           </div>
           <div className="text-xs text-zinc-500 mt-0.5">
-            {sample.feedback?.interestedInOrder ? '✓ Bulk Order Interest' : '—'}
+            {sample.feedback?.interestedInOrder ? (
+              <span className="inline-flex items-center gap-1">
+                <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+                Bulk Order Interest
+              </span>
+            ) : (
+              '—'
+            )}
           </div>
         </div>
       </div>
@@ -792,7 +802,14 @@ export const SampleRequestDetailPage: React.FC = () => {
                   Commercial Purchase Intent
                 </span>
                 <span className={sample.feedback.interestedInOrder ? 'text-emerald-700 font-semibold' : 'text-zinc-600'}>
-                  {sample.feedback.interestedInOrder ? '✓ Highly interested in placing bulk order' : 'Not interested at this stage'}
+                  {sample.feedback.interestedInOrder ? (
+                    <span className="inline-flex items-center gap-1">
+                      <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+                      Highly interested in placing bulk order
+                    </span>
+                  ) : (
+                    'Not interested at this stage'
+                  )}
                 </span>
               </div>
 
@@ -831,7 +848,10 @@ export const SampleRequestDetailPage: React.FC = () => {
                   onClick={openFeedback}
                   className="h-8 rounded-lg border-0 bg-slate-950 px-3 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 cursor-pointer"
                 >
-                  ⭐ Record Client Feedback Now
+                  <span className="inline-flex items-center gap-1">
+                    <Star className="h-4 w-4 shrink-0" aria-hidden />
+                    Record Client Feedback Now
+                  </span>
                 </button>
               </div>
             )}
@@ -866,7 +886,7 @@ export const SampleRequestDetailPage: React.FC = () => {
               )}
               {approveAction === 'approve' ? (
                 <p className="m-0 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
-                  Confirm you want to approve this sample request. Our team will prepare and dispatch it after approval.
+                  Confirm Sales Manager approval for this sample request. The team can prepare and dispatch it after approval.
                 </p>
               ) : (
                 <label className="block">

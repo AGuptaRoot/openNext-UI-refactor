@@ -1,4 +1,14 @@
 import React, { useMemo } from 'react';
+import {
+  Calendar,
+  CircleDollarSign,
+  FileText,
+  Landmark,
+  Pause,
+  Receipt,
+  RefreshCw,
+  Zap,
+} from 'lucide-react';
 import { RecurringInvoicesReportData } from '../../../types/reports';
 import {
   MetricCard,
@@ -97,7 +107,7 @@ export const RecurringInvoicesReportTab: React.FC<RecurringInvoicesReportTabProp
         <MetricCard
           label="Active Contracts"
           value={totalActive}
-          icon="🔄"
+          icon={<RefreshCw className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Profiles"
           sub={`${data.pausedProfiles ?? 0} paused · ${data.completedProfiles ?? 0} completed`}
           to="/invoices?tab=recurring"
@@ -105,7 +115,7 @@ export const RecurringInvoicesReportTab: React.FC<RecurringInvoicesReportTabProp
         <MetricCard
           label="Total Payment Amount"
           value={formatMoney(totalPaymentAmount, currency)}
-          icon="💰"
+          icon={<CircleDollarSign className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Per cycle"
           sub="Sum of active contract amounts"
           to="/invoices?tab=recurring"
@@ -113,7 +123,7 @@ export const RecurringInvoicesReportTab: React.FC<RecurringInvoicesReportTabProp
         <MetricCard
           label="Monthly MRR"
           value={formatMoney(mrr, currency)}
-          icon="📅"
+          icon={<Calendar className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Predictable"
           sub="Normalized monthly baseline"
           to="/invoices?tab=recurring"
@@ -121,7 +131,7 @@ export const RecurringInvoicesReportTab: React.FC<RecurringInvoicesReportTabProp
         <MetricCard
           label="Annualized ARR"
           value={formatMoney(arr, currency)}
-          icon="🏦"
+          icon={<Landmark className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Run-rate"
           sub="ARR = MRR × 12"
           to="/invoices?tab=recurring"
@@ -132,7 +142,7 @@ export const RecurringInvoicesReportTab: React.FC<RecurringInvoicesReportTabProp
         <MetricCard
           label="Upcoming Schedules"
           value={upcomingRuns.length}
-          icon="⚡"
+          icon={<Zap className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Pipeline"
           sub={formatMoney(upcomingPaymentTotal, currency) + ' next cycle'}
           to="/invoices?tab=recurring"
@@ -140,7 +150,7 @@ export const RecurringInvoicesReportTab: React.FC<RecurringInvoicesReportTabProp
         <MetricCard
           label="Invoices Generated"
           value={totalGeneratedInvoices}
-          icon="📄"
+          icon={<FileText className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="History"
           sub="Cycles completed so far"
           to="/invoices?tab=recurring"
@@ -148,7 +158,7 @@ export const RecurringInvoicesReportTab: React.FC<RecurringInvoicesReportTabProp
         <MetricCard
           label="Total Billed Amount"
           value={formatMoney(totalBilledAmount, currency)}
-          icon="🧾"
+          icon={<Receipt className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="To date"
           sub="Generated invoice value"
           to="/invoices?tab=recurring"
@@ -156,7 +166,7 @@ export const RecurringInvoicesReportTab: React.FC<RecurringInvoicesReportTabProp
         <MetricCard
           label="Paused / Completed"
           value={`${data.pausedProfiles ?? 0} / ${data.completedProfiles ?? 0}`}
-          icon="⏸️"
+          icon={<Pause className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Status"
           sub="Non-active profiles"
           to="/invoices?tab=recurring"

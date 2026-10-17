@@ -7,6 +7,13 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SearchIcon from '@mui/icons-material/Search';
 import PlaylistAddCheckIcon from '@mui/icons-material/PlaylistAddCheck';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import {
+  Check,
+  CheckSquare,
+  ClipboardList,
+  Flag,
+  X,
+} from 'lucide-react';
 
 import { crmApi } from '../../services/api';
 import { useDialog } from '../../context/DialogContext';
@@ -289,7 +296,7 @@ export const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         {/* Modal Header */}
         <div className="p-4 sm:px-6 border-b border-zinc-200 flex items-center justify-between bg-zinc-50">
           <div className="flex items-center gap-2.5">
-            <span className="text-xl">📋</span>
+            <ClipboardList className="h-[18px] w-[18px] shrink-0 text-zinc-700" aria-hidden />
             <div>
               <h2 className="text-base font-bold text-zinc-950 m-0">
                 {viewMode === 'list'
@@ -460,7 +467,7 @@ export const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
                               <ul className="m-0 p-0 list-none flex flex-col gap-1 text-[11px] text-zinc-600">
                                 {tpl.subtasks?.slice(0, 3).map((st, i) => (
                                   <li key={i} className="flex items-center gap-1.5 truncate">
-                                    <span className="text-emerald-600 font-bold">✓</span>
+                                    <Check className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
                                     <span className="truncate">{st.title}</span>
                                   </li>
                                 ))}
@@ -604,7 +611,10 @@ export const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <h4 className="text-xs font-bold text-zinc-900 m-0">
-                      ☑️ Predefined Checklist Subtasks
+                      <span className="inline-flex items-center gap-1">
+                        <CheckSquare className="h-4 w-4 shrink-0" aria-hidden />
+                        Predefined Checklist Subtasks
+                      </span>
                     </h4>
                     <p className="text-[11px] text-zinc-500 m-0 mt-0.5">
                       These checklist steps will be auto-generated whenever a task is created from this template.
@@ -651,7 +661,7 @@ export const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
                         className="p-1 rounded text-zinc-400 hover:text-red-600 border-none bg-transparent cursor-pointer"
                         title="Remove checklist item"
                       >
-                        ✕
+                        <X className="h-4 w-4 shrink-0" aria-hidden />
                       </button>
                     </div>
                   ))}
@@ -720,7 +730,10 @@ export const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
                     <option value="">No Milestone / General Task</option>
                     {instantiateMilestonesList.map((m) => (
                       <option key={m._id} value={m._id}>
-                        🚩 {m.title}
+                        <span className="inline-flex items-center gap-1">
+                          <Flag className="h-4 w-4 shrink-0" aria-hidden />
+                          {m.title}
+                        </span>
                       </option>
                     ))}
                   </select>
@@ -772,7 +785,7 @@ export const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
                     <div className="flex flex-col gap-1 text-xs text-zinc-700">
                       {selectedTemplateForInstantiate.subtasks.map((st, i) => (
                         <div key={i} className="flex items-center gap-2">
-                          <span className="text-emerald-600 font-bold">☑️</span>
+                          <CheckSquare className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
                           <span className="font-medium">{st.title}</span>
                           {st.description && (
                             <span className="text-zinc-400 text-[11px]">({st.description})</span>

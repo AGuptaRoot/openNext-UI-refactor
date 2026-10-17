@@ -11,6 +11,7 @@ import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined';
 import { SwapDropGrid } from '../dndkit';
+import { Briefcase } from 'lucide-react';
 import { crmApi } from '../../services/api';
 import {
   DEFAULT_STAGE_CATALOG,
@@ -652,8 +653,8 @@ export function OpportunityPipelinesPanel() {
       <div className={`${cardClass} space-y-4`}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-950 text-base text-white">
-              💼
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-950 text-white">
+              <Briefcase className="h-[18px] w-[18px] shrink-0" aria-hidden />
             </div>
             <div>
               <h3 className="m-0 text-sm font-bold text-zinc-950">Pipeline Management</h3>

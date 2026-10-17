@@ -1,11 +1,10 @@
 import React, { useMemo } from 'react';
 import { HashRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
-import { ThemeProvider } from '@mui/material/styles';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
-import { openNextTheme } from './theme/muiTheme';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ThemeProvider } from '@/context/ThemeContext';
 import { CurrencyProvider } from './context/CurrencyContext';
 import { TimerProvider } from './context/TimerContext';
 import { DialogProvider } from './context/DialogContext';
@@ -140,7 +139,7 @@ const UnmigratedRouteFallback: React.FC = () => {
 
 export const App: React.FC = () => {
   return (
-    <ThemeProvider theme={openNextTheme}>
+    <ThemeProvider>
       <AuthProvider>
         <CurrencyProvider>
         <DialogProvider>

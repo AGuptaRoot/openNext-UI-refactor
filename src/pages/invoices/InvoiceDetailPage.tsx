@@ -16,6 +16,8 @@ import type { InvoiceItem, InvoicePaymentRecord } from '../../types/invoices';
 import { calculateFinanceTotals } from '../../utils/financeTotals';
 import { canShowInvoiceRazorpayPay } from '../../utils/permissions';
 import { buildFullInvoicePortalLink } from '../../utils/portalLinks';
+import { getRuntimeDefaultCurrency } from '../../utils/currency';
+import { CreditCard } from 'lucide-react';
 
 let razorpayScriptPromise: Promise<void> | null = null;
 function loadRazorpayCheckoutScript(): Promise<void> {
@@ -330,7 +332,14 @@ export const InvoiceDetailPage: React.FC = () => {
       onClick={() => void handlePayWithRazorpay()}
       className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-950 bg-zinc-950 px-3.5 text-xs font-semibold text-white cursor-pointer disabled:opacity-50 hover:bg-zinc-800 shadow-sm"
     >
-      <span>{payingWithRazorpay ? 'Opening Razorpay…' : '💳 Pay with Razorpay'}</span>
+      {payingWithRazorpay ? (
+        <span>Opening Razorpay…</span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5">
+          <CreditCard className="h-4 w-4 shrink-0" aria-hidden />
+          Pay with Razorpay
+        </span>
+      )}
     </button>
   ) : null;
 

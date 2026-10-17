@@ -143,6 +143,7 @@ export interface TaskQueryParams {
   page?: number;
   limit?: number;
   projectId?: string;
+  clientId?: string;
   milestoneId?: string;
   status?: string;
   priority?: string;

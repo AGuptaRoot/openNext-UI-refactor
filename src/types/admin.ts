@@ -143,19 +143,19 @@ export interface SettingsAuditHint {
   updatedAt: string;
 }
 
-export const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string; icon: string }> = [
-  { id: 'general', label: 'General', icon: '🏢' },
-  { id: 'shipping', label: 'Shipping', icon: '🚚' },
-  { id: 'finance', label: 'Finance', icon: '💰' },
-  { id: 'email', label: 'Email', icon: '✉️' },
-  { id: 'integrations', label: 'Integrations', icon: '🔌' },
-  { id: 'projects', label: 'Projects', icon: '📁' },
-  { id: 'project-statuses', label: 'Project Statuses', icon: '📌' },
-  { id: 'leads', label: 'Leads', icon: '🎯' },
-  { id: 'qualification-match', label: 'Qualification Match', icon: '📐' },
-  { id: 'opportunities', label: 'Opportunity', icon: '💼' },
-  { id: 'clients', label: 'Clients', icon: '👥' },
-  { id: 'users', label: 'Users', icon: '🛡️' },
+export const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string }> = [
+  { id: 'general', label: 'General' },
+  { id: 'shipping', label: 'Shipping' },
+  { id: 'finance', label: 'Finance' },
+  { id: 'email', label: 'Email' },
+  { id: 'integrations', label: 'Integrations' },
+  { id: 'projects', label: 'Projects' },
+  { id: 'project-statuses', label: 'Project Statuses' },
+  { id: 'leads', label: 'Leads' },
+  { id: 'qualification-match', label: 'Qualification Match' },
+  { id: 'opportunities', label: 'Opportunity' },
+  { id: 'clients', label: 'Clients' },
+  { id: 'users', label: 'Users' },
 ];
 
 export const SETTINGS_CURRENCIES = [

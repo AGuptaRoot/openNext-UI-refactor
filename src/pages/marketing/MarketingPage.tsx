@@ -25,6 +25,7 @@ import {
   type PipelineReEntryEvent,
   type ReEngagementRequest,
 } from '../../types/marketing';
+import { Mail, Megaphone, Play, Target, Zap } from 'lucide-react';
 import { triggerFileDownload } from '../../utils/fileDownload';
 
 type MainTab = 'campaigns' | 'analytics';
@@ -589,18 +590,21 @@ export const MarketingPage: React.FC = () => {
                       <tr key={campaign._id} className="border-t border-zinc-100 align-top">
                         <td className="px-4 py-3">
                           <div className="font-semibold text-zinc-950">{campaign.name}</div>
-                          <div className="mt-1 text-xs text-zinc-500">
-                            📧 {campaign.subject || campaign.emailSubject}
+                          <div className="mt-1 inline-flex items-center gap-1 text-xs text-zinc-500">
+                            <Mail className="h-4 w-4 shrink-0" aria-hidden />
+                            {campaign.subject || campaign.emailSubject}
                           </div>
                         </td>
                         <td className="px-4 py-3">
-                          <span className="inline-flex rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs font-semibold text-zinc-700">
-                            📢 {campaign.type}
+                          <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs font-semibold text-zinc-700">
+                            <Megaphone className="h-4 w-4 shrink-0" aria-hidden />
+                            {campaign.type}
                           </span>
                         </td>
                         <td className="px-4 py-3">
-                          <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-800">
-                            🎯 {campaign.targetAudience || campaign.targetSegment}
+                          <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-800">
+                            <Target className="h-4 w-4 shrink-0" aria-hidden />
+                            {campaign.targetAudience || campaign.targetSegment}
                           </span>
                         </td>
                         <td className="px-4 py-3">
@@ -632,7 +636,10 @@ export const MarketingPage: React.FC = () => {
                                 onClick={() => openWinBack(campaign._id)}
                                 className="h-8 rounded-lg border border-zinc-300 bg-white px-2.5 text-xs font-semibold text-zinc-700"
                               >
-                                ⚡ Win-Back
+                                <span className="inline-flex items-center gap-1">
+                                  <Zap className="h-4 w-4 shrink-0" aria-hidden />
+                                  Win-Back
+                                </span>
                               </button>
                             )}
                             <button
@@ -645,7 +652,10 @@ export const MarketingPage: React.FC = () => {
                               }}
                               className="h-8 rounded-lg border border-zinc-300 bg-white px-2.5 text-xs font-semibold text-zinc-700"
                             >
-                              ✉ Test
+                              <span className="inline-flex items-center gap-1">
+                                <Mail className="h-4 w-4 shrink-0" aria-hidden />
+                                Test
+                              </span>
                             </button>
                             <button
                               type="button"
@@ -653,7 +663,10 @@ export const MarketingPage: React.FC = () => {
                               onClick={() => void runCampaign(campaign)}
                               className="h-8 rounded-lg border-0 bg-slate-950 px-2.5 text-xs font-semibold text-white disabled:opacity-50"
                             >
-                              ▶ Run
+                              <span className="inline-flex items-center gap-1">
+                                <Play className="h-4 w-4 shrink-0" aria-hidden />
+                                Run
+                              </span>
                             </button>
                             <button
                               type="button"

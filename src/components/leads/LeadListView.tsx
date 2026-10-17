@@ -1,4 +1,13 @@
 import React from 'react';
+import {
+  AlertTriangle,
+  Bell,
+  Calendar,
+  Clock,
+  Phone,
+  Siren,
+  Sprout,
+} from 'lucide-react';
 import SwapVertIcon from '@mui/icons-material/SwapVert';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
@@ -8,10 +17,10 @@ import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 
-import { LeadItem, AssignableUser, LeadPaginationMeta } from '../../types/leads';
+import { LeadItem, AssignableUser, LeadPaginationMeta, leadNeedsSampleRequest } from '../../types/leads';
 import { isLeadConvertibleStage } from '../../utils/leadPipeline';
 import { displayUserLabel } from '../../utils/displayLabels';
-import { getLeadStatusChipClass } from '../../utils/leadStatusStyle';
+import { getLeadStageBadgeClass, getLeadStatusChipClass } from '../../utils/leadStatusStyle';
 
 interface LeadListViewProps {
   leads: LeadItem[];
@@ -101,15 +110,7 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
     }
   };
 
-  const getStageBadgeStyle = (stage: string) => {
-    const s = stage.toLowerCase();
-    if (s.includes('won')) return 'bg-zinc-950 text-white border-zinc-950';
-    if (s.includes('lost') || s.includes('disqualified')) return 'bg-zinc-100 text-zinc-600 border-zinc-300';
-    if (s.includes('proposal')) return 'bg-zinc-100 text-zinc-900 border-zinc-300 font-semibold';
-    if (s.includes('qualified')) return 'bg-zinc-900 text-white border-zinc-900';
-    if (s.includes('contacted')) return 'bg-zinc-100 text-zinc-800 border-zinc-200';
-    return 'bg-zinc-50 text-zinc-700 border-zinc-200';
-  };
+  const getStageBadgeStyle = (stage: string) => getLeadStageBadgeClass(stage);
 
   const getAgeingBadge = (lead: LeadItem) => {
     const ageing = lead.ageing;
@@ -118,17 +119,17 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
     const status = ageing.status;
 
     let style = 'bg-zinc-100 text-zinc-700 border-zinc-200';
-    let icon = '🌱';
+    let Icon = Sprout;
 
     if (status === 'Stale' || days > 14) {
       style = 'bg-zinc-100 text-zinc-950 font-bold border-zinc-400';
-      icon = '🔴';
+      Icon = Siren;
     } else if (status === 'Attention' || days > 7) {
       style = 'bg-zinc-100 text-zinc-800 border-zinc-300';
-      icon = '⚠️';
+      Icon = AlertTriangle;
     } else if (status === 'Active' || days > 3) {
       style = 'bg-zinc-50 text-zinc-700 border-zinc-200';
-      icon = '🕒';
+      Icon = Clock;
     }
 
     return (
@@ -136,7 +137,7 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
         className={`inline-flex items-center gap-1 text-[10.5px] px-1.5 py-0.5 rounded border ${style}`}
         title={`Stage Age: ${days} days · Total Age: ${ageing.totalAgeDays} days`}
       >
-        <span>{icon}</span>
+        <Icon className="h-3 w-3 shrink-0" aria-hidden />
         <span>{days}d in stage</span>
       </span>
     );
@@ -187,7 +188,7 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
           className="inline-flex items-center gap-1 text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-zinc-950 text-white border border-zinc-950"
           title={`${fu.overdueCount} overdue follow-up(s) by ${fu.overdueDays} day(s)`}
         >
-          <span>🚨</span>
+          <Siren className="h-3 w-3 shrink-0" aria-hidden />
           <span>Overdue {fu.overdueDays}d</span>
         </span>
       );
@@ -198,7 +199,7 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
           className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-900 border border-zinc-300"
           title={`Follow-up due today: ${fu.nextDueTitle || 'Follow-up'}`}
         >
-          <span>🔔</span>
+          <Bell className="h-3 w-3 shrink-0" aria-hidden />
           <span>Due Today</span>
         </span>
       );
@@ -213,7 +214,7 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
           className="inline-flex items-center gap-1 text-[10.5px] px-1.5 py-0.5 rounded bg-zinc-50 text-zinc-600 border border-zinc-200"
           title={`Next follow-up: ${fu.nextDueTitle || ''}`}
         >
-          <span>📅</span>
+          <Calendar className="h-3 w-3 shrink-0" aria-hidden />
           <span>{dateStr}</span>
         </span>
       );
@@ -471,7 +472,7 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
                     {/* Name + Badges */}
                     <td className="px-4 py-3 font-medium">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-md bg-zinc-950 text-white flex items-center justify-center font-bold text-xs flex-shrink-0 overflow-hidden">
+                        <div className="w-7 h-7 rounded-md bg-primary text-primary-foreground flex items-center justify-center font-bold text-xs flex-shrink-0 overflow-hidden">
                           {lead.photoUrl || lead.avatarUrl ? (
                             <img
                               src={lead.photoUrl || lead.avatarUrl}
@@ -505,6 +506,14 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
                           {leadTitle && lead.name && (
                             <span className="text-[11px] text-zinc-500 truncate">{lead.name}</span>
                           )}
+                          {leadNeedsSampleRequest(lead) ? (
+                            <span
+                              className="crm-badge crm-badge-warning mt-0.5"
+                              title="Lead needs sample request (Commercial Requirement)"
+                            >
+                              Sample needs
+                            </span>
+                          ) : null}
                           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                             {lead.status && (
                               <span
@@ -546,7 +555,7 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
                         <span className="text-zinc-900 truncate">{lead.email || '—'}</span>
                         {lead.phone && (
                           <span className="text-zinc-500 flex items-center gap-1 truncate">
-                            <span>📞</span>
+                            <Phone className="h-3 w-3 shrink-0 text-zinc-400" aria-hidden />
                             <span>{lead.phone}</span>
                           </span>
                         )}

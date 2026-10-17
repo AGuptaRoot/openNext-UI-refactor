@@ -45,8 +45,13 @@ export interface LeadItem {
   tags?: string[];
   notes?: string;
   address?: string;
+  /** Formatted address alias (same as address when returned by Places). */
+  formattedAddress?: string;
   city?: string;
   state?: string;
+  country?: string;
+  postalCode?: string;
+  placeId?: string;
   latitude?: number | null;
   longitude?: number | null;
   photoUrl?: string;
@@ -185,6 +190,8 @@ export interface SavedLeadFilter {
     source?: string;
     tag?: string;
     matchScore?: string;
+    /** true | false — commercialRequirement.needsSampleRequest */
+    needsSampleRequest?: string;
     search?: string;
   };
 }
@@ -219,8 +226,20 @@ export interface LeadQueryParams {
   tag?: string;
   /** Qualification match band: unscored | strong | partial | weak | poor | scored */
   matchScore?: string;
+  /** Filter by Commercial Requirement "Lead needs sample request" (true|false) */
+  needsSampleRequest?: string;
   search?: string;
   sort?: string;
+}
+
+/** True when Commercial Requirement marked the lead as needing a sample request. */
+export function leadNeedsSampleRequest(lead: {
+  commercialRequirement?: { needsSampleRequest?: boolean } | null;
+  qualification?: { sampleRequired?: boolean } | null;
+}): boolean {
+  return Boolean(
+    lead?.commercialRequirement?.needsSampleRequest || lead?.qualification?.sampleRequired
+  );
 }
 
 export interface LeadCreateInput {

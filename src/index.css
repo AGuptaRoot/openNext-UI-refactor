@@ -12,10 +12,479 @@
   box-sizing: border-box;
   border-width: 0;
   border-style: solid;
-  border-color: #d4d4d8; /* zinc-300 — clearer list/card edges */
+  border-color: var(--border);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Semantic design tokens (OpenNext CMS–aligned)
+   Use: color: var(--foreground); background: var(--card);
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  color-scheme: light;
+
+  --background: #fafafa;
+  --foreground: #09090b;
+  --card: #ffffff;
+  --card-foreground: #09090b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --border: #e4e4e7;
+  --input: #ffffff;
+  --primary: #09090b;
+  --primary-foreground: #fafafa;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+
+  --success: #166534;
+  --success-bg: #f0fdf4;
+  --success-foreground: #166534;
+  --success-border: #bbf7d0;
+
+  --warning: #b45309;
+  --warning-bg: #fffbeb;
+  --warning-foreground: #92400e;
+  --warning-border: #fde68a;
+
+  --danger: #b91c1c;
+  --danger-bg: #fef2f2;
+  --danger-foreground: #991b1b;
+  --danger-border: #fecaca;
+
+  --info-bg: #eff6ff;
+  --info-foreground: #1e40af;
+  --info-border: #bfdbfe;
+
+  /* Always-readable ink on solid brand/avatar fills (do not invert in dark) */
+  --on-solid: #ffffff;
+
+  /* Charts */
+  --chart-grid: #f4f4f5;
+  --chart-tick: #71717a;
+  --chart-axis: #e4e4e7;
+  --chart-tooltip-bg: #ffffff;
+  --chart-tooltip-fg: #09090b;
+  --chart-tooltip-border: #e4e4e7;
+  --chart-series-1: #09090b;
+  --chart-series-2: #52525b;
+  --chart-series-3: #71717a;
+  --chart-series-4: #a1a1aa;
+  --chart-series-5: #d4d4d8;
+  --chart-series-6: #3f3f46;
+  --chart-cursor: #f4f4f5;
+}
+
+html.dark {
+  color-scheme: dark;
+
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #18181b;
+  --card-foreground: #fafafa;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --border: #3f3f46;
+  --input: #18181b;
+  --primary: #fafafa;
+  --primary-foreground: #09090b;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+
+  --success: #4ade80;
+  --success-bg: rgba(34, 197, 94, 0.16);
+  --success-foreground: #86efac;
+  --success-border: rgba(34, 197, 94, 0.4);
+
+  --warning: #fbbf24;
+  --warning-bg: rgba(245, 158, 11, 0.16);
+  --warning-foreground: #fcd34d;
+  --warning-border: rgba(245, 158, 11, 0.4);
+
+  --danger: #f87171;
+  --danger-bg: rgba(239, 68, 68, 0.16);
+  --danger-foreground: #fca5a5;
+  --danger-border: rgba(239, 68, 68, 0.4);
+
+  --info-bg: rgba(59, 130, 246, 0.16);
+  --info-foreground: #93c5fd;
+  --info-border: rgba(59, 130, 246, 0.4);
+
+  --on-solid: #ffffff;
+
+  --chart-grid: #27272a;
+  --chart-tick: #a1a1aa;
+  --chart-axis: #3f3f46;
+  --chart-tooltip-bg: #18181b;
+  --chart-tooltip-fg: #fafafa;
+  --chart-tooltip-border: #3f3f46;
+  --chart-series-1: #fafafa;
+  --chart-series-2: #a1a1aa;
+  --chart-series-3: #d4d4d8;
+  --chart-series-4: #71717a;
+  --chart-series-5: #52525b;
+  --chart-series-6: #e4e4e7;
+  --chart-cursor: #27272a;
+}
+
+html {
+  color-scheme: light;
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+html.dark {
+  color-scheme: dark;
 }
 
 body {
   margin: 0;
   padding: 0;
+  background-color: var(--background);
+  color: var(--foreground);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+/* Theme-aware status / stage badges */
+.crm-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 0.375rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.crm-badge-success {
+  background-color: var(--success-bg) !important;
+  color: var(--success-foreground) !important;
+  border-color: var(--success-border) !important;
+}
+
+.crm-badge-warning {
+  background-color: var(--warning-bg) !important;
+  color: var(--warning-foreground) !important;
+  border-color: var(--warning-border) !important;
+}
+
+.crm-badge-danger {
+  background-color: var(--danger-bg) !important;
+  color: var(--danger-foreground) !important;
+  border-color: var(--danger-border) !important;
+}
+
+.crm-badge-info {
+  background-color: var(--info-bg) !important;
+  color: var(--info-foreground) !important;
+  border-color: var(--info-border) !important;
+}
+
+.crm-badge-neutral {
+  background-color: var(--muted) !important;
+  color: var(--secondary-foreground) !important;
+  border-color: var(--border) !important;
+}
+
+.crm-badge-solid {
+  background-color: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+  border-color: var(--primary) !important;
+}
+
+/* Ink on solid avatar / brand fills — never remapped to dark */
+.crm-on-solid,
+.text-on-solid {
+  color: var(--on-solid) !important;
+}
+
+/*
+  Global dark remaps for legacy Tailwind light-only utilities.
+  Prefer CSS variables / crm-* tokens for new code.
+  Note: do NOT blanket-set border-color on `*` — that overrides badge token borders.
+*/
+
+/* Canvas / surfaces */
+html.dark .bg-white,
+html.dark .bg-zinc-50,
+html.dark .bg-zinc-100,
+html.dark .bg-neutral-50,
+html.dark .bg-neutral-100,
+html.dark .bg-stone-50,
+html.dark .bg-gray-50,
+html.dark .bg-slate-50 {
+  background-color: var(--card) !important;
+  color: var(--card-foreground);
+}
+
+html.dark .bg-zinc-200,
+html.dark .bg-neutral-200,
+html.dark .bg-gray-200 {
+  background-color: var(--muted) !important;
+}
+
+/* Primary solid fills invert in dark (CTA buttons) */
+html.dark .bg-zinc-950,
+html.dark .bg-black,
+html.dark .bg-neutral-950,
+html.dark .bg-slate-950 {
+  background-color: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+}
+
+/* Mid-solid chips / avatars (bg-zinc-900) stay dark enough for --on-solid ink */
+html.dark .bg-zinc-900,
+html.dark .bg-zinc-800 {
+  background-color: #3f3f46 !important;
+}
+
+html.dark .min-h-screen.bg-zinc-50,
+html.dark .bg-zinc-50\/80,
+html.dark .bg-zinc-50\/70 {
+  background-color: var(--background) !important;
+}
+
+/* Text */
+html.dark .text-zinc-950,
+html.dark .text-zinc-900,
+html.dark .text-zinc-800,
+html.dark .text-neutral-950,
+html.dark .text-neutral-900,
+html.dark .text-black,
+html.dark .text-slate-900,
+html.dark .text-gray-900,
+html.dark .text-gray-800 {
+  color: var(--foreground) !important;
+}
+
+html.dark .text-zinc-700,
+html.dark .text-zinc-600,
+html.dark .text-neutral-700,
+html.dark .text-gray-700,
+html.dark .text-gray-600 {
+  color: #d4d4d8 !important;
+}
+
+html.dark .text-zinc-500,
+html.dark .text-zinc-400,
+html.dark .text-neutral-500,
+html.dark .text-gray-500,
+html.dark .text-gray-400,
+html.dark .text-muted-foreground {
+  color: var(--muted-foreground) !important;
+}
+
+/*
+  DO NOT blanket-remap `.text-white` — that broke avatars & solid badges.
+  Only invert white text when the solid primary fill itself was inverted.
+*/
+html.dark .bg-zinc-950.text-white,
+html.dark .bg-black.text-white,
+html.dark .bg-slate-950.text-white,
+html.dark .bg-neutral-950.text-white,
+html.dark .bg-zinc-950 .text-white:not(.crm-on-solid):not(.text-on-solid),
+html.dark .bg-black .text-white:not(.crm-on-solid):not(.text-on-solid) {
+  color: var(--primary-foreground) !important;
+}
+
+/* Borders */
+html.dark .border-zinc-100,
+html.dark .border-zinc-200,
+html.dark .border-zinc-300,
+html.dark .border-neutral-200,
+html.dark .border-gray-200,
+html.dark .border-slate-200 {
+  border-color: var(--border) !important;
+}
+
+html.dark .border-zinc-950,
+html.dark .border-black,
+html.dark .border-slate-950 {
+  border-color: var(--primary) !important;
+}
+
+/* Hover / muted fills */
+html.dark .hover\:bg-zinc-50:hover,
+html.dark .hover\:bg-zinc-100:hover,
+html.dark .hover\:bg-white:hover {
+  background-color: var(--muted) !important;
+}
+
+html.dark .hover\:bg-zinc-800:hover,
+html.dark .hover\:bg-zinc-950:hover {
+  background-color: #e4e4e7 !important;
+  color: #09090b !important;
+}
+
+/* Soft tinted panels → semantic badge surfaces */
+html.dark .bg-emerald-50,
+html.dark .bg-green-50 {
+  background-color: var(--success-bg) !important;
+}
+html.dark .bg-amber-50,
+html.dark .bg-yellow-50,
+html.dark .bg-orange-50 {
+  background-color: var(--warning-bg) !important;
+}
+html.dark .bg-red-50,
+html.dark .bg-rose-50 {
+  background-color: var(--danger-bg) !important;
+}
+html.dark .bg-blue-50,
+html.dark .bg-sky-50,
+html.dark .bg-violet-50,
+html.dark .bg-indigo-50 {
+  background-color: var(--info-bg) !important;
+}
+
+html.dark .bg-blue-50\/50,
+html.dark .bg-blue-50\/40 {
+  background-color: var(--info-bg) !important;
+}
+
+html.dark .text-emerald-600,
+html.dark .text-emerald-700,
+html.dark .text-emerald-800,
+html.dark .text-emerald-900,
+html.dark .text-green-700,
+html.dark .text-green-800 {
+  color: var(--success-foreground) !important;
+}
+
+html.dark .text-amber-600,
+html.dark .text-amber-700,
+html.dark .text-amber-800,
+html.dark .text-amber-900,
+html.dark .text-amber-950,
+html.dark .text-yellow-700,
+html.dark .text-orange-600,
+html.dark .text-orange-700 {
+  color: var(--warning-foreground) !important;
+}
+
+html.dark .text-red-500,
+html.dark .text-red-600,
+html.dark .text-red-700,
+html.dark .text-red-800,
+html.dark .text-rose-600,
+html.dark .text-rose-700 {
+  color: var(--danger-foreground) !important;
+}
+
+html.dark .text-blue-500,
+html.dark .text-blue-600,
+html.dark .text-blue-700,
+html.dark .text-blue-800,
+html.dark .text-blue-900,
+html.dark .text-sky-700,
+html.dark .text-sky-800,
+html.dark .text-indigo-600,
+html.dark .text-indigo-700 {
+  color: var(--info-foreground) !important;
+}
+
+html.dark .border-emerald-200,
+html.dark .border-green-200 {
+  border-color: var(--success-border) !important;
+}
+html.dark .border-amber-200,
+html.dark .border-yellow-200,
+html.dark .border-orange-200 {
+  border-color: var(--warning-border) !important;
+}
+html.dark .border-red-200,
+html.dark .border-rose-200 {
+  border-color: var(--danger-border) !important;
+}
+html.dark .border-blue-200,
+html.dark .border-sky-200,
+html.dark .border-blue-500 {
+  border-color: var(--info-border) !important;
+}
+
+/* Form controls */
+html.dark input,
+html.dark select,
+html.dark textarea {
+  background-color: var(--input);
+  color: var(--foreground);
+  border-color: var(--border);
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: var(--muted-foreground);
+  opacity: 0.85;
+}
+
+html.dark option {
+  background-color: var(--card);
+  color: var(--foreground);
+}
+
+html.dark input[type='range'] {
+  accent-color: var(--info-foreground);
+}
+
+/* Tables / sticky headers */
+html.dark thead,
+html.dark th {
+  background-color: var(--card);
+  color: var(--foreground);
+}
+
+html.dark tr:hover td {
+  background-color: var(--muted);
+}
+
+/* Lucide / SVG icons inherit currentColor by default — ensure parents have readable color */
+html.dark svg.lucide {
+  color: inherit;
+}
+
+/* Scrollbars (Chromium) */
+html.dark *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+html.dark *::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 8px;
+}
+html.dark *::-webkit-scrollbar-track {
+  background: var(--card);
+}
+
+/*
+  Google Places Autocomplete attaches `.pac-container` to document.body.
+  Only hide truly empty nodes so suggestions remain clickable above the map.
+*/
+.pac-container {
+  z-index: 2147483000 !important;
+}
+.pac-container:empty {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+html.dark .pac-container {
+  background-color: var(--card);
+  color: var(--foreground);
+  border-color: var(--border);
+}
+html.dark .pac-item {
+  color: var(--foreground);
+  border-top-color: var(--border);
+}
+html.dark .pac-item:hover,
+html.dark .pac-item-selected {
+  background-color: var(--muted);
+}
+html.dark .pac-item-query {
+  color: var(--foreground);
+}
+html.dark .pac-matched {
+  color: var(--foreground);
 }

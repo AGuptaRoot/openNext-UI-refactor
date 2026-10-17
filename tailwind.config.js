@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   corePlugins: {
     preflight: false,
   },
@@ -20,15 +21,53 @@ export default {
     },
     extend: {
       colors: {
+        background: 'var(--background)',
+        foreground: 'var(--foreground)',
+        card: {
+          DEFAULT: 'var(--card)',
+          foreground: 'var(--card-foreground)',
+        },
+        muted: {
+          DEFAULT: 'var(--muted)',
+          foreground: 'var(--muted-foreground)',
+        },
+        border: 'var(--border)',
+        input: 'var(--input)',
+        primary: {
+          DEFAULT: 'var(--primary)',
+          foreground: 'var(--primary-foreground)',
+        },
+        secondary: {
+          DEFAULT: 'var(--secondary)',
+          foreground: 'var(--secondary-foreground)',
+        },
+        success: {
+          DEFAULT: 'var(--success)',
+          bg: 'var(--success-bg)',
+          foreground: 'var(--success-foreground)',
+          border: 'var(--success-border)',
+        },
+        warning: {
+          DEFAULT: 'var(--warning)',
+          bg: 'var(--warning-bg)',
+          foreground: 'var(--warning-foreground)',
+          border: 'var(--warning-border)',
+        },
+        danger: {
+          DEFAULT: 'var(--danger)',
+          bg: 'var(--danger-bg)',
+          foreground: 'var(--danger-foreground)',
+          border: 'var(--danger-border)',
+        },
         crm: {
-          black: '#09090b',
-          dark: '#18181b',
-          canvas: '#fafafa',
-          surface: '#ffffff',
-          border: '#e4e4e7',
-          'border-hover': '#a1a1aa',
-          muted: '#71717a',
-          subtle: '#a1a1aa',
+          black: 'var(--foreground)',
+          dark: 'var(--card)',
+          canvas: 'var(--background)',
+          surface: 'var(--card)',
+          border: 'var(--border)',
+          'border-hover': 'var(--muted-foreground)',
+          muted: 'var(--muted-foreground)',
+          subtle: 'var(--muted-foreground)',
         },
       },
       fontFamily: {

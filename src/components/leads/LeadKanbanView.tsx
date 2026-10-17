@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
+import { Check, Clock, Siren, Tag } from 'lucide-react';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 
-import { LeadItem, AssignableUser } from '../../types/leads';
+import { LeadItem, AssignableUser, leadNeedsSampleRequest } from '../../types/leads';
 import { isLeadConvertibleStage } from '../../utils/leadPipeline';
 import { displayUserLabel } from '../../utils/displayLabels';
 import { getLeadStatusChipClass } from '../../utils/leadStatusStyle';
@@ -132,7 +133,9 @@ function LeadCardBody({
               )}
               {lead.convertedClientId && (
                 <span className="text-[9.5px] font-semibold text-white bg-zinc-950 border border-zinc-950 px-1.5 py-0.2 rounded">
-                  ✓ Converted
+                  <span className="inline-flex items-center gap-0.5">
+                    <Check className="h-3 w-3 shrink-0" aria-hidden /> Converted
+                  </span>
                 </span>
               )}
             </div>
@@ -140,6 +143,14 @@ function LeadCardBody({
               {lead.title?.trim() && lead.name ? `${lead.name} · ` : ''}
               {lead.company || '—'}
             </p>
+            {leadNeedsSampleRequest(lead) ? (
+              <span
+                className="crm-badge crm-badge-warning mt-1"
+                title="Lead needs sample request"
+              >
+                Sample needs
+              </span>
+            ) : null}
           </div>
         </div>
         <span className="text-[11px] font-mono font-bold text-zinc-900 bg-zinc-50 border border-zinc-200 px-1.5 py-0.5 rounded flex-shrink-0">
@@ -155,17 +166,23 @@ function LeadCardBody({
         )}
         {lead.ageing && (
           <span className="text-zinc-700 bg-zinc-50 border border-zinc-200 px-1.5 py-0.5 rounded">
-            🕒 {lead.ageing.stageAgeDays}d
+            <span className="inline-flex items-center gap-0.5">
+              <Clock className="h-3 w-3 shrink-0" aria-hidden /> {lead.ageing.stageAgeDays}d
+            </span>
           </span>
         )}
         {lead.followUpSummary?.hasOverdue && (
           <span className="text-red-700 font-bold bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">
-            🚨 Overdue {lead.followUpSummary.overdueDays}d
+            <span className="inline-flex items-center gap-0.5">
+              <Siren className="h-3 w-3 shrink-0" aria-hidden /> Overdue {lead.followUpSummary.overdueDays}d
+            </span>
           </span>
         )}
         {lead.tags && lead.tags.length > 0 && (
           <span className="text-zinc-600 bg-zinc-50 border border-zinc-200 px-1.5 py-0.5 rounded">
-            🏷️ {lead.tags[0]}
+            <span className="inline-flex items-center gap-0.5">
+              <Tag className="h-3 w-3 shrink-0" aria-hidden /> {lead.tags[0]}
+            </span>
             {lead.tags.length > 1 && ` +${lead.tags.length - 1}`}
           </span>
         )}

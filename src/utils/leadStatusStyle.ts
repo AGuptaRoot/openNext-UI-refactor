@@ -1,26 +1,39 @@
+import { statusBadgeClass, statusToneFromLabel } from './statusBadge';
+
 /**
- * Shared Tailwind chip styling for lead status labels.
- * Hot / Warm / Cold are the default temperature statuses; the remaining
- * branches keep the existing lifecycle colours (Won, Lost, Contacted, …).
+ * Shared theme-aware chip styling for lead status labels.
+ * Uses CSS semantic tokens (success / warning / danger / info / neutral).
  */
 export function getLeadStatusChipClass(status?: string): string {
   const s = String(status || '').trim().toLowerCase();
 
-  if (s === 'hot') return 'bg-red-50 text-red-700 border-red-200';
-  if (s === 'warm') return 'bg-amber-50 text-amber-800 border-amber-200';
-  if (s === 'cold') return 'bg-sky-50 text-sky-800 border-sky-200';
+  if (s === 'hot') return statusBadgeClass('danger');
+  if (s === 'warm') return statusBadgeClass('warning');
+  if (s === 'cold') return statusBadgeClass('info');
 
   if (s === 'won' || s === 'completed' || s === 'qualified') {
-    return 'bg-emerald-50 text-emerald-800 border-emerald-200';
+    return statusBadgeClass('success');
   }
   if (s === 'lost' || s === 'disqualified' || s === 'junk' || s === 'cancelled') {
-    return 'bg-red-50 text-red-800 border-red-200';
+    return statusBadgeClass('danger');
   }
   if (s.includes('proposal') || s.includes('review') || s === 'pending') {
-    return 'bg-amber-50 text-amber-800 border-amber-200';
+    return statusBadgeClass('warning');
   }
   if (s === 'contacted') {
-    return 'bg-blue-50 text-blue-800 border-blue-200';
+    return statusBadgeClass('info');
   }
-  return 'bg-zinc-100 text-zinc-700 border-zinc-200';
+
+  return statusBadgeClass(statusToneFromLabel(status));
+}
+
+/** Pipeline stage badges (Qualified / Won / Lost / …) — theme-aware. */
+export function getLeadStageBadgeClass(stage?: string): string {
+  const s = String(stage || '').toLowerCase();
+  if (s.includes('won')) return statusBadgeClass('solid');
+  if (s.includes('lost') || s.includes('disqualified')) return statusBadgeClass('danger');
+  if (s.includes('proposal')) return statusBadgeClass('warning');
+  if (s.includes('qualified')) return statusBadgeClass('solid');
+  if (s.includes('contacted')) return statusBadgeClass('info');
+  return statusBadgeClass('neutral');
 }

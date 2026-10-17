@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { CircleDollarSign, Scale, TrendingDown, TrendingUp } from 'lucide-react';
 import { IncomeExpenseReportData } from '../../../types/reports';
 import {
   MetricCard,
@@ -83,7 +84,7 @@ export const IncomeExpenseReportTab: React.FC<IncomeExpenseReportTabProps> = ({ 
         <MetricCard
           label="Total Income"
           value={formatMoney(income, currency)}
-          icon="📈"
+          icon={<TrendingUp className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Revenue"
           sub="Payments received"
           to="/payments?status=Completed"
@@ -91,7 +92,7 @@ export const IncomeExpenseReportTab: React.FC<IncomeExpenseReportTabProps> = ({ 
         <MetricCard
           label="Operating Expenses"
           value={formatMoney(expenses, currency)}
-          icon="📉"
+          icon={<TrendingDown className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Outflow"
           sub="Approved expenses"
           to="/expenses?status=Approved"
@@ -99,7 +100,7 @@ export const IncomeExpenseReportTab: React.FC<IncomeExpenseReportTabProps> = ({ 
         <MetricCard
           label="Net Operating Profit"
           value={formatMoney(netProfit, currency)}
-          icon="💰"
+          icon={<CircleDollarSign className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Net"
           sub="Income - Expenses"
           to="/payments"
@@ -107,7 +108,7 @@ export const IncomeExpenseReportTab: React.FC<IncomeExpenseReportTabProps> = ({ 
         <MetricCard
           label="Profit Margin"
           value={`${margin}%`}
-          icon="⚖️"
+          icon={<Scale className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Margin"
           sub="Profit / Income"
           to="/expenses?status=Approved"

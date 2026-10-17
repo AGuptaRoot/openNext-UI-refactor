@@ -13,6 +13,8 @@ import {
   scoreLabel,
   type LeadCommercialRequirement,
 } from '../../utils/qualificationMatchScore';
+import { getDefaultCurrencySymbol } from '../../utils/currency';
+import { isProductRequestType } from '../../utils/isProductRequestType';
 
 function scoreTone(score: number | null | undefined): string {
   if (score == null || Number.isNaN(score)) return 'bg-zinc-100 text-zinc-700 border-zinc-200';
@@ -92,6 +94,7 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
   showToast,
   onSaved,
 }) => {
+  const currencySym = getDefaultCurrencySymbol();
   const { hasAnyPermission } = useAuth();
   const canPromoteGlobal = hasAnyPermission('crm.settings.manage');
 
@@ -121,6 +124,12 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
   });
   const [loadingTypes, setLoadingTypes] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [needsSampleRequest, setNeedsSampleRequest] = useState(() =>
+    Boolean(
+      lead.commercialRequirement?.needsSampleRequest ||
+        lead.qualification?.sampleRequired
+    )
+  );
 
   const readOnly = !canWrite || Boolean(lead.convertedClientId);
 
@@ -145,6 +154,12 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
         setSelectedId(resolved);
         setValues(legacyValuesFromLead(lead.commercialRequirement));
         setCustomOptions(normalizeCustomOptions(lead.commercialRequirement?.customOptions));
+        setNeedsSampleRequest(
+          Boolean(
+            lead.commercialRequirement?.needsSampleRequest ||
+              lead.qualification?.sampleRequired
+          )
+        );
         setScorePreview({
           score: lead.commercialRequirement?.score ?? null,
           breakdown: lead.commercialRequirement?.scoreBreakdown || [],
@@ -169,6 +184,41 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
     return requestTypes.find((rt) => rt._id === selectedId) || null;
   }, [requestTypes, selectedId]);
 
+  const showSampleCheckbox = useMemo(() => {
+    if (
+      isProductRequestType(selectedType, {
+        key: selectedType?.key || lead.commercialRequirement?.requestTypeKey,
+        name: selectedType?.name || lead.requestType,
+        kind: lead.commercialRequirement?.kind,
+      })
+    ) {
+      return true;
+    }
+    // Fallback: Details tab already has Product selected but commercial type
+    // object is still loading / unmatched by id.
+    const byId = requestTypes.find(
+      (rt) =>
+        rt._id === selectedId ||
+        rt._id === lead.requestTypeId ||
+        rt._id === lead.commercialRequirement?.requestTypeId
+    );
+    if (byId && isProductRequestType(byId)) return true;
+    return isProductRequestType(null, {
+      key: lead.commercialRequirement?.requestTypeKey,
+      name: lead.requestType,
+      kind: lead.commercialRequirement?.kind,
+    });
+  }, [
+    selectedType,
+    selectedId,
+    requestTypes,
+    lead.requestType,
+    lead.requestTypeId,
+    lead.commercialRequirement?.requestTypeId,
+    lead.commercialRequirement?.requestTypeKey,
+    lead.commercialRequirement?.kind,
+  ]);
+
   const selectableTypes = useMemo(() => {
     return requestTypes.filter(
       (rt) => rt.isEnabled || rt._id === selectedId || rt._id === lead.requestTypeId
@@ -190,6 +240,9 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
     }
     setValues(nextValues);
     setCustomOptions(nextCustom);
+    if (!isProductRequestType(next)) {
+      setNeedsSampleRequest(false);
+    }
   };
 
   const selectNewOption = (fieldKey: string, optionValue: string, fieldType: string) => {
@@ -260,9 +313,13 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
         values: nextValues,
         customOptions: nextCustom,
         kind: 'dynamic',
+        needsSampleRequest: isProductRequestType(selectedType)
+          ? needsSampleRequest
+          : false,
       });
       const saved = res.data?.commercialRequirement || emptyCommercialRequirement();
       setCustomOptions(normalizeCustomOptions(saved.customOptions));
+      setNeedsSampleRequest(Boolean(saved.needsSampleRequest));
       setScorePreview({
         score: saved.score ?? null,
         breakdown: saved.scoreBreakdown || [],
@@ -305,14 +362,14 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
 
         if (effMin != null && num < effMin) {
           showToast(
-            `${field.label} must be at least ₹${effMin.toLocaleString()} for ${selectedType.name} (allowed range: ₹${effMin.toLocaleString()} – ₹${effMax != null ? effMax.toLocaleString() : '∞'})`,
+            `${field.label} must be at least ${currencySym}${effMin.toLocaleString()} for ${selectedType.name} (allowed range: ${currencySym}${effMin.toLocaleString()} – ${currencySym}${effMax != null ? effMax.toLocaleString() : '∞'})`,
             'error'
           );
           return;
         }
         if (effMax != null && num > effMax) {
           showToast(
-            `${field.label} cannot exceed ₹${effMax.toLocaleString()} for ${selectedType.name} (allowed range: ₹${effMin != null ? effMin.toLocaleString() : '0'} – ₹${effMax.toLocaleString()})`,
+            `${field.label} cannot exceed ${currencySym}${effMax.toLocaleString()} for ${selectedType.name} (allowed range: ${currencySym}${effMin != null ? effMin.toLocaleString() : '0'} – ${currencySym}${effMax.toLocaleString()})`,
             'error'
           );
           return;
@@ -321,15 +378,18 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
     }
     setSaving(true);
     try {
+      const productType = isProductRequestType(selectedType);
       const res = await crmApi.updateLeadCommercialRequirement(leadId, {
         requestTypeId: selectedType._id,
         requestType: selectedType.name,
         values,
         customOptions,
         kind: 'dynamic',
+        needsSampleRequest: productType ? needsSampleRequest : false,
       });
       const saved = res.data.commercialRequirement || emptyCommercialRequirement();
       setCustomOptions(normalizeCustomOptions(saved.customOptions));
+      setNeedsSampleRequest(Boolean(saved.needsSampleRequest));
       setScorePreview({
         score: saved.score ?? null,
         breakdown: saved.scoreBreakdown || [],
@@ -396,6 +456,31 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
           </select>
         </label>
 
+        {/* Product only: checkbox appears immediately when Request Type is Product */}
+        {showSampleCheckbox ? (
+          <label
+            data-tour="lead-needs-sample-request"
+            className="mb-4 flex cursor-pointer items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5"
+          >
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
+              checked={needsSampleRequest}
+              disabled={readOnly}
+              onChange={(e) => setNeedsSampleRequest(e.target.checked)}
+            />
+            <span className="min-w-0">
+              <span className="block text-xs font-semibold text-zinc-950">
+                Lead needs sample request
+              </span>
+              <span className="mt-0.5 block text-[11px] text-zinc-600">
+                Visible only for Product request types. When checked, a &quot;Sample needs&quot; tag
+                appears on the Leads list. Remember to save commercial requirement.
+              </span>
+            </span>
+          </label>
+        ) : null}
+
         {selectedType ? (
           <>
             <div className="mb-3 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2 text-[11px] text-zinc-600">
@@ -413,9 +498,9 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
                   Commercial Budget Limits:
                 </span>
                 <span className="font-semibold text-amber-950">
-                  {selectedType.minBudget != null ? `₹${selectedType.minBudget.toLocaleString()}` : '₹0'}
+                  {selectedType.minBudget != null ? `${currencySym}${selectedType.minBudget.toLocaleString()}` : `${currencySym}0`}
                   {' – '}
-                  {selectedType.maxBudget != null ? `₹${selectedType.maxBudget.toLocaleString()}` : 'No maximum limit'}
+                  {selectedType.maxBudget != null ? `${currencySym}${selectedType.maxBudget.toLocaleString()}` : 'No maximum limit'}
                 </span>
               </div>
             )}

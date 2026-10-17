@@ -208,3 +208,92 @@ export function loadGoogleMapsPlaces(apiKey?: string): Promise<void> {
 export function getGoogleMaps(): GoogleMapsWindow['google'] {
   return (window as GoogleMapsWindow).google;
 }
+
+const PAC_STYLE_ID = 'opennext-crm-google-pac-styles';
+
+/**
+ * Shared Google Places Autocomplete dropdown styles.
+ * Prevents orphaned `.pac-container` nodes from covering the whole CRM UI
+ * (common in CMS iframes when the dropdown is left open after navigation).
+ */
+export function ensureGooglePacStyles(): void {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById(PAC_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = PAC_STYLE_ID;
+  style.textContent = `
+    .pac-container {
+      z-index: 2147483000 !important;
+      position: absolute !important;
+      box-sizing: border-box !important;
+      font-family: inherit !important;
+      border-radius: 8px !important;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+      border: 1px solid #e4e4e7 !important;
+      margin-top: 4px !important;
+      padding: 4px 0 !important;
+      max-width: min(560px, calc(100vw - 24px)) !important;
+      max-height: 280px !important;
+      overflow-x: hidden !important;
+      overflow-y: auto !important;
+      background: #fff !important;
+      pointer-events: auto !important;
+    }
+    /* Only truly empty nodes must be inert — do not hide while Google is filling .pac-item */
+    .pac-container:empty {
+      display: none !important;
+      pointer-events: none !important;
+    }
+    .pac-item {
+      padding: 8px 12px !important;
+      cursor: pointer !important;
+      font-size: 13px !important;
+      line-height: 1.4 !important;
+      border-top: 1px solid #f4f4f5 !important;
+      pointer-events: auto !important;
+    }
+    .pac-item:first-child {
+      border-top: none !important;
+    }
+    .pac-item:hover,
+    .pac-item-selected {
+      background-color: #f4f4f5 !important;
+    }
+    .pac-item-query {
+      font-size: 13px !important;
+      color: #18181b !important;
+      font-weight: 500 !important;
+    }
+    .pac-matched {
+      font-weight: 700 !important;
+      color: #09090b !important;
+    }
+    .pac-icon {
+      margin-top: 3px !important;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+/**
+ * Hide Places dropdowns. Only set display — Google clears/toggles display
+ * on the next keystroke. Do NOT set visibility/opacity (those stick and
+ * break autocomplete until the node is recreated).
+ */
+export function hideGooglePacContainers(): void {
+  if (typeof document === 'undefined') return;
+  document.querySelectorAll<HTMLElement>('.pac-container').forEach((el) => {
+    el.style.display = 'none';
+    el.style.removeProperty('visibility');
+    el.style.removeProperty('opacity');
+    el.style.removeProperty('pointer-events');
+  });
+}
+
+/** Remove Places dropdown nodes from document.body (Google recreates on next search). */
+export function removeGooglePacContainers(): void {
+  if (typeof document === 'undefined') return;
+  document.querySelectorAll('.pac-container').forEach((el) => {
+    el.parentElement?.removeChild(el);
+  });
+}

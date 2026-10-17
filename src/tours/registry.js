@@ -2,13 +2,14 @@ import { analyticsAiTourSteps } from './steps/analyticsAi.js';
 
 /**
  * Tours run on these modules (first visit).
- * Dedicated Beacon tours: dashboard, leads, clients, projects, tasks, reports, time-logs, quotations, invoices, expenses, data-quality, sales-orders, samples, opportunities, tickets, customer-success, marketing, audit, settings.
+ * Dedicated Beacon tours: dashboard, leads, clients, contacts, projects, tasks, reports, time-logs, quotations, invoices, expenses, data-quality, sales-orders, samples, opportunities, tickets, customer-success, marketing, audit, settings.
  * Still excluded from ModuleTour: payments.
  */
 export const tourRegistry = {
   // dashboard: handled by DashboardTour (Beacon workflow)
   // leads: handled by dedicated LeadsTour (Beacon workflow) — not ModuleTour
   // clients: handled by dedicated ClientsTour (Beacon workflow) — not ModuleTour
+  // contacts: handled by dedicated ContactsTour (Beacon workflow) — not ModuleTour
   // projects: handled by dedicated ProjectsTour (Beacon workflow) — not ModuleTour
   // tasks: handled by dedicated TasksTour (Beacon workflow) — not ModuleTour
   // reports: handled by ReportsTour (Beacon workflow)

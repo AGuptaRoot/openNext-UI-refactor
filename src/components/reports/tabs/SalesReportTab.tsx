@@ -1,4 +1,5 @@
 import React from 'react';
+import { CircleDollarSign, TrendingUp, Trophy, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { SalesReportData, ReportRolePermissions } from '../../../types/reports';
 import {
@@ -76,7 +77,7 @@ export const SalesReportTab: React.FC<SalesReportTabProps> = ({ data, perms }) =
         <MetricCard
           label="Leads in range"
           value={data.totalLeads ?? 0}
-          icon="👥"
+          icon={<Users className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Pipeline"
           sub="Selected period"
           to={withClient('/leads', clientId)}
@@ -84,7 +85,7 @@ export const SalesReportTab: React.FC<SalesReportTabProps> = ({ data, perms }) =
         <MetricCard
           label="Won leads"
           value={data.wonLeads ?? 0}
-          icon="🏆"
+          icon={<Trophy className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Closed"
           sub="Won stage"
           to={withClient('/leads?stage=Won', clientId)}
@@ -92,7 +93,7 @@ export const SalesReportTab: React.FC<SalesReportTabProps> = ({ data, perms }) =
         <MetricCard
           label="Conversion rate"
           value={`${data.conversionRate ?? 0}%`}
-          icon="📈"
+          icon={<TrendingUp className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Rate"
           sub="Won / total"
           to={withClient('/leads', clientId)}
@@ -101,7 +102,7 @@ export const SalesReportTab: React.FC<SalesReportTabProps> = ({ data, perms }) =
           <MetricCard
             label="Payments collected"
             value={formatMoney(data.paymentsTotal ?? 0, currency)}
-            icon="💰"
+            icon={<CircleDollarSign className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
             hint="Inflow"
             sub="Cash collected"
             to={withClient('/payments?status=Completed', clientId)}

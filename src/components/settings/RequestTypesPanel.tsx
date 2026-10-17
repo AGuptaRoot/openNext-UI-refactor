@@ -15,6 +15,8 @@ import {
   type RequestType,
   type RequestTypeField,
 } from '../../types/request-types';
+import { getDefaultCurrencySymbol } from '../../utils/currency';
+import { AlertTriangle, Ruler } from 'lucide-react';
 
 const inputClass =
   'h-9 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-400';
@@ -34,6 +36,7 @@ type Draft = {
 };
 
 export function RequestTypesPanel() {
+  const currencySym = getDefaultCurrencySymbol();
   const [items, setItems] = useState<RequestType[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -290,7 +293,7 @@ export function RequestTypesPanel() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-600 text-white text-xs font-bold font-mono">
-                      ₹
+                      {currencySym}
                     </span>
                     <div>
                       <h4 className="m-0 text-xs font-bold text-zinc-950">
@@ -362,14 +365,17 @@ export function RequestTypesPanel() {
 
                 {draft.minBudget != null && draft.maxBudget != null && draft.minBudget > draft.maxBudget ? (
                   <p className="m-0 text-[11px] font-semibold text-red-600">
-                    ⚠ Minimum amount cannot be greater than maximum amount.
+                    <span className="inline-flex items-center gap-1">
+                      <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+                      Minimum amount cannot be greater than maximum amount.
+                    </span>
                   </p>
                 ) : (draft.minBudget != null || draft.maxBudget != null) ? (
                   <div className="rounded-lg bg-white/80 border border-blue-200/60 px-3 py-1.5 text-[11px] text-zinc-700 flex items-center justify-between">
                     <span className="font-semibold text-blue-900">Commercial Requirement Allowed Range:</span>
                     <span className="font-mono font-bold text-zinc-900">
-                      {draft.minBudget != null ? `₹${draft.minBudget.toLocaleString()}` : '₹0'} –{' '}
-                      {draft.maxBudget != null ? `₹${draft.maxBudget.toLocaleString()}` : '∞'}
+                      {draft.minBudget != null ? `${currencySym}${draft.minBudget.toLocaleString()}` : `${currencySym}0`} –{' '}
+                      {draft.maxBudget != null ? `${currencySym}${draft.maxBudget.toLocaleString()}` : '∞'}
                     </span>
                   </div>
                 ) : null}
@@ -412,7 +418,8 @@ export function RequestTypesPanel() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] font-semibold text-zinc-600">
-              <span>📐</span> Request Types
+              <Ruler className="h-[18px] w-[18px] shrink-0" aria-hidden />
+              Request Types
             </div>
             <h2 className="m-0 text-xl font-bold tracking-tight text-zinc-950">
               Dynamic Request Type Builder
@@ -494,21 +501,21 @@ export function RequestTypesPanel() {
                         if (min != null && max != null) {
                           return (
                             <span className="font-mono font-medium text-emerald-800 bg-emerald-50 border border-emerald-200/80 rounded px-2 py-0.5">
-                              ₹{min.toLocaleString()} – ₹{max.toLocaleString()}
+                              {currencySym}{min.toLocaleString()} – {currencySym}{max.toLocaleString()}
                             </span>
                           );
                         }
                         if (min != null) {
                           return (
                             <span className="font-mono font-medium text-blue-800 bg-blue-50 border border-blue-200/80 rounded px-2 py-0.5">
-                              Min: ₹{min.toLocaleString()}
+                              Min: {currencySym}{min.toLocaleString()}
                             </span>
                           );
                         }
                         if (max != null) {
                           return (
                             <span className="font-mono font-medium text-blue-800 bg-blue-50 border border-blue-200/80 rounded px-2 py-0.5">
-                              Max: ₹{max.toLocaleString()}
+                              Max: {currencySym}{max.toLocaleString()}
                             </span>
                           );
                         }

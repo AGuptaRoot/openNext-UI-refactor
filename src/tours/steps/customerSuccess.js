@@ -157,7 +157,7 @@ export const customerSuccessTourSteps = [
     target: T('cs-csat-modal'),
     title: 'CSAT review wizard',
     content:
-      'Three steps with a progress bar. Staff pick a client; clients review their own locked profile. Tour will not save feedback.',
+      'Four steps with a progress bar. Staff pick a client; clients review their own locked profile, then choose related tasks. Tour will not save feedback.',
     skipBeacon: true,
     before: async () => {
       await ensureModalStep(1);
@@ -191,13 +191,25 @@ export const customerSuccessTourSteps = [
   }),
 
   step({
+    id: 'cs-modal-tasks',
+    target: T('cs-modal-tasks'),
+    title: '3. Related tasks',
+    content:
+      'Clients (and staff) can select one or more related tasks this review is about. Continue is allowed with none selected.',
+    before: async () => {
+      await ensureModalStep(3);
+      await waitForSelector(T('cs-modal-tasks'), 4000);
+    },
+  }),
+
+  step({
     id: 'cs-modal-details',
     target: T('cs-modal-details'),
-    title: '3. Category & comments',
+    title: '4. Category & comments',
     content:
       'Pick a category (Product Quality, Delivery, Service, Pricing, General) and optional comments. Soft-skipped if the modal is blocked.',
     before: async () => {
-      await ensureModalStep(3);
+      await ensureModalStep(4);
       await waitForSelector(T('cs-modal-details'), 4000);
     },
   }),
@@ -209,7 +221,7 @@ export const customerSuccessTourSteps = [
     content:
       'Back returns to the previous step. Submit Review saves CSAT — we skip saving on the tour and close the modal next.',
     before: async () => {
-      await ensureModalStep(3);
+      await ensureModalStep(4);
       await waitForSelector(T('cs-modal-actions'), 4000);
     },
   }),
@@ -243,7 +255,7 @@ export const customerSuccessTourSteps = [
     target: T('cs-wall-of-love'),
     title: 'Wall of Love',
     content:
-      'Recent CSAT cards with stars, category, date, and quotes. Soft-skipped when there are no reviews yet.',
+      'CSAT listing table with client, task name, stars, category, date, and comments. Soft-skipped when there are no reviews yet.',
     before: async () => {
       await ensureReviewsTab();
       await waitForSelector(T('cs-wall-of-love'), 4000);

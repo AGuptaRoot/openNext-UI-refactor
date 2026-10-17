@@ -174,7 +174,7 @@ export const FinancePdfScanModal: React.FC<FinancePdfScanModalProps> = ({
                   {preview.documentNumber || '—'}
                 </div>
                 <div>
-                  <span className="text-zinc-500">Currency *:</span> {preview.currency || 'INR'}
+                  <span className="text-zinc-500">Currency *:</span> {preview.currency || getRuntimeDefaultCurrency()}
                 </div>
                 <div>
                   <span className="text-zinc-500">Issue date *:</span> {preview.issueDate || '—'}

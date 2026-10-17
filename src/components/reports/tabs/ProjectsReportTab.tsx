@@ -1,4 +1,5 @@
 import React from 'react';
+import { CheckCircle2, ClipboardList, FolderKanban, Siren } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ProjectsReportData, ReportRolePermissions } from '../../../types/reports';
 import {
@@ -51,7 +52,7 @@ export const ProjectsReportTab: React.FC<ProjectsReportTabProps> = ({ data, perm
         <MetricCard
           label="Total Projects"
           value={projects.length}
-          icon="📁"
+          icon={<FolderKanban className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Portfolio"
           sub="Active & completed"
           to="/projects"
@@ -59,7 +60,7 @@ export const ProjectsReportTab: React.FC<ProjectsReportTabProps> = ({ data, perm
         <MetricCard
           label="Deliverables"
           value={totalTasks}
-          icon="📋"
+          icon={<ClipboardList className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Tasks"
           sub="Across projects"
           to="/tasks"
@@ -67,7 +68,7 @@ export const ProjectsReportTab: React.FC<ProjectsReportTabProps> = ({ data, perm
         <MetricCard
           label="Completed"
           value={completedTasks}
-          icon="✅"
+          icon={<CheckCircle2 className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Delivery"
           sub={`${totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0}% complete`}
           to="/tasks?status=Completed"
@@ -75,7 +76,7 @@ export const ProjectsReportTab: React.FC<ProjectsReportTabProps> = ({ data, perm
         <MetricCard
           label="Overdue Tasks"
           value={overdueTasks.length}
-          icon="🚨"
+          icon={<Siren className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Attention"
           sub="Past due date"
           to="/tasks?due=overdue"

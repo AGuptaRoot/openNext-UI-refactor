@@ -16,6 +16,22 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CancelOutlinedIcon from '@mui/icons-material/CancelOutlined';
+import {
+  AlertTriangle,
+  Bell,
+  Calendar,
+  CheckSquare,
+  Flag,
+  Link2,
+  Mail,
+  MessageCircle,
+  Pencil,
+  Repeat,
+  Save,
+  Timer,
+  User,
+  X,
+} from 'lucide-react';
 
 import { useAuth } from '../../context/AuthContext';
 import { displayUserLabel } from '../../utils/displayLabels';
@@ -266,12 +282,8 @@ export const TaskDetailPage: React.FC = () => {
     };
   }, [id]);
 
-  // Format Currency
-  const currency = project?.currency || 'INR';
-  const formatMoney = (val: number) => {
-    const symbol = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : '₹';
-    return `${symbol}${Number(val || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  };
+  const currency = project?.currency || getRuntimeDefaultCurrency();
+  const formatMoney = (val: number) => formatCrmMoney(val, currency);
 
   // 4 Executive Metrics Calculations
   const totalSubtasks = subtasks.length;
@@ -1300,7 +1312,10 @@ export const TaskDetailPage: React.FC = () => {
                   </p>
                   {task.isDependencyBlocked && (
                     <p className="m-0 text-[11px] text-amber-700 font-medium">
-                      ⚠️ Prerequisite deliverable has not been completed yet.
+                      <span className="inline-flex items-center gap-1">
+                        <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+                        Prerequisite deliverable has not been completed yet.
+                      </span>
                     </p>
                   )}
                 </div>
@@ -1597,7 +1612,10 @@ export const TaskDetailPage: React.FC = () => {
                           <div className="flex items-center gap-2 flex-shrink-0">
                             {subtaskUserName && (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-zinc-100 text-zinc-700 border border-zinc-200">
-                                👤 {subtaskUserName}
+                                <span className="inline-flex items-center gap-1">
+                                  <User className="h-4 w-4 shrink-0" aria-hidden />
+                                  {subtaskUserName}
+                                </span>
                               </span>
                             )}
                             {s.dueDate && (
@@ -1606,7 +1624,10 @@ export const TaskDetailPage: React.FC = () => {
                                   ? 'bg-red-50 text-red-700 border-red-200 font-bold'
                                   : 'bg-zinc-50 text-zinc-600 border-zinc-200'
                               }`}>
-                                📅 {s.dueDate.slice(0, 10)}
+                                <span className="inline-flex items-center gap-1">
+                                  <Calendar className="h-4 w-4 shrink-0" aria-hidden />
+                                  {s.dueDate.slice(0, 10)}
+                                </span>
                               </span>
                             )}
                             {canManageTasks && (
@@ -1616,7 +1637,7 @@ export const TaskDetailPage: React.FC = () => {
                                 className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-600 text-xs p-1 border-none bg-transparent cursor-pointer transition-opacity"
                                 title="Delete subtask"
                               >
-                                ✕
+                                <X className="h-4 w-4 shrink-0" aria-hidden />
                               </button>
                             )}
                           </div>
@@ -1652,7 +1673,7 @@ export const TaskDetailPage: React.FC = () => {
                         : 'bg-emerald-50 text-emerald-700'
                     }`}
                   >
-                    ⏱️
+                    <Timer className="h-5 w-5 shrink-0" aria-hidden />
                   </div>
                   <div>
                     <h4 className="m-0 text-xs font-bold text-zinc-900">
@@ -2197,14 +2218,28 @@ export const TaskDetailPage: React.FC = () => {
               <div className="flex items-start justify-between gap-2">
                 <span className="text-zinc-500">Milestone:</span>
                 <span className="text-zinc-800 text-right">
-                  {task.milestoneTitle ? `🚩 ${task.milestoneTitle}` : 'None'}
+                  {task.milestoneTitle ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Flag className="h-4 w-4 shrink-0" aria-hidden />
+                      {task.milestoneTitle}
+                    </span>
+                  ) : (
+                    'None'
+                  )}
                 </span>
               </div>
 
               <div className="flex items-start justify-between gap-2">
                 <span className="text-zinc-500">Depends on:</span>
                 <span className="text-zinc-800 text-right">
-                  {task.dependsOnTaskTitle ? `🔗 ${task.dependsOnTaskTitle}` : 'None'}
+                  {task.dependsOnTaskTitle ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Link2 className="h-4 w-4 shrink-0" aria-hidden />
+                      {task.dependsOnTaskTitle}
+                    </span>
+                  ) : (
+                    'None'
+                  )}
                 </span>
               </div>
 
@@ -2319,7 +2354,7 @@ export const TaskDetailPage: React.FC = () => {
                           className="text-zinc-400 hover:text-red-600 text-[11px] p-0.5 border-none bg-transparent cursor-pointer"
                           title="Remove watcher"
                         >
-                          ✕
+                          <X className="h-4 w-4 shrink-0" aria-hidden />
                         </button>
                       )}
                     </div>
@@ -2379,7 +2414,10 @@ export const TaskDetailPage: React.FC = () => {
                     : 'bg-zinc-50 hover:bg-zinc-100 text-zinc-800 border-zinc-200'
                 }`}
               >
-                <span>⏱️ {activeCheckIn ? 'Stop Active Timer' : 'Start Task Timer'}</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <Timer className="h-4 w-4 shrink-0" aria-hidden />
+                  {activeCheckIn ? 'Stop Active Timer' : 'Start Task Timer'}
+                </span>
                 {activeCheckIn && (
                   <span className="font-mono">{formatTimerSeconds(elapsedSecs)}</span>
                 )}
@@ -2393,7 +2431,10 @@ export const TaskDetailPage: React.FC = () => {
                 onClick={handleOpenSaveTemplate}
                 className="py-2 px-3 rounded-lg text-xs font-semibold border border-zinc-200 bg-zinc-50 hover:bg-zinc-100 text-zinc-800 flex items-center justify-between cursor-pointer transition-colors"
               >
-                <span>💾 Save as Template</span>
+                <span className="inline-flex items-center gap-1">
+                  <Save className="h-4 w-4 shrink-0" aria-hidden />
+                  Save as Template
+                </span>
                 <span className="text-[10px] text-zinc-400">Blueprint</span>
               </button>
               )}
@@ -2407,7 +2448,19 @@ export const TaskDetailPage: React.FC = () => {
                 className="py-2 px-3 rounded-lg text-xs font-semibold border border-zinc-200 bg-zinc-50 hover:bg-zinc-100 text-zinc-800 flex items-center justify-between cursor-pointer transition-colors"
                 title="Send or resend review reminder email to client"
               >
-                <span>{task.clientNotifiedAt ? '🔔 Resend Reminder' : '✉️ Send Review Email'}</span>
+                <span className="inline-flex items-center gap-1">
+                  {task.clientNotifiedAt ? (
+                    <>
+                      <Bell className="h-4 w-4 shrink-0" aria-hidden />
+                      Resend Reminder
+                    </>
+                  ) : (
+                    <>
+                      <Mail className="h-4 w-4 shrink-0" aria-hidden />
+                      Send Review Email
+                    </>
+                  )}
+                </span>
                 <span className="text-[10px] text-zinc-400">Client Email</span>
               </button>
               )}
@@ -2422,7 +2475,10 @@ export const TaskDetailPage: React.FC = () => {
                 }}
                 className="py-2 px-3 rounded-lg text-xs font-semibold border border-zinc-200 bg-zinc-50 hover:bg-zinc-100 text-zinc-800 flex items-center justify-between cursor-pointer transition-colors"
               >
-                <span>☑️ Add Subtask</span>
+                <span className="inline-flex items-center gap-1">
+                  <CheckSquare className="h-4 w-4 shrink-0" aria-hidden />
+                  Add Subtask
+                </span>
                 <span className="text-[10px] text-zinc-400">Checklist</span>
               </button>
               )}
@@ -2437,7 +2493,10 @@ export const TaskDetailPage: React.FC = () => {
                 }}
                 className="py-2 px-3 rounded-lg text-xs font-semibold border border-zinc-200 bg-zinc-50 hover:bg-zinc-100 text-zinc-800 flex items-center justify-between cursor-pointer transition-colors"
               >
-                <span>💬 Post Comment</span>
+                <span className="inline-flex items-center gap-1">
+                  <MessageCircle className="h-4 w-4 shrink-0" aria-hidden />
+                  Post Comment
+                </span>
                 <span className="text-[10px] text-zinc-400">Discussion</span>
               </button>
               )}
@@ -2449,7 +2508,10 @@ export const TaskDetailPage: React.FC = () => {
                 onClick={() => setEditModalOpen(true)}
                 className="py-2 px-3 rounded-lg text-xs font-semibold border border-zinc-200 bg-zinc-50 hover:bg-zinc-100 text-zinc-800 flex items-center justify-between cursor-pointer transition-colors"
               >
-                <span>✏️ Edit Task Details</span>
+                <span className="inline-flex items-center gap-1">
+                  <Pencil className="h-4 w-4 shrink-0" aria-hidden />
+                  Edit Task Details
+                </span>
                 <span className="text-[10px] text-zinc-400">Settings</span>
               </button>
               )}
@@ -2636,7 +2698,10 @@ export const TaskDetailPage: React.FC = () => {
                     <option value="">None (General Deliverable)</option>
                     {projectMilestones.map((ms) => (
                       <option key={ms._id} value={ms._id}>
-                        🚩 {ms.title}
+                        <span className="inline-flex items-center gap-1">
+                          <Flag className="h-4 w-4 shrink-0" aria-hidden />
+                          {ms.title}
+                        </span>
                       </option>
                     ))}
                   </select>
@@ -2656,7 +2721,10 @@ export const TaskDetailPage: React.FC = () => {
                       .filter((pt) => pt._id !== task._id)
                       .map((pt) => (
                         <option key={pt._id} value={pt._id}>
-                          🔗 {pt.title} [{pt.status}]
+                          <span className="inline-flex items-center gap-1">
+                            <Link2 className="h-4 w-4 shrink-0" aria-hidden />
+                            {pt.title} [{pt.status}]
+                          </span>
                         </option>
                       ))}
                   </select>
@@ -2681,7 +2749,10 @@ export const TaskDetailPage: React.FC = () => {
                     checked={draft.isRecurring || false}
                     onChange={(e) => setDraft({ ...draft, isRecurring: e.target.checked })}
                   />
-                  <span>🔁 Repeat this task (Recurring Task Schedule)</span>
+                  <span className="inline-flex items-center gap-1">
+                    <Repeat className="h-4 w-4 shrink-0" aria-hidden />
+                    Repeat this task (Recurring Task Schedule)
+                  </span>
                 </label>
 
                 {draft.isRecurring && (

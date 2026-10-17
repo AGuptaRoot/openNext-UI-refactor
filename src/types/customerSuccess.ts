@@ -18,6 +18,10 @@ export interface CustomerFeedbackItem {
   orderId?: string | null;
   sampleId?: string | null;
   ticketId?: string | null;
+  taskId?: string | null;
+  taskIds?: string[];
+  /** Related task name(s) shown in CSAT list columns. */
+  taskName?: string;
   rating: number;
   category: string;
   comments?: string;
@@ -34,6 +38,10 @@ export interface CustomerFeedbackCreateInput {
   orderId?: string;
   sampleId?: string;
   ticketId?: string;
+  taskId?: string;
+  taskIds?: string[];
+  taskName?: string;
+  taskNames?: string[];
   submittedBy?: string;
 }
 
@@ -106,10 +114,15 @@ export function healthCategoryTone(category: HealthCategory): string {
   return 'bg-red-50 text-red-800 border-red-200';
 }
 
-export function healthCategoryEmoji(category: HealthCategory): string {
-  if (category === 'Healthy') return '🟢';
-  if (category === 'At Risk') return '🟡';
-  return '🔴';
+export function healthCategoryDotClass(category: HealthCategory): string {
+  if (category === 'Healthy') return 'bg-emerald-500';
+  if (category === 'At Risk') return 'bg-amber-500';
+  return 'bg-red-500';
+}
+
+/** @deprecated Use healthCategoryDotClass with a colored dot instead */
+export function healthCategoryEmoji(_category: HealthCategory): string {
+  return '';
 }
 
 export function computeCsatScore(ratings: number[]): { score: number; avg: number | null } {
@@ -160,15 +173,15 @@ export function recommendRetentionAction(input: {
   overdueInvoices: number;
 }): string {
   if (input.healthCategory === 'Critical') {
-    if (input.openTickets > 0) return '🚨 Escalate Open Complaints Immediately';
-    if (input.overdueInvoices > 0) return '💳 Resolve Overdue Invoices & Payment Terms';
-    return '📞 Executive VIP Intervention Needed';
+    if (input.openTickets > 0) return 'Escalate Open Complaints Immediately';
+    if (input.overdueInvoices > 0) return 'Resolve Overdue Invoices & Payment Terms';
+    return 'Executive VIP Intervention Needed';
   }
   if (input.healthCategory === 'At Risk') {
-    if (input.openTickets > 0) return '⚠️ Priority Ticket Resolution';
-    return '🤝 Schedule Relationship Review Call';
+    if (input.openTickets > 0) return 'Priority Ticket Resolution';
+    return 'Schedule Relationship Review Call';
   }
-  return '⭐ Propose Upsell & Renewal Contract';
+  return 'Propose Upsell & Renewal Contract';
 }
 
 export function buildHealthFactors(input: {

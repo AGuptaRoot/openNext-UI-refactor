@@ -684,7 +684,7 @@ export const ExpensesPage: React.FC = () => {
                 onClick={() => setExportOpen((open) => !open)}
                 className="inline-flex h-9 items-center gap-1 px-3 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer"
               >
-                <DownloadIcon sx={{ fontSize: 15 }} /> Export CSV
+                <DownloadIcon sx={{ fontSize: 15 }} /> Export
               </button>
               {exportOpen && (
                 <div className="absolute right-0 z-20 mt-1 w-36 rounded-lg border border-zinc-300 bg-white shadow-lg overflow-hidden">
@@ -694,7 +694,7 @@ export const ExpensesPage: React.FC = () => {
                     onClick={() => exportData('csv')}
                     className="block w-full text-left px-3 py-2 text-xs font-semibold hover:bg-zinc-50 border-0 bg-white cursor-pointer"
                   >
-                    Download CSV
+                    Export CSV
                   </button>
                   <button
                     type="button"
@@ -702,7 +702,7 @@ export const ExpensesPage: React.FC = () => {
                     onClick={() => exportData('json')}
                     className="block w-full text-left px-3 py-2 text-xs font-semibold hover:bg-zinc-50 border-0 bg-white cursor-pointer border-t border-zinc-100"
                   >
-                    Download JSON
+                    Export JSON
                   </button>
                 </div>
               )}

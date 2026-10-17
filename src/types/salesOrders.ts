@@ -177,6 +177,12 @@ export interface SalesOrderItem {
   orderNumber: string;
   quotationId?: string | null;
   opportunityId?: string | null;
+  /** Enriched from linked Opportunity (by opportunityId). */
+  opportunityTitle?: string | null;
+  opportunityStage?: string | null;
+  opportunityStageType?: string | null;
+  opportunityExpectedRevenue?: number | null;
+  opportunityCurrency?: string | null;
   clientId: string;
   clientName?: string;
   clientEmail?: string;
@@ -189,6 +195,9 @@ export interface SalesOrderItem {
   deliveryTargetDate?: string | null;
   status: SalesOrderStatus;
   currency?: string;
+  /** Alias of `currency` (ISO 4217) for per-record override APIs. */
+  currencyCode?: string;
+  exchangeRate?: number;
   lineItems: SalesOrderLineItem[];
   subtotal?: number;
   discountType?: 'percent' | 'amount' | 'fixed';
@@ -249,6 +258,8 @@ export type SalesOrderCreateInput = {
   discount?: number;
   shippingCharge: number;
   currency?: string;
+  currencyCode?: string;
+  exchangeRate?: number;
   notes?: string;
   totalWeightKg?: number;
 };

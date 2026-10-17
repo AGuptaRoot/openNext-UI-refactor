@@ -1,3 +1,5 @@
+import { formatCrmMoney } from '../utils/currency';
+
 export type CampaignType =
   | 'Lost Lead Re-engagement'
   | 'Repeat Business Nurture'
@@ -291,7 +293,7 @@ export function renderMarketingTemplate(
   const ctaUrl = recipient.ctaUrl || '#';
   const ctaButton = `<div style="margin: 24px 0; text-align: center;">
   <a href="${ctaUrl}" style="background: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
-    👉 Click Here — I am Interested / Request Quote
+    Click Here — I am Interested / Request Quote
   </a>
 </div>`;
 
@@ -310,16 +312,8 @@ export function renderMarketingTemplate(
   return output;
 }
 
-export function formatMarketingMoney(amount: number, currency = 'INR'): string {
-  try {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 0,
-    }).format(Number(amount) || 0);
-  } catch {
-    return `₹${Math.round(Number(amount) || 0).toLocaleString('en-IN')}`;
-  }
+export function formatMarketingMoney(amount: number, currency?: string): string {
+  return formatCrmMoney(amount, currency, { maximumFractionDigits: 0 });
 }
 
 export function conversionRate(sent: number, reEngaged: number): number {

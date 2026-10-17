@@ -1,4 +1,5 @@
 import React from 'react';
+import { BarChart3, Briefcase, Clock, CreditCard } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { TimeReportData } from '../../../types/reports';
 import { displayUserLabel } from '../../../utils/displayLabels';
@@ -46,7 +47,7 @@ export const TimeReportTab: React.FC<TimeReportTabProps> = ({ data }) => {
         <MetricCard
           label="Total Hours Logged"
           value={`${data.totalHours ?? 0}h`}
-          icon="⏰"
+          icon={<Clock className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Labor"
           sub="All logged work"
           to="/time-logs"
@@ -54,7 +55,7 @@ export const TimeReportTab: React.FC<TimeReportTabProps> = ({ data }) => {
         <MetricCard
           label="Billable Hours"
           value={`${data.billableHours ?? 0}h`}
-          icon="💳"
+          icon={<CreditCard className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Invoiced"
           sub="Client-chargeable"
           to="/time-logs?billable=billable"
@@ -62,7 +63,7 @@ export const TimeReportTab: React.FC<TimeReportTabProps> = ({ data }) => {
         <MetricCard
           label="Non-Billable"
           value={`${data.nonBillableHours ?? 0}h`}
-          icon="💼"
+          icon={<Briefcase className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Internal"
           sub="Admin & overhead"
           to="/time-logs?billable=non"
@@ -70,7 +71,7 @@ export const TimeReportTab: React.FC<TimeReportTabProps> = ({ data }) => {
         <MetricCard
           label="Billable Ratio"
           value={`${data.billablePercent ?? 0}%`}
-          icon="📊"
+          icon={<BarChart3 className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Efficiency"
           sub="Billable / Total"
           to="/time-logs"

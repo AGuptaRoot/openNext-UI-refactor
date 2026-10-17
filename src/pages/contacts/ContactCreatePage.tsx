@@ -186,7 +186,10 @@ export const ContactCreatePage: React.FC = () => {
   }
 
   return (
-    <div className="flex w-full flex-col gap-6 pb-16 font-sans max-w-3xl">
+    <div
+      data-tour="contacts-create-form"
+      className="flex w-full flex-col gap-6 pb-16 font-sans max-w-3xl"
+    >
       <div className="flex items-center justify-between pt-1">
         <div className="flex items-center gap-2 text-xs text-zinc-500">
           <Link to="/dashboard" className="text-zinc-600 hover:text-zinc-950 no-underline">
@@ -220,6 +223,7 @@ export const ContactCreatePage: React.FC = () => {
         </div>
         <button
           type="button"
+          data-tour="contacts-create-ocr"
           onClick={() => setShowOcrModal(true)}
           className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-800 shadow-sm shrink-0 cursor-pointer"
         >
@@ -261,17 +265,21 @@ export const ContactCreatePage: React.FC = () => {
       )}
 
       <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-6">
-        <section className="bg-white border border-zinc-300 rounded-xl p-6">
+        <section
+          data-tour="contacts-create-fields"
+          className="bg-white border border-zinc-300 rounded-xl p-6"
+        >
           <ContactFormFields
             values={values}
             onChange={patch}
             disabled={saving}
             onFieldBlur={(vals) => void checkValues(vals)}
             onUploadError={setError}
+            tourPrefix="contacts-create"
           />
         </section>
 
-        <div className="flex items-center justify-end gap-3">
+        <div data-tour="contacts-create-actions" className="flex items-center justify-end gap-3">
           <button
             type="button"
             onClick={() => navigate(backTo)}

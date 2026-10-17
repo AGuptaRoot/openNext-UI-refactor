@@ -6,6 +6,7 @@ import CalendarTodayOutlinedIcon from '@mui/icons-material/CalendarTodayOutlined
 import { CrmRole, DashboardPeriod } from '../../types/dashboard';
 import { useAuth } from '../../context/AuthContext';
 import { TourButton } from '../../ui/tour';
+import { CrmRoleIcon } from '../icons/CrmRoleIcon';
 
 interface DashboardHeaderProps {
   period: DashboardPeriod;
@@ -15,14 +16,14 @@ interface DashboardHeaderProps {
   isRefreshing: boolean;
 }
 
-const ROLE_LABELS: Record<CrmRole, { label: string; icon: string }> = {
-  'crm-manager': { label: 'CRM Manager', icon: '👑' },
-  'sales-manager': { label: 'Sales Manager', icon: '📈' },
-  'sales-representative': { label: 'Sales Representative', icon: '🎯' },
-  'project-manager': { label: 'Project Lead', icon: '📁' },
-  'crm-employee': { label: 'Team Member', icon: '💻' },
-  'finance-manager': { label: 'Finance Lead', icon: '💳' },
-  client: { label: 'Client Portal', icon: '👤' },
+const ROLE_LABELS: Record<CrmRole, { label: string }> = {
+  'crm-manager': { label: 'CRM Manager' },
+  'sales-manager': { label: 'Sales Manager' },
+  'sales-representative': { label: 'Sales Representative' },
+  'project-manager': { label: 'Project Lead' },
+  'crm-employee': { label: 'Team Member' },
+  'finance-manager': { label: 'Finance Lead' },
+  client: { label: 'Client Portal' },
 };
 
 const PERIODS: Array<{ value: DashboardPeriod; label: string }> = [
@@ -69,7 +70,8 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
             className="inline-flex items-center gap-1.5 text-xs font-semibold bg-zinc-100 text-zinc-900 border border-zinc-200 px-2.5 py-1 rounded-lg"
             title="CRM role from your CMS session (not switchable)"
           >
-            <span>{currentRoleObj.icon}</span> {currentRoleObj.label}
+            <CrmRoleIcon role={activeRole} className="h-4 w-4 shrink-0 text-zinc-700" />{' '}
+            {currentRoleObj.label}
           </span>
         </div>
 

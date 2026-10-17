@@ -8,7 +8,7 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 
 import { useAuth } from '../../context/AuthContext';
 import { useDialog } from '../../context/DialogContext';
-import { crmApi } from '../../services/api';
+import { ApiError, crmApi } from '../../services/api';
 import { AssignableUser } from '../../types/leads';
 import {
   OpportunityItem,
@@ -69,11 +69,13 @@ export const OpportunityDetailPage: React.FC = () => {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const { hasPermission, isClient, user, activeRole } = useAuth();
-  const { alert, confirm } = useDialog();
+  const { confirm } = useDialog();
 
   const canWrite =
     (hasPermission('crm.opportunities.write') || hasPermission('crm.leads.write')) && !isClient;
   const canDelete = hasPermission('crm.opportunities.delete') && !isClient;
+  const canViewSalesOrders = hasPermission('crm.orders.read') && !isClient;
+  const canCreateSalesOrders = hasPermission('crm.orders.write') && !isClient;
   const canRequestSample =
     (hasPermission('crm.samples.write') ||
       hasPermission('crm.opportunities.write') ||
@@ -240,41 +242,66 @@ export const OpportunityDetailPage: React.FC = () => {
     }
   };
 
+  const promptOpenExistingSalesOrder = async (salesOrderId?: string | null) => {
+    const open = await confirm({
+      title: 'Sales Order exists',
+      message: 'A Sales Order already exists for this Opportunity.',
+      confirmLabel: 'Open Sales Order',
+      cancelLabel: 'Close',
+    });
+    if (open && salesOrderId && salesOrderId !== 'converted') {
+      navigate(`/sales-orders/${salesOrderId}`);
+    }
+  };
+
   const runConvertSalesOrder = async () => {
     if (!item) return;
     if (item.generatedSalesOrderId) {
-      await alert({
-        title: 'Opportunity Converted',
-        message: 'This opportunity converted',
-      });
+      await promptOpenExistingSalesOrder(item.generatedSalesOrderId);
       return;
     }
-    if (!(await confirm(`Generate sales order from "${item.title}"?`))) return;
+    if (!(await confirm(`Create sales order from "${item.title}"?`))) return;
     setBusy(true);
+    setError('');
     setInfo('');
     try {
       const res = await crmApi.convertOpportunityToSalesOrder(item._id);
-      await load();
-      await alert({
-        title: 'Opportunity Converted',
-        message: 'This opportunity converted',
-      });
-      setInfo('This opportunity converted');
       const salesOrderId =
         (res.data as { salesOrderId?: string })?.salesOrderId ||
-        (res.data as { _id?: string })?._id;
+        (res.data as { _id?: string })?._id ||
+        '';
+      setItem((prev) =>
+        prev
+          ? {
+              ...prev,
+              generatedSalesOrderId: salesOrderId || prev.generatedSalesOrderId || null,
+            }
+          : prev
+      );
+      setInfo('Sales Order created');
+      await load();
       if (salesOrderId) {
         navigate(`/sales-orders/${salesOrderId}`);
       }
     } catch (reason) {
       const msg = reason instanceof Error ? reason.message : 'Sales order conversion failed';
-      if (msg.toLowerCase().includes('converted')) {
+      const existingId =
+        reason instanceof ApiError && reason.data && typeof reason.data === 'object'
+          ? String((reason.data as { salesOrderId?: string }).salesOrderId || '')
+          : '';
+      if (
+        reason instanceof ApiError &&
+        (reason.status === 409 ||
+          reason.code === 'SALES_ORDER_EXISTS' ||
+          /already exists|converted/i.test(msg))
+      ) {
+        const soId = existingId || item.generatedSalesOrderId;
+        setItem((prev) =>
+          prev ? { ...prev, generatedSalesOrderId: soId || prev.generatedSalesOrderId || null } : prev
+        );
+        setInfo('A Sales Order already exists for this Opportunity.');
         await load();
-        await alert({
-          title: 'Opportunity Converted',
-          message: 'This opportunity converted',
-        });
-        setInfo('This opportunity converted');
+        await promptOpenExistingSalesOrder(soId);
       } else {
         setError(msg);
       }
@@ -319,8 +346,8 @@ export const OpportunityDetailPage: React.FC = () => {
     );
   }
 
-  const dealValue = item.expectedRevenue ?? item.value ?? financials.expectedRevenue;
-  const weighted = item.weightedRevenue ?? financials.weightedRevenue;
+  const dealValue =
+    item.estimatedDealValue ?? item.expectedRevenue ?? item.value ?? financials.expectedRevenue;
 
   return (
     <div data-tour="opportunities-detail" className="flex flex-col gap-5 pb-10">
@@ -333,20 +360,6 @@ export const OpportunityDetailPage: React.FC = () => {
           }`}
         >
           {error || info}
-        </div>
-      )}
-
-      {item.generatedSalesOrderId && (
-        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-semibold text-emerald-800">
-          <span>✓ This opportunity converted</span>
-          <span className="text-emerald-400">·</span>
-          <span>Sales Order generated</span>
-          <Link
-            to={`/sales-orders/${item.generatedSalesOrderId}`}
-            className="text-emerald-900 underline font-bold ml-auto no-underline hover:underline"
-          >
-            {item.generatedSalesOrderNo ? `View ${item.generatedSalesOrderNo}` : 'View Sales Order'} &rarr;
-          </Link>
         </div>
       )}
 
@@ -409,7 +422,9 @@ export const OpportunityDetailPage: React.FC = () => {
               Create Quotation
             </button>
           )}
-          {canWrite && isOpportunityWonStage(item.stage) && !item.generatedSalesOrderId && (
+          {isOpportunityWonStage(item.stage, item.stageType) &&
+            !item.generatedSalesOrderId &&
+            canCreateSalesOrders && (
             <button
               type="button"
               disabled={busy}
@@ -417,8 +432,20 @@ export const OpportunityDetailPage: React.FC = () => {
               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold cursor-pointer disabled:opacity-50 hover:bg-zinc-50"
             >
               <ShoppingCartOutlinedIcon sx={{ fontSize: 15 }} />
-              Sales Order
+              Create Sales Order
             </button>
+          )}
+          {isOpportunityWonStage(item.stage, item.stageType) &&
+            item.generatedSalesOrderId &&
+            item.generatedSalesOrderId !== 'converted' &&
+            canViewSalesOrders && (
+            <Link
+              to={`/sales-orders/${item.generatedSalesOrderId}`}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-semibold no-underline text-emerald-800 hover:bg-emerald-100"
+            >
+              <OpenInNewIcon sx={{ fontSize: 15 }} />
+              Open Sales Order
+            </Link>
           )}
           {(item.acceptedQuotationId || item.generatedQuotationId) && (
             <Link
@@ -435,15 +462,6 @@ export const OpportunityDetailPage: React.FC = () => {
           >
             Quotation history
           </Link>
-          {item.generatedSalesOrderId && (
-            <Link
-              to={`/sales-orders/${item.generatedSalesOrderId}`}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold no-underline text-zinc-800 hover:bg-zinc-50"
-            >
-              <OpenInNewIcon sx={{ fontSize: 15 }} />
-              Open sales order
-            </Link>
-          )}
           {canDelete && (
             <button
               type="button"
@@ -460,11 +478,10 @@ export const OpportunityDetailPage: React.FC = () => {
 
       <div
         data-tour="opportunities-detail-kpis"
-        className="grid grid-cols-2 md:grid-cols-4 gap-3"
+        className="grid grid-cols-2 md:grid-cols-3 gap-3"
       >
         {[
-          { label: 'Deal value', value: formatMoney(dealValue, item.currency) },
-          { label: 'Weighted forecast', value: formatMoney(weighted, item.currency) },
+          { label: 'Estimated Deal Value', value: formatMoney(dealValue, item.currency) },
           { label: 'Probability', value: `${probability}%` },
         ].map((card) => (
           <div key={card.label} className="bg-white border border-zinc-300 rounded-xl p-4">
@@ -477,6 +494,66 @@ export const OpportunityDetailPage: React.FC = () => {
       </div>
 
       <div data-tour="opportunities-detail-sections" className="flex flex-col gap-5">
+        {isOpportunityWonStage(item.stage, item.stageType) &&
+          item.generatedSalesOrderId &&
+          item.generatedSalesOrderId !== 'converted' &&
+          canViewSalesOrders && (
+            <section
+              data-tour="opportunities-detail-sales-order"
+              className="bg-white border border-emerald-200 rounded-xl p-5"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-sm font-bold text-zinc-950 m-0 mb-1">Sales Order</h2>
+                  <p className="text-xs text-zinc-500 m-0">
+                    Linked by opportunityId · one Sales Order per opportunity
+                  </p>
+                </div>
+                <Link
+                  to={`/sales-orders/${item.generatedSalesOrderId}`}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-semibold no-underline text-emerald-800 hover:bg-emerald-100"
+                >
+                  <OpenInNewIcon sx={{ fontSize: 15 }} />
+                  Open Sales Order
+                </Link>
+              </div>
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                <InfoRow label="Sales Order Number">
+                  <code className="font-mono text-xs font-semibold">
+                    {item.generatedSalesOrderNo || item.generatedSalesOrderId}
+                  </code>
+                </InfoRow>
+                <InfoRow label="Status">{item.generatedSalesOrderStatus || '—'}</InfoRow>
+                <InfoRow label="Date">{formatDate(item.generatedSalesOrderDate)}</InfoRow>
+                <InfoRow label="Amount">
+                  {item.generatedSalesOrderAmount != null
+                    ? formatMoney(
+                        item.generatedSalesOrderAmount,
+                        item.generatedSalesOrderCurrency || item.currency || settingsCurrency
+                      )
+                    : '—'}
+                </InfoRow>
+                <InfoRow label="Currency">
+                  {item.generatedSalesOrderCurrency || item.currency || settingsCurrency}
+                </InfoRow>
+              </div>
+              <p className="mt-3 mb-0 text-sm font-semibold text-zinc-800">
+                {[
+                  item.generatedSalesOrderNo || 'SO',
+                  item.generatedSalesOrderStatus || null,
+                  item.generatedSalesOrderAmount != null
+                    ? formatMoney(
+                        item.generatedSalesOrderAmount,
+                        item.generatedSalesOrderCurrency || item.currency || settingsCurrency
+                      )
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' | ')}
+              </p>
+            </section>
+          )}
+
         <section
           data-tour="opportunities-detail-overview"
           className="bg-white border border-zinc-300 rounded-xl p-5"
@@ -665,8 +742,7 @@ export const OpportunityDetailPage: React.FC = () => {
             <InfoRow label="Estimated GST">
               {formatMoney(financials.taxTotal, item.currency)}
             </InfoRow>
-            <InfoRow label="Total deal value">{formatMoney(dealValue, item.currency)}</InfoRow>
-            <InfoRow label="Weighted forecast">{formatMoney(weighted, item.currency)}</InfoRow>
+            <InfoRow label="Estimated Deal Value">{formatMoney(dealValue, item.currency)}</InfoRow>
           </div>
         </section>
 
@@ -701,13 +777,19 @@ export const OpportunityDetailPage: React.FC = () => {
               )}
             </InfoRow>
             <InfoRow label="Sales order">
-              {item.generatedSalesOrderId ? (
-                <Link
-                  to={`/sales-orders/${item.generatedSalesOrderId}`}
-                  className="font-semibold text-zinc-950 no-underline hover:underline"
-                >
-                  {item.generatedSalesOrderNo || 'Open sales order'}
-                </Link>
+              {item.generatedSalesOrderId && item.generatedSalesOrderId !== 'converted' ? (
+                canViewSalesOrders ? (
+                  <Link
+                    to={`/sales-orders/${item.generatedSalesOrderId}`}
+                    className="font-semibold text-zinc-950 no-underline hover:underline"
+                  >
+                    {item.generatedSalesOrderNo || 'Open Sales Order'}
+                  </Link>
+                ) : (
+                  item.generatedSalesOrderNo || 'Linked'
+                )
+              ) : isOpportunityWonStage(item.stage, item.stageType) && canCreateSalesOrders ? (
+                'Not created yet — use Create Sales Order'
               ) : (
                 'Not generated'
               )}

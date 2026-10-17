@@ -56,6 +56,11 @@ export interface SampleItem {
   urgency: SampleUrgency | string;
   deliveryAddress?: string;
   notes?: string;
+  isChargeable?: boolean;
+  chargeAmount?: number;
+  currency?: string;
+  currencyCode?: string;
+  exchangeRate?: number;
   status: SampleStatus | string;
   approvedBy?: string | null;
   approvedAt?: string | null;
@@ -87,6 +92,12 @@ export interface SampleCreateInput {
   deliveryAddress?: string;
   notes?: string;
   recipientName?: string;
+  /** When true, chargeAmount + currency are persisted on the sample. */
+  isChargeable?: boolean;
+  chargeAmount?: number;
+  currency?: string;
+  currencyCode?: string;
+  exchangeRate?: number;
 }
 
 export interface SampleQueryParams {
@@ -228,11 +239,17 @@ export function sampleUrgencyTone(urgency: string): string {
   return 'bg-emerald-50 text-emerald-800 border-emerald-200';
 }
 
-export function sampleUrgencyEmoji(urgency: string): string {
-  if (urgency === 'Urgent') return '🔴';
-  if (urgency === 'High') return '🟠';
-  if (urgency === 'Normal') return '🔵';
-  return '🟢';
+/** Tailwind background class for urgency indicator dots (no emoji). */
+export function sampleUrgencyDotClass(urgency: string): string {
+  if (urgency === 'Urgent') return 'bg-red-500';
+  if (urgency === 'High') return 'bg-orange-500';
+  if (urgency === 'Normal') return 'bg-sky-500';
+  return 'bg-emerald-500';
+}
+
+/** @deprecated Use SampleUrgencyDot or sampleUrgencyDotClass instead */
+export function sampleUrgencyEmoji(_urgency: string): string {
+  return '';
 }
 
 export function normalizeSample(raw: Partial<SampleItem> & Record<string, unknown>): SampleItem {

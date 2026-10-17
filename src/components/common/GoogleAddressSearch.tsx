@@ -3,24 +3,20 @@ import SearchIcon from '@mui/icons-material/Search';
 import MapIcon from '@mui/icons-material/Map';
 
 import {
+  ensureGooglePacStyles,
   getGoogleMaps,
+  hideGooglePacContainers,
   loadGoogleMaps,
   resolveGoogleMapsApiKey,
   type GoogleAutocomplete,
-  type GooglePlaceResult,
 } from '../../utils/googleMapsLoader';
+import {
+  parseGooglePlace,
+  type GooglePlaceAddress,
+} from '../../utils/googlePlaceAddress';
 
-export interface GooglePlaceAddress {
-  address: string;
-  city: string;
-  state: string;
-  country: string;
-  postcode: string;
-  lat: number;
-  lng: number;
-  placeId: string;
-  name: string;
-}
+export type { GooglePlaceAddress };
+export { parseGooglePlace } from '../../utils/googlePlaceAddress';
 
 interface GoogleAddressSearchProps {
   onPlaceSelect: (place: GooglePlaceAddress) => void;
@@ -30,50 +26,6 @@ interface GoogleAddressSearchProps {
   /** Optional prefill of the search box (does not fire onPlaceSelect). */
   initialQuery?: string;
   apiKey?: string;
-}
-
-function componentByType(
-  components: GooglePlaceResult['address_components'],
-  type: string,
-  useShort = false
-): string {
-  const match = (components || []).find((c) => c.types?.includes(type));
-  if (!match) return '';
-  return String(useShort ? match.short_name : match.long_name || '').trim();
-}
-
-export function parseGooglePlace(place: GooglePlaceResult): GooglePlaceAddress | null {
-  const loc = place.geometry?.location;
-  if (!loc) return null;
-  const lat = Number(loc.lat());
-  const lng = Number(loc.lng());
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-
-  const components = place.address_components || [];
-  const city =
-    componentByType(components, 'locality') ||
-    componentByType(components, 'administrative_area_level_2') ||
-    componentByType(components, 'sublocality') ||
-    componentByType(components, 'postal_town') ||
-    componentByType(components, 'sublocality_level_1');
-  const state = componentByType(components, 'administrative_area_level_1');
-  const country = componentByType(components, 'country');
-  const postcode = componentByType(components, 'postal_code');
-  const address =
-    String(place.formatted_address || '').trim() ||
-    [place.name, city, state, postcode, country].filter(Boolean).join(', ');
-
-  return {
-    address,
-    city,
-    state,
-    country,
-    postcode,
-    lat: Number(lat.toFixed(6)),
-    lng: Number(lng.toFixed(6)),
-    placeId: String(place.place_id || ''),
-    name: String(place.name || '').trim(),
-  };
 }
 
 /**
@@ -96,14 +48,7 @@ export const GoogleAddressSearch: React.FC<GoogleAddressSearchProps> = ({
   onSelectRef.current = onPlaceSelect;
 
   useEffect(() => {
-    // Keep Places dropdown above MUI Dialog / sticky headers
-    const styleId = 'opennext-crm-google-pac-zindex';
-    if (!document.getElementById(styleId)) {
-      const style = document.createElement('style');
-      style.id = styleId;
-      style.textContent = '.pac-container{z-index:20000 !important;}';
-      document.head.appendChild(style);
-    }
+    ensureGooglePacStyles();
 
     let cancelled = false;
     setStatus('loading');
@@ -146,6 +91,7 @@ export const GoogleAddressSearch: React.FC<GoogleAddressSearchProps> = ({
           ac.addListener('place_changed', () => {
             const place = ac.getPlace();
             const parsed = parseGooglePlace(place);
+            hideGooglePacContainers();
             if (!parsed) {
               setError('Could not read that place. Try another suggestion.');
               return;
@@ -169,25 +115,23 @@ export const GoogleAddressSearch: React.FC<GoogleAddressSearchProps> = ({
         google.maps.event.clearInstanceListeners(autocompleteRef.current);
       }
       autocompleteRef.current = null;
+      hideGooglePacContainers();
     };
   }, [apiKey]);
 
   useEffect(() => {
-    if (inputRef.current && initialQuery && !inputRef.current.value) {
+    if (!inputRef.current || !initialQuery) return;
+    if (!inputRef.current.value) {
       inputRef.current.value = initialQuery;
     }
   }, [initialQuery]);
 
   return (
-    <div className={`flex flex-col gap-1.5 ${className}`.trim()}>
-      <label className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-600">
-        <MapIcon sx={{ fontSize: 14 }} />
-        Find address (Google Maps)
-      </label>
-      <div className="relative">
+    <div className={`relative z-20 overflow-visible ${className}`.trim()}>
+      <div className="relative flex items-center">
         <SearchIcon
           sx={{ fontSize: 16 }}
-          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none"
+          className="absolute left-2.5 text-zinc-400 pointer-events-none"
         />
         <input
           ref={inputRef}
@@ -201,17 +145,18 @@ export const GoogleAddressSearch: React.FC<GoogleAddressSearchProps> = ({
                 : placeholder
           }
           autoComplete="off"
+          onBlur={() => {
+            // Delay so a pac-item mousedown/click can finish; only hide, do not remove.
+            window.setTimeout(() => hideGooglePacContainers(), 350);
+          }}
           className="w-full border border-zinc-300 rounded-lg py-2 pl-8 pr-2.5 bg-white text-xs text-zinc-900 outline-none focus:border-zinc-950 disabled:bg-zinc-50 disabled:text-zinc-400"
         />
+        <MapIcon
+          sx={{ fontSize: 15 }}
+          className="absolute right-2.5 text-zinc-300 pointer-events-none"
+        />
       </div>
-      {error ? (
-        <p className="m-0 text-[11px] text-red-700">{error}</p>
-      ) : (
-        <p className="m-0 text-[11px] text-zinc-500">
-          Type a place or address, then pick a Google suggestion. Address, city, state and map pin
-          update automatically.
-        </p>
-      )}
+      {error ? <p className="mb-0 mt-1 text-[11px] text-red-600">{error}</p> : null}
     </div>
   );
 };

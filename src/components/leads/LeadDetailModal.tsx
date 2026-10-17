@@ -10,6 +10,17 @@ import BusinessOutlinedIcon from '@mui/icons-material/BusinessOutlined';
 import CalendarMonthOutlinedIcon from '@mui/icons-material/CalendarMonthOutlined';
 import AddIcon from '@mui/icons-material/Add';
 import CheckIcon from '@mui/icons-material/Check';
+import {
+  Calendar,
+  Check,
+  CheckCircle2,
+  Clock,
+  Crown,
+  Tag,
+  Target,
+  Wallet,
+  Hourglass,
+} from 'lucide-react';
 
 import { LeadItem, AssignableUser, LeadEvent, LeadFollowUp } from '../../types/leads';
 import { isLeadConvertibleStage, resolveWonStage } from '../../utils/leadPipeline';
@@ -220,8 +231,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                   {lead.name}
                 </h2>
                 {lead.convertedClientId && (
-                  <span className="text-xs bg-zinc-950 text-white px-2 py-0.5 rounded font-semibold">
-                    ✓ Converted Client
+                  <span className="inline-flex items-center gap-1 text-xs bg-zinc-950 text-white px-2 py-0.5 rounded font-semibold">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+                    Converted Client
                   </span>
                 )}
               </div>
@@ -322,8 +334,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
           <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
             {lead.ageing && (
-              <span className="px-2 py-0.5 rounded bg-zinc-100 border border-zinc-200 text-zinc-700 font-medium">
-                🕒 {lead.ageing.stageAgeDays}d in stage ({lead.ageing.totalAgeDays}d total)
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-100 border border-zinc-200 text-zinc-700 font-medium">
+                <Clock className="h-4 w-4 shrink-0" aria-hidden />
+                {lead.ageing.stageAgeDays}d in stage ({lead.ageing.totalAgeDays}d total)
               </span>
             )}
             {lead.dataQuality && (
@@ -434,9 +447,10 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                   {lead.tags.map((t) => (
                     <span
                       key={t}
-                      className="text-xs px-2.5 py-1 rounded-md bg-zinc-100 border border-zinc-200 text-zinc-800 font-medium"
+                      className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-zinc-100 border border-zinc-200 text-zinc-800 font-medium"
                     >
-                      🏷️ {t}
+                      <Tag className="h-4 w-4 shrink-0" aria-hidden />
+                      {t}
                     </span>
                   ))}
                 </div>
@@ -486,14 +500,22 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                     : 'bg-white text-zinc-600 border-zinc-300'
                 }`}
               >
-                {lead.qualification?.isQualified ? '✓ Qualified Deal' : 'Unqualified'}
+                {lead.qualification?.isQualified ? (
+                  <span className="inline-flex items-center gap-1">
+                    <Check className="h-4 w-4 shrink-0" aria-hidden />
+                    Qualified Deal
+                  </span>
+                ) : (
+                  'Unqualified'
+                )}
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="p-3.5 rounded-lg border border-zinc-300 bg-white">
-                <span className="text-[11px] font-bold text-zinc-500 uppercase block mb-1">
-                  💰 Budget
+                <span className="text-[11px] font-bold text-zinc-500 uppercase flex items-center gap-1 mb-1">
+                  <Wallet className="h-[18px] w-[18px] shrink-0" aria-hidden />
+                  Budget
                 </span>
                 <span className="text-xs font-medium text-zinc-900 block">
                   {lead.qualification?.budget
@@ -503,8 +525,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               </div>
 
               <div className="p-3.5 rounded-lg border border-zinc-300 bg-white">
-                <span className="text-[11px] font-bold text-zinc-500 uppercase block mb-1">
-                  👑 Authority / Decision Maker
+                <span className="text-[11px] font-bold text-zinc-500 uppercase flex items-center gap-1 mb-1">
+                  <Crown className="h-[18px] w-[18px] shrink-0" aria-hidden />
+                  Authority / Decision Maker
                 </span>
                 <span className="text-xs font-medium text-zinc-900 block">
                   {lead.qualification?.authority || 'Decision maker not identified'}
@@ -512,8 +535,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               </div>
 
               <div className="p-3.5 rounded-lg border border-zinc-300 bg-white">
-                <span className="text-[11px] font-bold text-zinc-500 uppercase block mb-1">
-                  🎯 Business Need
+                <span className="text-[11px] font-bold text-zinc-500 uppercase flex items-center gap-1 mb-1">
+                  <Target className="h-[18px] w-[18px] shrink-0" aria-hidden />
+                  Business Need
                 </span>
                 <span className="text-xs font-medium text-zinc-900 block">
                   {lead.qualification?.need || 'Scope not specified'}
@@ -521,8 +545,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               </div>
 
               <div className="p-3.5 rounded-lg border border-zinc-300 bg-white">
-                <span className="text-[11px] font-bold text-zinc-500 uppercase block mb-1">
-                  ⏳ Timeline
+                <span className="text-[11px] font-bold text-zinc-500 uppercase flex items-center gap-1 mb-1">
+                  <Hourglass className="h-[18px] w-[18px] shrink-0" aria-hidden />
+                  Timeline
                 </span>
                 <span className="text-xs font-medium text-zinc-900 block">
                   {lead.qualification?.timeline || 'Timeline flexible'}
@@ -546,10 +571,10 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                   onChange={(e) => setNewActType(e.target.value as LeadEvent['type'])}
                   className="text-xs border border-zinc-300 rounded px-2 py-1 bg-white text-zinc-900 outline-none"
                 >
-                  <option value="Call">📞 Call</option>
-                  <option value="Meeting">🤝 Meeting</option>
-                  <option value="Email">✉️ Email</option>
-                  <option value="Note">📝 Note</option>
+                  <option value="Call">Call</option>
+                  <option value="Meeting">Meeting</option>
+                  <option value="Email">Email</option>
+                  <option value="Note">Note</option>
                 </select>
               </div>
 
@@ -706,8 +731,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                         </span>
                       </div>
 
-                      <span className="text-xs font-mono font-semibold text-zinc-600 bg-zinc-100 px-2 py-0.5 rounded border border-zinc-200">
-                        📅 {fu.dueDate}
+                      <span className="inline-flex items-center gap-1 text-xs font-mono font-semibold text-zinc-600 bg-zinc-100 px-2 py-0.5 rounded border border-zinc-200">
+                        <Calendar className="h-4 w-4 shrink-0" aria-hidden />
+                        {fu.dueDate}
                       </span>
                     </div>
                   );

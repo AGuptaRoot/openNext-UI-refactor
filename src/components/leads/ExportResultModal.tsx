@@ -4,6 +4,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import CheckIcon from '@mui/icons-material/Check';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import { CheckCircle2, Eye, Upload } from 'lucide-react';
 
 import { triggerFileDownload } from '../../utils/fileDownload';
 
@@ -93,7 +94,7 @@ export const ExportResultModal: React.FC<ExportResultModalProps> = ({
         {/* Modal Header */}
         <div className="p-4 sm:p-5 border-b border-zinc-200 flex items-center justify-between bg-zinc-50">
           <div className="flex items-center gap-3">
-            <span className="text-2xl">📤</span>
+            <Upload className="h-[18px] w-[18px] shrink-0 text-zinc-700" aria-hidden />
             <div>
               <h3 className="text-base font-bold text-zinc-950 m-0">{title}</h3>
               <p className="text-xs text-zinc-500 m-0 mt-0.5 font-mono">
@@ -114,7 +115,7 @@ export const ExportResultModal: React.FC<ExportResultModalProps> = ({
         <div className="p-5 overflow-y-auto flex-1 flex flex-col gap-4">
           {/* Success Banner */}
           <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex items-start gap-3">
-            <span className="text-emerald-700 text-lg leading-none mt-0.5">✅</span>
+            <CheckCircle2 className="h-[18px] w-[18px] shrink-0 text-emerald-700 mt-0.5" aria-hidden />
             <div className="text-xs text-emerald-900 leading-relaxed">
               <strong>Data exported successfully!</strong>
               <p className="m-0 mt-0.5 text-emerald-800">
@@ -176,7 +177,10 @@ export const ExportResultModal: React.FC<ExportResultModalProps> = ({
           {/* Collapsible Preview & Raw Content */}
           <details className="bg-zinc-50 border border-zinc-200 rounded-lg p-3 text-xs">
             <summary className="cursor-pointer font-semibold text-zinc-800 flex items-center justify-between select-none">
-              <span>👁️ View / Select Raw Data</span>
+              <span className="inline-flex items-center gap-1.5">
+                <Eye className="h-4 w-4 shrink-0" aria-hidden />
+                View / Select Raw Data
+              </span>
               <span className="text-[11px] text-zinc-400 font-normal">Click to expand</span>
             </summary>
             <div className="mt-3 flex flex-col gap-2">

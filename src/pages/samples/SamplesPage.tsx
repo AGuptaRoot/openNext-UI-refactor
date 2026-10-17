@@ -15,11 +15,19 @@ import {
   SAMPLE_RATING_LABELS,
   SAMPLE_STATUSES,
   sampleStatusTone,
-  sampleUrgencyEmoji,
   sampleUrgencyTone,
   type SampleItem,
 } from '../../types/samples';
 import { triggerFileDownload } from '../../utils/fileDownload';
+import { SampleUrgencyDot } from '../../components/icons/SampleUrgencyDot';
+import {
+  Check,
+  CheckCircle2,
+  Clock,
+  Star,
+  Truck,
+  X,
+} from 'lucide-react';
 
 const fieldClass =
   'h-9 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-zinc-400';
@@ -47,8 +55,10 @@ export const SamplesPage: React.FC = () => {
       activeRole === 'sales-manager' ||
       activeRole === 'finance-manager');
 
-  // Only the client can approve / reject sample requests (admin / staff must not).
-  const canApproveSamples = isClient;
+  // Only Sales Manager (or CRM admin) can approve / reject sample requests — not clients.
+  const canApproveSamples =
+    !isClient &&
+    (isAdmin || activeRole === 'sales-manager' || activeRole === 'crm-manager');
   const canDispatchSamples = isSampleLifecycleManager && (hasPermission('crm.samples.write') || isAdmin);
   const canDeliverSamples = isSampleLifecycleManager && (hasPermission('crm.samples.write') || isAdmin);
   const canWriteSamples = hasPermission('crm.samples.write') && !isClient;
@@ -286,8 +296,11 @@ export const SamplesPage: React.FC = () => {
     if (item.status === 'Completed' && item.feedback?.rating) {
       return (
         <div className="text-xs text-zinc-700">
-          <div className="font-semibold text-amber-600">
-            {'⭐'.repeat(item.feedback.rating)} {item.feedback.rating}/5
+          <div className="inline-flex items-center gap-0.5 font-semibold text-amber-600">
+            {Array.from({ length: item.feedback.rating }, (_, i) => (
+              <Star key={i} className="h-3.5 w-3.5 shrink-0 fill-amber-500 text-amber-500" aria-hidden />
+            ))}
+            <span className="ml-0.5 text-zinc-700">{item.feedback.rating}/5</span>
           </div>
           <div className="mt-0.5 text-zinc-500">
             {item.feedback.interestedInOrder ? 'Interested in order' : 'Not ordering yet'}
@@ -297,8 +310,9 @@ export const SamplesPage: React.FC = () => {
     }
     if (item.status === 'Delivered') {
       return (
-        <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
-          ⏳ Review Pending
+        <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+          <Clock className="h-4 w-4 shrink-0" aria-hidden />
+          Review Pending
         </span>
       );
     }
@@ -320,7 +334,10 @@ export const SamplesPage: React.FC = () => {
               onClick={() => openApprove(item, 'approve')}
               className="h-8 rounded-lg border-0 bg-emerald-700 px-2.5 text-xs font-semibold text-white disabled:opacity-50"
             >
-              ✓ Approve
+              <span className="inline-flex items-center gap-1">
+                <Check className="h-4 w-4 shrink-0" aria-hidden />
+                Approve
+              </span>
             </button>
             <button
               type="button"
@@ -328,7 +345,10 @@ export const SamplesPage: React.FC = () => {
               onClick={() => openApprove(item, 'reject')}
               className="h-8 rounded-lg border border-red-200 bg-red-50 px-2.5 text-xs font-semibold text-red-700 disabled:opacity-50"
             >
-              ✕ Reject
+              <span className="inline-flex items-center gap-1">
+                <X className="h-4 w-4 shrink-0" aria-hidden />
+                Reject
+              </span>
             </button>
           </>
         )}
@@ -339,7 +359,10 @@ export const SamplesPage: React.FC = () => {
             onClick={() => openDispatch(item)}
             className="h-8 rounded-lg border-0 bg-slate-950 px-2.5 text-xs font-semibold text-white disabled:opacity-50"
           >
-            🚚 Dispatch
+            <span className="inline-flex items-center gap-1">
+              <Truck className="h-4 w-4 shrink-0" aria-hidden />
+              Dispatch
+            </span>
           </button>
         )}
         {item.status === 'Dispatched' && canDeliverSamples && (
@@ -349,7 +372,10 @@ export const SamplesPage: React.FC = () => {
             onClick={() => void markDelivered(item)}
             className="h-8 rounded-lg border-0 bg-emerald-700 px-2.5 text-xs font-semibold text-white disabled:opacity-50"
           >
-            ✅ Delivered
+            <span className="inline-flex items-center gap-1">
+              <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+              Delivered
+            </span>
           </button>
         )}
         {(item.status === 'Delivered' || item.status === 'Completed') && canFeedbackSamples && (
@@ -359,7 +385,10 @@ export const SamplesPage: React.FC = () => {
             onClick={() => openFeedback(item)}
             className="h-8 rounded-lg border border-zinc-300 bg-white px-2.5 text-xs font-semibold text-zinc-700 disabled:opacity-50"
           >
-            ⭐ {item.status === 'Completed' ? 'View Review' : 'Give Review'}
+            <span className="inline-flex items-center gap-1">
+              <Star className="h-4 w-4 shrink-0" aria-hidden />
+              {item.status === 'Completed' ? 'View Review' : 'Give Review'}
+            </span>
           </button>
         )}
         <Link
@@ -503,7 +532,7 @@ export const SamplesPage: React.FC = () => {
                   <th className="px-4 py-3 font-semibold">Urgency</th>
                   <th className="px-4 py-3 font-semibold">Status</th>
                   <th className="px-4 py-3 font-semibold">Prospect / Client</th>
-                  <th className="px-4 py-3 font-semibold">Courier & AWB</th>
+                  <th className="px-4 py-3 font-semibold">Courier</th>
                   <th className="px-4 py-3 font-semibold">Client Review</th>
                   <th className="px-4 py-3 font-semibold">Actions</th>
                 </tr>
@@ -534,9 +563,10 @@ export const SamplesPage: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">
                       <span
-                        className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${sampleUrgencyTone(String(item.urgency))}`}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${sampleUrgencyTone(String(item.urgency))}`}
                       >
-                        {sampleUrgencyEmoji(String(item.urgency))} {item.urgency}
+                        <SampleUrgencyDot urgency={String(item.urgency)} />
+                        {item.urgency}
                       </span>
                     </td>
                     <td className="px-4 py-3">
@@ -625,7 +655,7 @@ export const SamplesPage: React.FC = () => {
               )}
               {approveAction === 'approve' ? (
                 <p className="m-0 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
-                  Confirm you want to approve this sample request. Our team will prepare and dispatch it after approval.
+                  Confirm Sales Manager approval for this sample request. The team can prepare and dispatch it after approval.
                 </p>
               ) : (
                 <label className="block">

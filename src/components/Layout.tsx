@@ -1,5 +1,7 @@
 import React, { useEffect } from 'react';
+import { LayoutDashboard } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useDashboardSidebarSync, hideParentSidebarRoutes } from '../hooks/useDashboardSidebarSync';
 import { GlobalSearchBar } from './common/GlobalSearchBar';
@@ -8,6 +10,7 @@ import { CheckoutNoteModal } from './common/CheckoutNoteModal';
 import { ModuleTour } from '../tours/ModuleTour';
 import { LeadsTour } from '../tours/LeadsTour';
 import { ClientsTour } from '../tours/ClientsTour';
+import { ContactsTour } from '../tours/ContactsTour';
 import { ProjectsTour } from '../tours/ProjectsTour';
 import { TasksTour } from '../tours/TasksTour';
 import { TimeLogsTour } from '../tours/TimeLogsTour';
@@ -28,8 +31,18 @@ import { ReportsTour } from '../tours/ReportsTour';
 import { TourControlBar } from '../tours/TourControlBar';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { theme } = useTheme();
   const { user, activeRole, isClient, canUseTours } = useAuth();
   useDashboardSidebarSync();
+
+  // Keep Tailwind `dark:` utilities in sync with OpenNext CMS theme (light | dark).
+  useEffect(() => {
+    const isDark = theme === 'dark';
+    document.documentElement.classList.toggle('dark', isDark);
+    document.documentElement.dataset.theme = theme;
+    document.body.classList.toggle('dark', isDark);
+    document.body.dataset.theme = theme;
+  }, [theme]);
 
   // Client: hide Dashboard. Employee: hide Expenses.
   useEffect(() => {
@@ -53,12 +66,13 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const homePath = isClient ? '/projects' : '/dashboard';
 
   return (
-    <div className="min-h-screen bg-zinc-50 flex flex-col font-sans">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50 flex flex-col font-sans transition-colors">
       {canUseTours && (
         <>
           <ModuleTour />
           <LeadsTour />
           <ClientsTour />
+          <ContactsTour />
           <ProjectsTour />
           <TasksTour />
           <TimeLogsTour />
@@ -85,19 +99,19 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         {/* Top Navbar */}
         <header
           data-tour="crm-header"
-          className="bg-white border-b border-zinc-200 px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between gap-4"
+          className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between gap-4"
         >
         {/* Left: Brand & Home Link */}
         <div className="flex items-center gap-3 shrink-0">
           <Link to={homePath} className="flex items-center gap-3 no-underline">
-            <div className="w-8 h-8 rounded-lg bg-zinc-950 text-white flex items-center justify-center font-bold text-sm select-none">
-              📊
+            <div className="w-8 h-8 rounded-lg bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 flex items-center justify-center font-bold text-sm select-none">
+              <LayoutDashboard className="h-4 w-4 shrink-0" aria-hidden />
             </div>
             <div>
-              <h1 className="text-[14px] font-bold text-zinc-950 leading-tight tracking-tight m-0">
+              <h1 className="text-[14px] font-bold text-zinc-950 dark:text-zinc-50 leading-tight tracking-tight m-0">
                 Root CRM
               </h1>
-              <p className="text-[11px] text-zinc-500 m-0 leading-none mt-0.5">
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 m-0 leading-none mt-0.5">
                 {tenantName}
               </p>
             </div>
@@ -116,15 +130,15 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </div>
 
           {/* User Profile & Role Info */}
-          <div className="flex items-center gap-2 pl-1 sm:pl-2 sm:border-l sm:border-zinc-200">
-            <div className="w-8 h-8 rounded-full bg-zinc-950 text-white flex items-center justify-center text-xs font-semibold select-none">
+          <div className="flex items-center gap-2 pl-1 sm:pl-2 sm:border-l sm:border-zinc-200 dark:sm:border-zinc-800">
+            <div className="w-8 h-8 rounded-full bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 flex items-center justify-center text-xs font-semibold select-none">
               {displayName.charAt(0).toUpperCase()}
             </div>
             <div className="hidden md:block text-left">
-              <div className="text-xs font-semibold text-zinc-950 leading-tight">
+              <div className="text-xs font-semibold text-zinc-950 dark:text-zinc-50 leading-tight">
                 {displayName}
               </div>
-              <span className="inline-block text-[10px] font-medium bg-zinc-100 text-zinc-700 px-1.5 py-0.5 rounded border border-zinc-200 mt-0.5">
+              <span className="inline-block text-[10px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 px-1.5 py-0.5 rounded border border-zinc-200 dark:border-zinc-700 mt-0.5">
                 {activeRole}
               </span>
             </div>

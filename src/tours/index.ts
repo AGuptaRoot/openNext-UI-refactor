@@ -1,6 +1,7 @@
 export { ModuleTour } from './ModuleTour';
 export { LeadsTour, restartLeadsTour } from './LeadsTour';
 export { ClientsTour, restartClientsTour } from './ClientsTour';
+export { ContactsTour, restartContactsTour } from './ContactsTour';
 export { ProjectsTour, restartProjectsTour } from './ProjectsTour';
 export { TasksTour, restartTasksTour } from './TasksTour';
 export { TimeLogsTour, restartTimeLogsTour } from './TimeLogsTour';

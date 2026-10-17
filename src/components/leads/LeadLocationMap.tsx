@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import SearchIcon from '@mui/icons-material/Search';
 import CloseIcon from '@mui/icons-material/Close';
 import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined';
@@ -8,16 +9,21 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 
 import {
   parseGooglePlace,
+  STREET_LEVEL_ZOOM,
   type GooglePlaceAddress,
-} from '../common/GoogleAddressSearch';
+} from '../../utils/googlePlaceAddress';
 import {
+  ensureGooglePacStyles,
   getGoogleMaps,
+  hideGooglePacContainers,
   loadGoogleMaps,
+  removeGooglePacContainers,
   resolveGoogleMapsApiKey,
   type GoogleAutocomplete,
   type GoogleCircle,
   type GoogleMap,
   type GoogleMarker,
+  type GooglePlaceResult,
 } from '../../utils/googleMapsLoader';
 
 /** Great-circle distance in metres (Haversine). */
@@ -159,12 +165,29 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
   const [searchQuery, setSearchQuery] = useState(address || '');
   const [searching, setSearching] = useState(false);
   const [copiedCoords, setCopiedCoords] = useState(false);
+  const [candidates, setCandidates] = useState<GooglePlaceAddress[]>([]);
+  const [geocodingAddress, setGeocodingAddress] = useState(false);
+  const skipNextReverseRef = useRef(false);
+  const didInitialAddressGeocodeRef = useRef(false);
+  const reverseGeocodeCoordsRef = useRef<(lat: number, lng: number) => void>(() => {});
+  const handleManualSearchRef = useRef<(queryOverride?: string) => void>(() => {});
+  const onSettlePropRef = useRef(onSettle);
+  onSettlePropRef.current = onSettle;
 
   onChangeRef.current = onChange;
-  onSettleRef.current = onSettle;
   onPlaceSelectRef.current = onPlaceSelect;
   maxRadiusRef.current = maxRadiusMeters;
   readOnlyRef.current = readOnly;
+
+  // Wrap settle: always notify parent, reverse-geocode unless a Places/search apply just ran.
+  onSettleRef.current = (lat: number, lng: number) => {
+    onSettlePropRef.current?.(lat, lng);
+    if (skipNextReverseRef.current) {
+      skipNextReverseRef.current = false;
+      return;
+    }
+    reverseGeocodeCoordsRef.current(lat, lng);
+  };
 
   const latNum = latitude !== '' && latitude != null ? Number(latitude) : NaN;
   const lngNum = longitude !== '' && longitude != null ? Number(longitude) : NaN;
@@ -217,8 +240,9 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
    * Directly positions/updates marker, centers map, and triggers parent callbacks.
    */
   const applyPlace = useCallback(
-    (parsed: GooglePlaceAddress) => {
+    (parsed: GooglePlaceAddress, options?: { skipReverse?: boolean; zoom?: number }) => {
       setSearchError(null);
+      setCandidates([]);
       const displayLabel = parsed.address || parsed.name;
       setSearchQuery(displayLabel);
       if (searchInputRef.current) {
@@ -227,6 +251,7 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
 
       const map = mapRef.current;
       const google = getGoogleMaps();
+      const zoom = options?.zoom ?? STREET_LEVEL_ZOOM;
       if (map && google?.maps?.Marker) {
         if (markerRef.current) {
           markerRef.current.setPosition({ lat: parsed.lat, lng: parsed.lng });
@@ -242,10 +267,14 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
           bindMarkerDrag(marker, resolvePoint, isDraggingRef, onChangeRef, onSettleRef);
           markerRef.current = marker;
         }
+        map.setCenter({ lat: parsed.lat, lng: parsed.lng });
         map.panTo({ lat: parsed.lat, lng: parsed.lng });
-        map.setZoom(17);
+        map.setZoom(zoom);
       }
 
+      if (options?.skipReverse) {
+        skipNextReverseRef.current = true;
+      }
       onPlaceSelectRef.current?.(parsed);
       onChangeRef.current?.(parsed.lat, parsed.lng);
       onSettleRef.current?.(parsed.lat, parsed.lng);
@@ -255,6 +284,37 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
 
   const applyPlaceRef = useRef(applyPlace);
   applyPlaceRef.current = applyPlace;
+
+  const reverseGeocodeCoords = useCallback((lat: number, lng: number) => {
+    const google = getGoogleMaps();
+    if (!google?.maps?.Geocoder) return;
+    const geocoder = new google.maps.Geocoder();
+    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+      if (status !== 'OK' || !results?.length) {
+        setSearchError('Address not found for this map point.');
+        return;
+      }
+      const parsed = parseGooglePlace(results[0]);
+      if (!parsed) {
+        setSearchError('Address not found for this map point.');
+        return;
+      }
+      // Keep exact marker coordinates as source of truth.
+      const synced: GooglePlaceAddress = {
+        ...parsed,
+        lat,
+        lng,
+      };
+      setSearchError(null);
+      setSearchQuery(synced.address || synced.name);
+      if (searchInputRef.current) {
+        searchInputRef.current.value = synced.address || synced.name;
+      }
+      onPlaceSelectRef.current?.(synced);
+    });
+  }, []);
+
+  reverseGeocodeCoordsRef.current = reverseGeocodeCoords;
 
   // Manual fallback geocode when user submits custom search text
   const handleManualSearch = useCallback(
@@ -268,28 +328,43 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
       }
       setSearching(true);
       setSearchError(null);
+      setCandidates([]);
       const geocoder = new google.maps.Geocoder();
       geocoder.geocode({ address: text }, (results, status) => {
         setSearching(false);
-        if (status === 'OK' && results && results[0]) {
-          const parsed = parseGooglePlace(results[0]);
-          if (parsed) {
-            applyPlaceRef.current(parsed);
-            return;
-          }
+        if (status !== 'OK' || !results?.length) {
+          setSearchError(`No address found for "${text}".`);
+          return;
         }
-        setSearchError(`No location found for "${text}". Try another address.`);
+        const parsedList = results
+          .map((r: GooglePlaceResult) => parseGooglePlace(r))
+          .filter((p): p is GooglePlaceAddress => Boolean(p));
+        if (!parsedList.length) {
+          setSearchError(`No address found for "${text}".`);
+          return;
+        }
+        if (parsedList.length === 1) {
+          applyPlaceRef.current(parsedList[0], { skipReverse: true, zoom: STREET_LEVEL_ZOOM });
+          return;
+        }
+        // Multiple matches — let the user choose instead of guessing.
+        setCandidates(parsedList.slice(0, 6));
+        setSearchError(null);
       });
     },
     [searchQuery]
   );
+  handleManualSearchRef.current = handleManualSearch;
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       const pacContainer = document.querySelector('.pac-container');
-      const hasActivePacItem = pacContainer && pacContainer.querySelector('.pac-item-selected');
-      if (hasActivePacItem) {
-        // Let Google Places Autocomplete handle the selection
+      const hasActivePacItem =
+        pacContainer &&
+        (pacContainer.querySelector('.pac-item-selected') ||
+          pacContainer.querySelector('.pac-item'));
+      // If suggestions are open, let Google Autocomplete consume Enter.
+      if (hasActivePacItem && (pacContainer as HTMLElement).style.display !== 'none') {
         return;
       }
       e.preventDefault();
@@ -301,6 +376,7 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
   const handleClearSearch = () => {
     setSearchQuery('');
     setSearchError(null);
+    setCandidates([]);
     if (searchInputRef.current) {
       searchInputRef.current.value = '';
       searchInputRef.current.focus();
@@ -355,7 +431,7 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
             : NaN;
         const hasInit = Number.isFinite(initLat) && Number.isFinite(initLng);
         const center = hasInit ? { lat: initLat, lng: initLng } : DEFAULT_CENTER;
-        const zoom = hasInit ? 17 : 5;
+        const zoom = hasInit ? STREET_LEVEL_ZOOM : 5;
 
         const map = new MapCtor(mapContainerRef.current, {
           center,
@@ -404,11 +480,19 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
             ac.addListener('place_changed', () => {
               const place = ac.getPlace();
               const parsed = parseGooglePlace(place);
+              hideGooglePacContainers();
               if (!parsed) {
+                // Place selected without geometry — fall back to geocode by text
+                const q =
+                  String(place?.formatted_address || place?.name || searchInputRef.current?.value || '').trim();
+                if (q) {
+                  handleManualSearchRef.current(q);
+                  return;
+                }
                 setSearchError('Could not read that place. Try another suggestion.');
                 return;
               }
-              applyPlaceRef.current(parsed);
+              applyPlaceRef.current(parsed, { skipReverse: true, zoom: STREET_LEVEL_ZOOM });
             });
           }
         }
@@ -447,6 +531,7 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
         circleRef.current = null;
       }
       mapRef.current = null;
+      removeGooglePacContainers();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap once per apiKey/showSearch/readOnly
   }, [apiKey, showSearch, readOnly, resolvePoint]);
@@ -476,15 +561,35 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
       }
 
       if (!isDraggingRef.current) {
+        map.setCenter({ lat: latNum, lng: lngNum });
         map.panTo({ lat: latNum, lng: lngNum });
-        const z = map.getZoom() || 14;
-        map.setZoom(Math.max(z, hasAnchor ? 17 : 15));
+        const z = map.getZoom() || STREET_LEVEL_ZOOM;
+        map.setZoom(Math.max(z, hasAnchor ? STREET_LEVEL_ZOOM : 16));
       }
     } else if (markerRef.current) {
       markerRef.current.setMap(null);
       markerRef.current = null;
     }
   }, [ready, latNum, lngNum, address, hasCoords, readOnly, hasAnchor, resolvePoint]);
+
+  // Existing lead: address only (no coords) → geocode once and populate coordinates
+  useEffect(() => {
+    if (!ready || readOnly || hasCoords || didInitialAddressGeocodeRef.current) return;
+    const text = String(address || '').trim();
+    if (!text) return;
+    const google = getGoogleMaps();
+    if (!google?.maps?.Geocoder) return;
+    didInitialAddressGeocodeRef.current = true;
+    setGeocodingAddress(true);
+    const geocoder = new google.maps.Geocoder();
+    geocoder.geocode({ address: text }, (results, status) => {
+      setGeocodingAddress(false);
+      if (status !== 'OK' || !results?.length) return;
+      const parsed = parseGooglePlace(results[0]);
+      if (!parsed) return;
+      applyPlaceRef.current(parsed, { skipReverse: true, zoom: STREET_LEVEL_ZOOM });
+    });
+  }, [ready, readOnly, hasCoords, address]);
 
   // GPS adjustment circle
   useEffect(() => {
@@ -518,50 +623,10 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
     }
   }, [ready, hasAnchor, anchorLat, anchorLng, maxRadiusMeters]);
 
-  // Inject enhanced styling for Google Places autocomplete dropdown
+  // Shared Places dropdown styles (hide empty / orphaned overlays)
   useEffect(() => {
     if (!showSearch) return;
-    const styleId = 'opennext-crm-google-pac-styles';
-    if (document.getElementById(styleId)) return;
-    const style = document.createElement('style');
-    style.id = styleId;
-    style.textContent = `
-      .pac-container {
-        z-index: 20000 !important;
-        font-family: inherit !important;
-        border-radius: 8px !important;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
-        border: 1px solid #e4e4e7 !important;
-        margin-top: 4px !important;
-        padding: 4px 0 !important;
-      }
-      .pac-item {
-        padding: 8px 12px !important;
-        cursor: pointer !important;
-        font-size: 13px !important;
-        line-height: 1.4 !important;
-        border-top: 1px solid #f4f4f5 !important;
-      }
-      .pac-item:first-child {
-        border-top: none !important;
-      }
-      .pac-item:hover {
-        background-color: #f4f4f5 !important;
-      }
-      .pac-item-query {
-        font-size: 13px !important;
-        color: #18181b !important;
-        font-weight: 500 !important;
-      }
-      .pac-matched {
-        font-weight: 700 !important;
-        color: #09090b !important;
-      }
-      .pac-icon {
-        margin-top: 3px !important;
-      }
-    `;
-    document.head.appendChild(style);
+    ensureGooglePacStyles();
   }, [showSearch]);
 
   const hint = readOnly
@@ -576,8 +641,8 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
     <div className="w-full flex flex-col gap-2">
       {/* Google Search Map Input with suggestions and controls */}
       {showSearch && !readOnly ? (
-        <div className="flex flex-col gap-1.5">
-          <div className="relative flex items-center">
+        <div className="relative z-30 flex flex-col gap-1.5 overflow-visible">
+          <div className="relative flex items-center overflow-visible">
             <SearchIcon
               sx={{ fontSize: 17 }}
               className="absolute left-3 text-zinc-400 pointer-events-none z-10"
@@ -592,11 +657,24 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
                   ? 'Google Maps unavailable'
                   : !ready
                     ? 'Loading Google Maps…'
-                    : 'Search address or place on Google Maps (e.g. Connaught Place, New Delhi)…'
+                    : 'Search address or place on Google Maps (e.g. Westfield Complex Surat)…'
               }
               autoComplete="off"
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setCandidates([]);
+              }}
               onKeyDown={handleKeyDown}
+              onFocus={() => {
+                // Let Google re-show suggestions after a prior hide (display:none only).
+                document.querySelectorAll<HTMLElement>('.pac-container').forEach((el) => {
+                  el.style.removeProperty('display');
+                });
+              }}
+              onBlur={() => {
+                // Hide only — never remove .pac-container on blur (breaks suggestion clicks).
+                window.setTimeout(() => hideGooglePacContainers(), 280);
+              }}
               className="w-full border border-zinc-300 rounded-lg py-2 pl-9 pr-24 bg-white text-xs text-zinc-900 outline-none focus:border-zinc-950 focus:ring-1 focus:ring-zinc-950 disabled:bg-zinc-50 disabled:text-zinc-400 shadow-2xs placeholder:text-zinc-400"
             />
             <div className="absolute right-1.5 flex items-center gap-1 z-10">
@@ -621,23 +699,46 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
               </button>
             </div>
           </div>
+          {candidates.length > 1 ? (
+            <ul className="relative z-40 m-0 list-none rounded-lg border border-zinc-200 bg-white p-0 shadow-lg max-h-56 overflow-y-auto">
+              {candidates.map((c, idx) => (
+                <li key={`${c.placeId || c.address}-${idx}`}>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() =>
+                      applyPlaceRef.current(c, { skipReverse: true, zoom: STREET_LEVEL_ZOOM })
+                    }
+                    className="w-full text-left px-3 py-2 text-xs text-zinc-800 hover:bg-zinc-100 border-0 bg-transparent cursor-pointer border-b border-zinc-100 last:border-b-0"
+                  >
+                    <span className="font-medium text-zinc-900 block">{c.name || c.address}</span>
+                    {c.name && c.address !== c.name ? (
+                      <span className="text-[11px] text-zinc-500">{c.address}</span>
+                    ) : null}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {searchError ? (
             <p className="m-0 text-[11px] text-red-600 font-medium flex items-center gap-1">
-              <span>⚠</span> {searchError}
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" aria-hidden /> {searchError}
             </p>
+          ) : searching || geocodingAddress ? (
+            <div className="text-[11px] text-zinc-500">Looking up address…</div>
           ) : (
             <div className="flex items-center justify-between text-[11px] text-zinc-500">
-              <span>Type to view Google suggestions dropdown, or press Enter / Search.</span>
+              <span>Type for Google suggestions, or press Enter / Search. Use ↑↓ + Enter in the dropdown.</span>
             </div>
           )}
         </div>
       ) : null}
 
-      {/* Google Map Viewport */}
+      {/* Google Map Viewport — keep below search/pac (z-index); overflow only on map tile */}
       <div
         ref={mapContainerRef}
         style={{ height }}
-        className="w-full rounded-lg border border-zinc-200 overflow-hidden z-0 shadow-none bg-zinc-100 relative"
+        className="w-full rounded-lg border border-zinc-200 overflow-hidden z-0 shadow-none bg-zinc-100 relative isolate"
       />
 
       {/* Selected Location Details Card: Address, Latitude, Longitude & Actions */}

@@ -63,14 +63,6 @@ function buildAddressLine(addr: NominatimAddress, displayName: string): string {
   return line || displayName;
 }
 
-function componentByType(
-  components: Array<{ long_name: string; short_name: string; types: string[] }> | undefined,
-  type: string
-): string {
-  const match = (components || []).find((c) => c.types?.includes(type));
-  return String(match?.long_name || '').trim();
-}
-
 /**
  * Reverse-geocode via Google Geocoder (requires Maps JS loaded).
  */
@@ -79,56 +71,29 @@ async function reverseGeocodeGoogle(
   longitude: number
 ): Promise<ReverseGeocodeResult | null> {
   const google = getGoogleMaps();
-  const Geocoder = google?.maps?.Geocoder as
-    | (new () => {
-        geocode: (
-          req: { location: { lat: number; lng: number } },
-          cb: (
-            results: Array<{
-              formatted_address?: string;
-              address_components?: Array<{
-                long_name: string;
-                short_name: string;
-                types: string[];
-              }>;
-            }> | null,
-            status: string
-          ) => void
-        ) => void;
-      })
-    | undefined;
+  if (!google?.maps?.Geocoder) return null;
 
-  if (!Geocoder) return null;
+  const { parseGooglePlace } = await import('./googlePlaceAddress');
 
   return new Promise((resolve) => {
-    const geocoder = new Geocoder();
+    const geocoder = new google.maps!.Geocoder();
     geocoder.geocode({ location: { lat: latitude, lng: longitude } }, (results, status) => {
       if (status !== 'OK' || !results?.length) {
         resolve(null);
         return;
       }
-      const top = results[0];
-      const components = top.address_components || [];
-      const city =
-        componentByType(components, 'locality') ||
-        componentByType(components, 'administrative_area_level_2') ||
-        componentByType(components, 'sublocality') ||
-        componentByType(components, 'postal_town');
-      const state = componentByType(components, 'administrative_area_level_1');
-      const country = componentByType(components, 'country');
-      const postcode = componentByType(components, 'postal_code');
-      const displayName = String(top.formatted_address || '').trim();
-      if (!displayName && !city && !state) {
+      const parsed = parseGooglePlace(results[0]);
+      if (!parsed) {
         resolve(null);
         return;
       }
       resolve({
-        displayName,
-        addressLine: displayName,
-        city,
-        state,
-        country,
-        postcode,
+        displayName: parsed.address,
+        addressLine: parsed.address,
+        city: parsed.city,
+        state: parsed.state,
+        country: parsed.country,
+        postcode: parsed.postcode,
         source: 'google',
       });
     });

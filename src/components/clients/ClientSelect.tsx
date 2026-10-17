@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import CloseIcon from '@mui/icons-material/Close';
+import { Check } from 'lucide-react';
 import { getClientInitials, resolveClientAvatarColor, resolveClientMediaUrl } from '../../utils/clientAvatar';
 
 export interface ClientSelectOption {
@@ -55,7 +56,7 @@ export const ClientAvatarBadge: React.FC<ClientAvatarProps> = ({ client, size = 
 
   return (
     <div
-      className={`flex ${dim} shrink-0 items-center justify-center rounded-full font-bold text-white ring-1 ring-zinc-200`}
+      className={`flex ${dim} shrink-0 items-center justify-center rounded-full font-bold crm-on-solid ring-1 ring-border`}
       style={{ backgroundColor: resolveClientAvatarColor(client.avatarColor) }}
       aria-hidden
     >
@@ -238,7 +239,9 @@ export const ClientSelect: React.FC<ClientSelectProps> = ({
                         {client.email || 'No email'}
                       </div>
                     </div>
-                    {active ? <span className="text-xs font-semibold text-emerald-700">✓</span> : null}
+                    {active ? (
+                      <Check className="h-4 w-4 shrink-0 text-emerald-700" aria-hidden />
+                    ) : null}
                   </button>
                 );
               })

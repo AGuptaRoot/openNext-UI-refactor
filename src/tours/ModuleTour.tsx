@@ -10,6 +10,7 @@ import {
   setModuleTourProgress,
 } from './storage.js';
 import { getClientsTourProgress } from './clientsTourState.js';
+import { getContactsTourProgress } from './contactsTourState.js';
 import { getLeadsTourProgress } from './leadsTourState.js';
 import { getProjectsTourProgress } from './projectsTourState.js';
 import { getTasksTourProgress } from './tasksTourState.js';
@@ -31,6 +32,7 @@ function dedicatedTourActive() {
   return Boolean(
     getLeadsTourProgress()?.active ||
       getClientsTourProgress()?.active ||
+      getContactsTourProgress()?.active ||
       getProjectsTourProgress()?.active ||
       getTasksTourProgress()?.active ||
       getTimeLogsTourProgress()?.active ||

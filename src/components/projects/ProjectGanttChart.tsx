@@ -10,6 +10,19 @@ import FlagOutlinedIcon from '@mui/icons-material/FlagOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import { displayUserLabel } from '../../utils/displayLabels';
+import {
+  AlertTriangle,
+  Calendar,
+  Check,
+  ClipboardList,
+  Eye,
+  Flag,
+  Hourglass,
+  MapPin,
+  Pause,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 
 import {
   ProjectItem,
@@ -52,7 +65,6 @@ const GANTT_STATUS_CONFIG: Record<
     border: string;
     text: string;
     label: string;
-    icon: string;
     pillBg: string;
     pillText: string;
     pillBorder: string;
@@ -63,7 +75,6 @@ const GANTT_STATUS_CONFIG: Record<
     border: '#059669',
     text: '#ffffff',
     label: 'Completed',
-    icon: '✓',
     pillBg: '#ecfdf5',
     pillText: '#065f46',
     pillBorder: '#a7f3d0',
@@ -73,7 +84,6 @@ const GANTT_STATUS_CONFIG: Record<
     border: '#2563eb',
     text: '#ffffff',
     label: 'In Progress',
-    icon: '⏳',
     pillBg: '#eff6ff',
     pillText: '#1e40af',
     pillBorder: '#bfdbfe',
@@ -83,7 +93,6 @@ const GANTT_STATUS_CONFIG: Record<
     border: '#d97706',
     text: '#ffffff',
     label: 'In Review',
-    icon: '👁️',
     pillBg: '#fffbeb',
     pillText: '#92400e',
     pillBorder: '#fde68a',
@@ -93,7 +102,6 @@ const GANTT_STATUS_CONFIG: Record<
     border: '#4f46e5',
     text: '#ffffff',
     label: 'To Do',
-    icon: '📋',
     pillBg: '#eef2ff',
     pillText: '#3730a3',
     pillBorder: '#c7d2fe',
@@ -103,12 +111,24 @@ const GANTT_STATUS_CONFIG: Record<
     border: '#ea580c',
     text: '#ffffff',
     label: 'On Hold',
-    icon: '⏸',
     pillBg: '#fff7ed',
     pillText: '#9a3412',
     pillBorder: '#fed7aa',
   },
 };
+
+const GANTT_STATUS_ICONS: Record<string, LucideIcon> = {
+  Completed: Check,
+  'In Progress': Hourglass,
+  Review: Eye,
+  'To Do': ClipboardList,
+  'On Hold': Pause,
+};
+
+function GanttBarStatusIcon({ status }: { status?: string }) {
+  const Icon = GANTT_STATUS_ICONS[status || 'To Do'] ?? MapPin;
+  return <Icon className="h-3.5 w-3.5 shrink-0 drop-shadow-xs" aria-hidden />;
+}
 
 function getStatusStyle(status?: string) {
   return (
@@ -117,7 +137,6 @@ function getStatusStyle(status?: string) {
       border: '#475569',
       text: '#ffffff',
       label: status || 'To Do',
-      icon: '📌',
       pillBg: '#f1f5f9',
       pillText: '#475569',
       pillBorder: '#cbd5e1',
@@ -570,7 +589,7 @@ export const ProjectGanttChart: React.FC<ProjectGanttChartProps> = ({
           );
 
           setActiveTooltip({
-            text: `📅 Rescheduled: ${formatDateShort(
+            text: `Rescheduled: ${formatDateShort(
               state.currentStartDate
             )} → ${formatDateShort(state.currentDueDate)} (${durationDays}d)`,
             x: moveEv.clientX,
@@ -735,7 +754,7 @@ export const ProjectGanttChart: React.FC<ProjectGanttChartProps> = ({
               <option value="none">General (No Milestone)</option>
               {milestones.map((m) => (
                 <option key={m._id} value={m._id}>
-                  🚩 {m.title}
+                  {m.title}
                 </option>
               ))}
             </select>
@@ -808,7 +827,7 @@ export const ProjectGanttChart: React.FC<ProjectGanttChartProps> = ({
               onClick={() => setShowHelpTip(false)}
               className="text-zinc-400 hover:text-zinc-700 text-xs font-bold border-0 bg-transparent cursor-pointer"
             >
-              ✕
+              <X className="h-4 w-4 shrink-0" aria-hidden />
             </button>
           </div>
         )}
@@ -818,7 +837,7 @@ export const ProjectGanttChart: React.FC<ProjectGanttChartProps> = ({
       <div className="bg-white border border-zinc-300 rounded-xl overflow-hidden shadow-xs">
         {flatDisplayRows.length === 0 ? (
           <div className="py-16 px-4 text-center">
-            <div className="text-4xl mb-3">📅</div>
+            <Calendar className="h-10 w-10 shrink-0 text-zinc-400 mx-auto mb-3" aria-hidden />
             <h3 className="text-base font-bold text-zinc-900 m-0 mb-1">
               No tasks found for current filter
             </h3>
@@ -903,8 +922,10 @@ export const ProjectGanttChart: React.FC<ProjectGanttChartProps> = ({
                                 {displayUserLabel(row.task.assigneeName, row.task.assigneeId, 'Unassigned')}
                               </span>
                               {row.milestoneTitle && (
-                                <span className="text-zinc-400 truncate">
-                                  · 🚩 {row.milestoneTitle}
+                                <span className="inline-flex items-center gap-0.5 text-zinc-400 truncate">
+                                  ·
+                                  <Flag className="h-3 w-3 shrink-0" aria-hidden />
+                                  {row.milestoneTitle}
                                 </span>
                               )}
                             </div>
@@ -1005,7 +1026,7 @@ export const ProjectGanttChart: React.FC<ProjectGanttChartProps> = ({
                   className="absolute top-[72px] bottom-0 w-0.5 bg-red-500 z-10 pointer-events-none"
                 >
                   <div className="sticky top-[76px] -translate-x-1/2 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap">
-                    📍 Today
+                    Today
                   </div>
                 </div>
 
@@ -1032,7 +1053,10 @@ export const ProjectGanttChart: React.FC<ProjectGanttChartProps> = ({
                     <React.Fragment key={group.key}>
                       {groupByMilestone && group.title && (
                         <div className="h-7 bg-zinc-100/60 border-b border-zinc-200 px-3 flex items-center text-[10px] font-semibold text-zinc-500 sticky left-0">
-                          🚩 {group.title} ({group.rows.length})
+                          <span className="inline-flex items-center gap-1">
+                            <Flag className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                            {group.title} ({group.rows.length})
+                          </span>
                         </div>
                       )}
 
@@ -1099,7 +1123,7 @@ export const ProjectGanttChart: React.FC<ProjectGanttChartProps> = ({
                                   row.start
                                 )}\nDue: ${formatDateShort(row.end)}\nProgress: ${row.progress}%`}
                               >
-                                <span className="text-[11px] drop-shadow-xs">{row.style.icon}</span>
+                                <GanttBarStatusIcon status={row.task.status} />
                                 <span className="truncate drop-shadow-xs">{row.task.title}</span>
                                 <span className="text-[10px] font-extrabold opacity-90 ml-auto shrink-0 drop-shadow-xs">
                                   {row.progress}%
@@ -1122,7 +1146,8 @@ export const ProjectGanttChart: React.FC<ProjectGanttChartProps> = ({
                               {/* Overdue Warning Pill */}
                               {row.isOverdue && (
                                 <div className="absolute -right-22 top-1/2 -translate-y-1/2 bg-red-600 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded shadow-xs pointer-events-none flex items-center gap-1 whitespace-nowrap z-20">
-                                  ⚠️ OVERDUE
+                                  <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+                                  OVERDUE
                                 </div>
                               )}
                             </div>

@@ -48,6 +48,24 @@ import { RequestTypesPanel } from '../../components/settings/RequestTypesPanel';
 import { GroqIntegrationPanel } from '../../components/settings/GroqIntegrationPanel';
 import { GoogleMapsIntegrationPanel } from '../../components/settings/GoogleMapsIntegrationPanel';
 import { INDIAN_STATES } from '../../types/opportunities';
+import { SettingsTabIcon } from '../../components/icons/SettingsTabIcon';
+import {
+  Compass,
+  FolderKanban,
+  FolderOpen,
+  Pin,
+  Puzzle,
+  Radar,
+  Receipt,
+  Ruler,
+  Route,
+  Search,
+  Tag,
+  Target,
+  Truck,
+  Zap,
+  Pencil,
+} from 'lucide-react';
 
 const inputClass =
   'h-9 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-400';
@@ -91,7 +109,7 @@ function ChipListEditor({
 }: {
   title: string;
   description: string;
-  icon: string;
+  icon: React.ReactNode;
   accent: string;
   value: string[];
   placeholder?: string;
@@ -120,7 +138,7 @@ function ChipListEditor({
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0">
           <div
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg ${accent}`}
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${accent}`}
           >
             {icon}
           </div>
@@ -281,7 +299,8 @@ function ProjectStatusesEditor({
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-2xl">
               <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-zinc-600">
-                <span>📌</span> Project lifecycle
+                <Pin className="h-4 w-4 shrink-0" aria-hidden />
+                <span>Project lifecycle</span>
               </div>
               <h2 className="m-0 text-xl font-bold tracking-tight text-zinc-950">
                 Project statuses
@@ -345,8 +364,8 @@ function ProjectStatusesEditor({
         <section className={`${cardClass} flex h-full flex-col gap-4`}>
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-start gap-3 min-w-0">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-lg">
-                ✏️
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-100">
+                <Pencil className="h-[18px] w-[18px] shrink-0 text-zinc-700" aria-hidden />
               </div>
               <div className="min-w-0">
                 <h3 className="m-0 text-sm font-bold text-zinc-950">Custom statuses</h3>
@@ -553,8 +572,8 @@ function PipelineStagesEditor({
     <div className={`${cardClass} space-y-4`}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-950 text-base text-white">
-            🛤️
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-950 text-white">
+            <Route className="h-[18px] w-[18px] shrink-0" aria-hidden />
           </div>
           <div>
             <h3 className="m-0 text-sm font-bold text-zinc-950">Sales Pipeline Stages</h3>
@@ -822,7 +841,6 @@ function CustomFieldBuilder({
 interface SettingsTabMeta {
   id: SettingsTabId;
   label: string;
-  icon: string;
   subtitle: string;
   keywords: string;
 }
@@ -841,35 +859,30 @@ const SETTINGS_TAB_GROUPS: SettingsTabGroup[] = [
       {
         id: 'general',
         label: 'General Profile',
-        icon: '🏢',
         subtitle: 'Company details, office address & UoMs',
         keywords: 'company name tax gst state address office branch unit of measure uom pcs kg litre',
       },
       {
         id: 'shipping',
         label: 'Shipping & Logistics',
-        icon: '🚚',
         subtitle: 'Origin state & regional freight tariffs',
         keywords: 'shipping origin state freight weight rate courier logistics tier delivery',
       },
       {
         id: 'finance',
         label: 'Finance & Banking',
-        icon: '💰',
         subtitle: 'Currencies, banking accounts & terms',
         keywords: 'finance currency inr usd bank account bank name ifsc iban account number payment terms',
       },
       {
         id: 'email',
         label: 'Email & SMTP',
-        icon: '✉️',
         subtitle: 'Relay server & transactional routing',
         keywords: 'email smtp host port tls authentication sender from test email relay notification',
       },
       {
         id: 'integrations',
         label: 'Integrations & AI',
-        icon: '🔌',
         subtitle: 'Groq OCR LLM & Google Maps Places API',
         keywords: 'integrations groq ocr ai google maps places api key autocomplete vision model',
       },
@@ -882,28 +895,24 @@ const SETTINGS_TAB_GROUPS: SettingsTabGroup[] = [
       {
         id: 'leads',
         label: 'Leads & Funnels',
-        icon: '🎯',
         subtitle: 'Lead sources, categories & tags',
         keywords: 'leads sources categories tags stages custom fields qualification capture',
       },
       {
         id: 'qualification-match',
         label: 'Qualification Match',
-        icon: '📐',
         subtitle: 'Commercial request types & budget bounds',
         keywords: 'qualification match request types budget min max budget commercial requirements dynamic forms',
       },
       {
         id: 'opportunities',
         label: 'Opportunity Pipelines',
-        icon: '💼',
         subtitle: 'Sales pipelines & conversion stages',
         keywords: 'opportunity deal pipeline stages kanban win probability stages revenue forecast',
       },
       {
         id: 'clients',
         label: 'Clients & Accounts',
-        icon: '👥',
         subtitle: 'Client categories, tags & attributes',
         keywords: 'clients accounts categories tags custom fields customer company directory',
       },
@@ -916,21 +925,18 @@ const SETTINGS_TAB_GROUPS: SettingsTabGroup[] = [
       {
         id: 'projects',
         label: 'Projects & Delivery',
-        icon: '📁',
         subtitle: 'Project categories & priority ratings',
         keywords: 'projects categories custom fields priorities billing delivery collaboration',
       },
       {
         id: 'project-statuses',
         label: 'Project Statuses',
-        icon: '📌',
         subtitle: 'Custom delivery lifecycle stages',
         keywords: 'project statuses stages workflow planning in-progress on-hold completed cancelled',
       },
       {
         id: 'users',
         label: 'Users & Designations',
-        icon: '🛡️',
         subtitle: 'Workspace team roles & permissions',
         keywords: 'users designations roles permissions rbac team members designations access security',
       },
@@ -991,7 +997,6 @@ export const SettingsPage: React.FC = () => {
       ? {
           id: fallback.id,
           label: fallback.label,
-          icon: fallback.icon,
           subtitle: 'Settings & Preferences',
           keywords: '',
         }
@@ -1124,9 +1129,6 @@ export const SettingsPage: React.FC = () => {
         .filter(Boolean);
       payload.courier_carriers = (settings.courier_carriers || [])
         .map((c) => String(c || '').trim())
-        .filter(Boolean);
-      payload.tracking_number_options = (settings.tracking_number_options || [])
-        .map((t) => String(t || '').trim())
         .filter(Boolean);
     } else if (activeTab === 'shipping') {
       payload.state_shipping_rates = settings.state_shipping_rates || {};
@@ -1376,7 +1378,7 @@ export const SettingsPage: React.FC = () => {
             >
               <div className="flex items-center gap-2.5 min-w-0">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-950 text-base text-white">
-                  {currentTabMeta?.icon || '⚙️'}
+                  <SettingsTabIcon tabId={activeTab} className="h-[18px] w-[18px] shrink-0 text-white" />
                 </span>
                 <div className="min-w-0">
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400">
@@ -1476,7 +1478,7 @@ export const SettingsPage: React.FC = () => {
                                     : 'bg-zinc-100 text-zinc-700 group-hover:bg-zinc-200/80 group-hover:text-zinc-950'
                                 }`}
                               >
-                                {tab.icon}
+                                <SettingsTabIcon tabId={tab.id} className="h-4 w-4 shrink-0" />
                               </span>
                               <div className="min-w-0">
                                 <span
@@ -1545,7 +1547,7 @@ export const SettingsPage: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs">
             <div className="flex items-center gap-3.5 min-w-0">
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-950 text-xl text-white shadow-xs">
-                {currentTabMeta?.icon || '⚙️'}
+                <SettingsTabIcon tabId={activeTab} className="h-[18px] w-[18px] shrink-0 text-white" />
               </span>
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
@@ -1719,7 +1721,7 @@ export const SettingsPage: React.FC = () => {
             </label>
             <div className="sm:col-span-2 lg:col-span-3 border-t border-zinc-100 pt-4 mt-2">
               <ChipListEditor
-                icon="📏"
+                icon={<Ruler className="h-[18px] w-[18px] shrink-0" aria-hidden />}
                 title="Sample Request - Units of Measure (UoM)"
                 description="Configure units of measure available when adding sample products (e.g. pcs, kg, litre, meter, box, packet). These will be available in the sample request creation form."
                 value={settings.sample_units_of_measure || ['pcs', 'kg', 'litre', 'meter', 'box', 'packet', 'roll', 'set', 'swatch', 'gram']}
@@ -1730,7 +1732,7 @@ export const SettingsPage: React.FC = () => {
             </div>
             <div className="sm:col-span-2 lg:col-span-3 border-t border-zinc-100 pt-4 mt-2">
               <ChipListEditor
-                icon="🚚"
+                icon={<Truck className="h-[18px] w-[18px] shrink-0" aria-hidden />}
                 title="Courier / Carrier Options"
                 description="Configure courier and carrier names available when dispatching sample requests (e.g. BlueDart Express, Delhivery, FedEx)."
                 value={
@@ -1747,17 +1749,6 @@ export const SettingsPage: React.FC = () => {
                 onChange={(next: string[]) => update('courier_carriers', next)}
                 placeholder="Add courier / carrier name…"
                 accent="bg-sky-50 text-sky-800"
-              />
-            </div>
-            <div className="sm:col-span-2 lg:col-span-3 border-t border-zinc-100 pt-4 mt-2">
-              <ChipListEditor
-                icon="🔢"
-                title="Tracking Number Options"
-                description="Optional AWB / tracking number presets suggested when dispatching sample requests. Users can still enter a custom tracking number."
-                value={settings.tracking_number_options || []}
-                onChange={(next: string[]) => update('tracking_number_options', next)}
-                placeholder="Add tracking number preset / prefix…"
-                accent="bg-amber-50 text-amber-800"
               />
             </div>
           </div>
@@ -1781,7 +1772,10 @@ export const SettingsPage: React.FC = () => {
                 }}
                 className="h-9 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-700"
               >
-                ⚡ Reset Standard Indian States
+                <span className="inline-flex items-center gap-1.5">
+                  <Zap className="h-4 w-4 shrink-0" aria-hidden />
+                  Reset Standard Indian States
+                </span>
               </button>
               <button
                 type="button"
@@ -1916,7 +1910,7 @@ export const SettingsPage: React.FC = () => {
             <ChipListEditor
               title="Expense Classification Categories"
               description="Labels used when logging expenses so reports stay consistent."
-              icon="🧾"
+              icon={<Receipt className="h-[18px] w-[18px] shrink-0" aria-hidden />}
               accent="bg-zinc-100"
               value={settings.expense_categories}
               placeholder="e.g. Travel"
@@ -2067,24 +2061,24 @@ export const SettingsPage: React.FC = () => {
                   'project_priorities',
                   'Project Priorities',
                   'Priority levels used across projects and related task views.',
-                  '⚡',
+                  <Zap key="prio" className="h-[18px] w-[18px] shrink-0" aria-hidden />,
                   'e.g. High',
                 ],
                 [
                   'project_categories',
                   'Project Categories',
                   'Group projects by type — Internal, Client Delivery, R&D…',
-                  '📁',
+                  <FolderKanban key="cat" className="h-[18px] w-[18px] shrink-0" aria-hidden />,
                   'e.g. Client Delivery',
                 ],
                 [
                   'project_tags',
                   'Project Tags',
                   'Quick labels for segmentation and reporting.',
-                  '🏷️',
+                  <Tag key="tag" className="h-[18px] w-[18px] shrink-0" aria-hidden />,
                   'e.g. Retainer',
                 ],
-              ] as Array<[keyof CrmSettings, string, string, string, string]>
+              ] as Array<[keyof CrmSettings, string, string, React.ReactNode, string]>
             ).map(([key, title, description, icon, placeholder]) => (
               <ChipListEditor
                 key={key}
@@ -2127,7 +2121,8 @@ export const SettingsPage: React.FC = () => {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div className="max-w-2xl">
                   <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-zinc-600">
-                    <span>🎯</span> Lead intake & pipeline
+                    <Target className="h-4 w-4 shrink-0" aria-hidden />
+                    <span>Lead intake & pipeline</span>
                   </div>
                   <h2 className="m-0 text-xl font-bold tracking-tight text-zinc-950">
                     Configure how leads are captured and progressed
@@ -2168,7 +2163,7 @@ export const SettingsPage: React.FC = () => {
             <ChipListEditor
               title="Lead Sources"
               description="Where prospects come from — Website, Referral, Ads, Trade Show…"
-              icon="📡"
+              icon={<Radar className="h-[18px] w-[18px] shrink-0" aria-hidden />}
               accent="bg-zinc-100"
               value={settings.lead_sources}
               placeholder="e.g. Referral"
@@ -2177,7 +2172,7 @@ export const SettingsPage: React.FC = () => {
             <ChipListEditor
               title="Lead Statuses"
               description="Temperature + lifecycle labels — Hot, Warm, Cold, New, Contacted…"
-              icon="📌"
+              icon={<Pin className="h-[18px] w-[18px] shrink-0" aria-hidden />}
               accent="bg-zinc-100"
               value={settings.lead_statuses}
               placeholder="e.g. Hot"
@@ -2186,7 +2181,7 @@ export const SettingsPage: React.FC = () => {
             <ChipListEditor
               title="Lead Types"
               description="Classify leads as Organizational or Individual."
-              icon="🧭"
+              icon={<Compass className="h-[18px] w-[18px] shrink-0" aria-hidden />}
               accent="bg-zinc-100"
               value={settings.lead_types}
               placeholder="e.g. Organizational"
@@ -2195,7 +2190,7 @@ export const SettingsPage: React.FC = () => {
             <ChipListEditor
               title="Lead Priorities"
               description="Urgency levels shown on lead forms — Low, Medium, High, Urgent…"
-              icon="⚡"
+              icon={<Zap className="h-[18px] w-[18px] shrink-0" aria-hidden />}
               accent="bg-zinc-100"
               value={settings.lead_priorities}
               placeholder="e.g. Critical"
@@ -2204,7 +2199,7 @@ export const SettingsPage: React.FC = () => {
             <ChipListEditor
               title="Lead Tags"
               description="Quick labels for segmentation — Hot Lead, Inbound, Enterprise…"
-              icon="🏷️"
+              icon={<Tag className="h-[18px] w-[18px] shrink-0" aria-hidden />}
               accent="bg-zinc-100"
               value={settings.lead_tags}
               placeholder="e.g. Hot Lead"
@@ -2221,8 +2216,8 @@ export const SettingsPage: React.FC = () => {
 
           <section data-tour="settings-leads-custom-fields" className={cardClass}>
             <div className="mb-4 flex items-start gap-3 border-b border-zinc-100 pb-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100 text-base">
-                🧩
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100">
+                <Puzzle className="h-[18px] w-[18px] shrink-0 text-zinc-700" aria-hidden />
               </div>
               <div>
                 <h3 className="m-0 text-sm font-bold text-zinc-950">Lead Custom Fields</h3>
@@ -2273,7 +2268,7 @@ export const SettingsPage: React.FC = () => {
             <ChipListEditor
               title="Client Categories"
               description="Classify accounts — Enterprise, SMB, Partner…"
-              icon="📂"
+              icon={<FolderOpen className="h-[18px] w-[18px] shrink-0" aria-hidden />}
               accent="bg-zinc-100"
               value={settings.client_categories}
               placeholder="e.g. Enterprise"
@@ -2282,7 +2277,7 @@ export const SettingsPage: React.FC = () => {
             <ChipListEditor
               title="Client Tags"
               description="Quick labels for segmentation and filters on Clients."
-              icon="🏷️"
+              icon={<Tag className="h-[18px] w-[18px] shrink-0" aria-hidden />}
               accent="bg-zinc-100"
               value={settings.client_tags}
               placeholder="e.g. VIP"
@@ -2454,7 +2449,10 @@ export const SettingsPage: React.FC = () => {
                           onClick={() => setPermsUser(user)}
                           className="rounded-lg border border-zinc-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
                         >
-                          🔍 View
+                          <span className="inline-flex items-center gap-1">
+                            <Search className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                            View
+                          </span>
                         </button>
                       </div>
                     </td>

@@ -190,7 +190,6 @@ export const ROLE_PERMISSION_PRESETS: Record<CrmRole, readonly string[]> = {
     "crm.expenses.approve",
     "crm.samples.read",
     "crm.samples.write",
-    "crm.samples.approve",
     "crm.samples.feedback",
     "crm.reports.read",
     "crm.reports.export",

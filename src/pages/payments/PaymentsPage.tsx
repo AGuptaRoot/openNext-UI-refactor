@@ -1,8 +1,9 @@
 import { displayLabel } from '../../utils/displayLabels';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DownloadIcon from '@mui/icons-material/Download';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
@@ -93,6 +94,8 @@ export const PaymentsPage: React.FC = () => {
   const [autoApprove, setAutoApprove] = useState(false);
   const [rejectOpen, setRejectOpen] = useState<{ paymentId: string; refundId: string } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const next = searchParams.get('status') || '';
@@ -248,7 +251,19 @@ export const PaymentsPage: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (!exportOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [exportOpen]);
+
   const exportData = async (format: 'csv' | 'json') => {
+    setExportOpen(false);
     try {
       const response = await crmApi.exportPayments({
         search: search || undefined,
@@ -339,9 +354,34 @@ export const PaymentsPage: React.FC = () => {
           <button type="button" onClick={() => (tab === 'payments' ? loadPayments() : loadRefunds())} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer">
             <RefreshIcon sx={{ fontSize: 15 }} /> Refresh
           </button>
-          <button type="button" onClick={() => exportData('csv')} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer">
-            <DownloadIcon sx={{ fontSize: 15 }} /> Export CSV
-          </button>
+          <div className="relative" ref={exportRef} data-tour="payments-export-btn">
+            <button
+              type="button"
+              onClick={() => setExportOpen((open) => !open)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer"
+            >
+              <DownloadIcon sx={{ fontSize: 15 }} /> Export
+              <ExpandMoreIcon sx={{ fontSize: 16 }} />
+            </button>
+            {exportOpen && (
+              <div className="absolute right-0 z-20 mt-1 w-36 overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => void exportData('csv')}
+                  className="w-full cursor-pointer border-0 bg-transparent px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-50"
+                >
+                  Export CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void exportData('json')}
+                  className="w-full cursor-pointer border-0 border-t border-zinc-100 bg-transparent px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-50"
+                >
+                  Export JSON
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 

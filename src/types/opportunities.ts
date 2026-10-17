@@ -33,9 +33,15 @@ export interface OpportunityItem {
   /** Linked PersonContact from the Contacts directory */
   contactId?: string | null;
   products?: OpportunityProductLine[];
+  /** Canonical deal amount shown in UI as Estimated Deal Value. */
+  estimatedDealValue?: number;
+  /** @deprecated Prefer estimatedDealValue — kept for API compatibility. */
   expectedRevenue?: number;
+  /** @deprecated Prefer estimatedDealValue */
   value?: number;
   currency?: string;
+  currencyCode?: string;
+  exchangeRate?: number;
   shippingState?: string;
   shippingCharge?: number;
   probability?: number;
@@ -58,6 +64,11 @@ export interface OpportunityItem {
   acceptedQuotationNo?: string | null;
   generatedSalesOrderId?: string | null;
   generatedSalesOrderNo?: string | null;
+  /** Linked sales order summary (1 Opportunity → 1 Sales Order). */
+  generatedSalesOrderStatus?: string | null;
+  generatedSalesOrderDate?: string | null;
+  generatedSalesOrderAmount?: number | null;
+  generatedSalesOrderCurrency?: string | null;
   description?: string;
   source?: string;
   isDeleted?: boolean;
@@ -75,9 +86,13 @@ export interface OpportunityCreateInput {
   leadId?: string;
   stage?: OpportunityStage;
   probability?: number;
+  estimatedDealValue?: number;
+  /** @deprecated Prefer estimatedDealValue — still accepted by API as expectedRevenue. */
   expectedRevenue?: number;
   value?: number;
   currency?: string;
+  currencyCode?: string;
+  exchangeRate?: number;
   expectedCloseDate?: string;
   salesOwner?: string;
   contactPerson?: string;
@@ -133,7 +148,7 @@ export const OPPORTUNITY_STAGES: {
     key: 'Discovery',
     label: 'Discovery',
     probability: 10,
-    icon: '🔍',
+    icon: 'search',
     color: '#64748b',
     desc: 'Initial qualification & customer discovery',
   },
@@ -141,7 +156,7 @@ export const OPPORTUNITY_STAGES: {
     key: 'Requirement Confirmed',
     label: 'Requirement Confirmed',
     probability: 25,
-    icon: '📋',
+    icon: 'clipboard',
     color: '#3b82f6',
     desc: 'Technical & business needs documented',
   },
@@ -149,7 +164,7 @@ export const OPPORTUNITY_STAGES: {
     key: 'Product Validated',
     label: 'Product Validated',
     probability: 40,
-    icon: '🧪',
+    icon: 'test-tube',
     color: '#06b6d4',
     desc: 'Solution architecture & specs agreed',
   },
@@ -157,7 +172,7 @@ export const OPPORTUNITY_STAGES: {
     key: 'Sample Approved',
     label: 'Sample Approved',
     probability: 55,
-    icon: '✅',
+    icon: 'check',
     color: '#10b981',
     desc: 'Prototype / material swatch tested & accepted',
   },
@@ -165,7 +180,7 @@ export const OPPORTUNITY_STAGES: {
     key: 'Commercial Discussion',
     label: 'Commercial Discussion',
     probability: 70,
-    icon: '💬',
+    icon: 'message',
     color: '#8b5cf6',
     desc: 'Pricing, payment terms & timeline review',
   },
@@ -173,7 +188,7 @@ export const OPPORTUNITY_STAGES: {
     key: 'Quotation Sent',
     label: 'Quotation Sent',
     probability: 95,
-    icon: '📨',
+    icon: 'mail',
     color: '#6366f1',
     desc: 'Formal quotation issued to the customer',
   },
@@ -181,7 +196,7 @@ export const OPPORTUNITY_STAGES: {
     key: 'Won',
     label: 'Won (Closed)',
     probability: 100,
-    icon: '🏆',
+    icon: 'trophy',
     color: '#059669',
     desc: 'Deal successfully won & ready for quotation / order',
   },
@@ -189,7 +204,7 @@ export const OPPORTUNITY_STAGES: {
     key: 'Negotiation',
     label: 'Negotiation',
     probability: 85,
-    icon: '🤝',
+    icon: 'handshake',
     color: '#f59e0b',
     desc: 'Final contract terms & discount discussion',
   },
@@ -197,7 +212,7 @@ export const OPPORTUNITY_STAGES: {
     key: 'Lost',
     label: 'Lost',
     probability: 0,
-    icon: '❌',
+    icon: 'x',
     color: '#ef4444',
     desc: 'Opportunity abandoned or lost to competitor',
   },
@@ -255,7 +270,7 @@ export function buildOpportunityStages(
       key: name,
       label: known?.label || name,
       probability: prob,
-      icon: known?.icon || '📍',
+      icon: known?.icon || 'pin',
       color: known?.color || STAGE_PALETTE[index % STAGE_PALETTE.length],
       desc: known?.desc || '',
     };
@@ -389,8 +404,8 @@ export function isOpportunityStageLocked(
 export function opportunityLockLabel(
   item: Pick<OpportunityItem, 'acceptedQuotationId' | 'generatedSalesOrderId' | 'generatedQuotationId'>
 ): string {
-  if (item.generatedSalesOrderId) return '🔒 Sales Order Generated';
-  if (item.acceptedQuotationId) return '🔒 Quotation Accepted';
+  if (item.generatedSalesOrderId) return 'Sales Order Generated';
+  if (item.acceptedQuotationId) return 'Quotation Accepted';
   return '';
 }
 
@@ -421,4 +436,12 @@ export function computeOpportunityFinancials(
     expectedRevenue,
     weightedRevenue,
   };
+}
+
+/** Canonical UI amount: Estimated Deal Value (maps estimatedDealValue → expectedRevenue → value). */
+export function getEstimatedDealValue(
+  item: Pick<OpportunityItem, 'estimatedDealValue' | 'expectedRevenue' | 'value'>
+): number {
+  const n = Number(item.estimatedDealValue ?? item.expectedRevenue ?? item.value ?? 0);
+  return Number.isFinite(n) ? n : 0;
 }

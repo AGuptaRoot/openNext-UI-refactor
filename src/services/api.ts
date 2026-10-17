@@ -42,6 +42,7 @@ import type {
   ContactCompanyLeadsResult,
 } from '../types/contacts';
 import { triggerFileDownload } from '../utils/fileDownload';
+import { getRuntimeDefaultCurrency } from '../utils/currency';
 import {
   applyListPaginationParams,
   fallbackPagination,
@@ -374,13 +375,16 @@ export class ApiError extends Error {
   details?: unknown[];
   /** Populated on 409 CONTACT_DUPLICATE responses. */
   duplicates?: unknown[];
+  /** Extra payload from API errors (e.g. existing salesOrderId on 409). */
+  data?: unknown;
 
   constructor(
     message: string,
     status: number,
     code?: string,
     details?: unknown[],
-    duplicates?: unknown[]
+    duplicates?: unknown[],
+    data?: unknown
   ) {
     super(message);
     this.name = 'ApiError';
@@ -388,6 +392,7 @@ export class ApiError extends Error {
     this.code = code;
     this.details = details;
     this.duplicates = duplicates;
+    this.data = data;
   }
 }
 
@@ -452,7 +457,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<ApiR
       response.status,
       typeof payload.code === 'string' ? payload.code : undefined,
       payload.details,
-      Array.isArray(payload.duplicates) ? payload.duplicates : undefined
+      Array.isArray(payload.duplicates) ? payload.duplicates : undefined,
+      payload.data
     );
   }
 
@@ -1089,7 +1095,7 @@ const DEFAULT_ADMIN_SETTINGS: CrmSettings = {
     'Custom Courier',
   ],
   tracking_number_options: [],
-  default_currency: 'INR',
+  default_currency: getRuntimeDefaultCurrency(),
   tax_rate: 18,
   free_shipping_threshold: 5000,
   state_shipping_rates: { ...STANDARD_STATE_SHIPPING_RATES },
@@ -1178,7 +1184,7 @@ function normalizeCrmSettings(raw?: Partial<CrmSettings> | null): CrmSettings {
       : DEFAULT_ADMIN_SETTINGS.tracking_number_options || [],
     default_currency:
       String(raw?.default_currency ?? '').trim().toUpperCase() ||
-      DEFAULT_ADMIN_SETTINGS.default_currency,
+      getRuntimeDefaultCurrency(),
     state_shipping_rates:
       raw?.state_shipping_rates && Object.keys(raw.state_shipping_rates).length
         ? { ...raw.state_shipping_rates }
@@ -2392,7 +2398,7 @@ function applyLeadWinBack(input: {
   const revenue = leadExpectedRevenue(lead);
   const nextQualificationStatus =
     input.targetStage === 'Qualified' ? 'Qualified' : 'In Review';
-  const noteLine = `🔥 Pipeline Win-Back via ${input.campaign.name} (${input.actionType})${
+  const noteLine = `Pipeline Win-Back via ${input.campaign.name} (${input.actionType})${
     input.notes?.trim() ? `: ${input.notes.trim()}` : ''
   }`;
   const updated: LeadItem = {
@@ -2476,7 +2482,7 @@ function normalizeSalesOrder(raw: Partial<SalesOrderItem> & { _id?: string }): S
     status: (raw.status as SalesOrderStatus) || 'Approved',
     issueDate: raw.issueDate || new Date().toISOString().slice(0, 10),
     shippingState: raw.shippingState || 'Maharashtra',
-    currency: raw.currency || 'INR',
+    currency: raw.currency || getRuntimeDefaultCurrency(),
     lineItems,
     discountType,
     discountValue,
@@ -2829,7 +2835,7 @@ function normalizeExpenseItem(raw: Partial<ExpenseItem> & { _id?: string }): Exp
     itemName: raw.itemName || raw.title || '',
     amount: Number(raw.amount ?? price),
     price,
-    currency: raw.currency || 'INR',
+    currency: raw.currency || getRuntimeDefaultCurrency(),
     exchangeRate: Number(raw.exchangeRate ?? 1) || 1,
     expenseDate: raw.expenseDate || purchaseDate,
     purchaseDate,
@@ -2982,7 +2988,7 @@ function createExpenseFromRecurring(profile: RecurringExpenseItem): ExpenseItem 
     title: profile.itemName,
     price,
     amount: price,
-    currency: profile.currency || 'INR',
+    currency: profile.currency || getRuntimeDefaultCurrency(),
     exchangeRate: Number(profile.exchangeRate || 1),
     purchaseDate: runDate,
     expenseDate: runDate,
@@ -3072,7 +3078,7 @@ function toApiSubtaskPayload(body: {
 function normalizeProjectOverview(
   raw: unknown,
   fallbackHoursEstimate = 0,
-  currency = 'INR'
+  currency = getRuntimeDefaultCurrency()
 ): ProjectOverview {
   const data = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const statistics =
@@ -3134,7 +3140,7 @@ function normalizeProjectOverview(
     hoursLogged: hoursLoggedValue,
     hoursEstimate:
       Number(data.hoursEstimate ?? project.hoursEstimate ?? fallbackHoursEstimate) || 0,
-    currency: String(data.currency || project.currency || currency || 'INR'),
+    currency: String(data.currency || project.currency || currency || getRuntimeDefaultCurrency()),
     taskStats: {
       total,
       completed,
@@ -3288,7 +3294,7 @@ function dispatchTaskReminderMock(taskId: string): {
       _id: `comment_${Date.now()}`,
       taskId,
       userName: 'System',
-      body: `🔔 **Reminder email sent to client** (${clientEmail}) on ${new Date(now).toLocaleString()}`,
+      body: `**Reminder email sent to client** (${clientEmail}) on ${new Date(now).toLocaleString()}`,
       createdAt: now,
     },
     ...(commentsMap[taskId] || []),
@@ -3728,6 +3734,7 @@ export const crmApi = {
     if (params.source) query.set('source', params.source);
     if (params.tag) query.set('tag', params.tag);
     if (params.matchScore) query.set('matchScore', params.matchScore);
+    if (params.needsSampleRequest) query.set('needsSampleRequest', params.needsSampleRequest);
     if (params.search) query.set('search', params.search);
     if (params.sort) query.set('sort', params.sort);
     const qs = query.toString();
@@ -3762,6 +3769,19 @@ export const crmApi = {
           if (band === 'partial') return n != null && n >= 55 && n < 80;
           if (band === 'weak') return n != null && n >= 30 && n < 55;
           if (band === 'poor') return n != null && n >= 0 && n < 30;
+          return true;
+        });
+      }
+      if (params.needsSampleRequest) {
+        const flag = params.needsSampleRequest.toLowerCase();
+        const wants = flag === 'true' || flag === '1' || flag === 'yes';
+        const doesnt = flag === 'false' || flag === '0' || flag === 'no';
+        items = items.filter((l) => {
+          const needs = Boolean(
+            l.commercialRequirement?.needsSampleRequest || l.qualification?.sampleRequired
+          );
+          if (wants) return needs;
+          if (doesnt) return !needs;
           return true;
         });
       }
@@ -3824,7 +3844,7 @@ export const crmApi = {
         _id: `lead_${Date.now()}`,
         status: input.status || 'New',
         value: input.value || 0,
-        currency: input.currency || 'INR',
+        currency: input.currency || getRuntimeDefaultCurrency(),
         customFields: input.customFields || {},
         assignedUsername: user?.username || 'admin',
         assignedToName: user?.displayName || user?.name || 'Unassigned',
@@ -4027,6 +4047,7 @@ export const crmApi = {
     source?: string;
     tag?: string;
     matchScore?: string;
+    needsSampleRequest?: string;
     search?: string;
     format?: 'csv' | 'json';
     from?: string;
@@ -4044,6 +4065,7 @@ export const crmApi = {
     if (params.source) query.set('source', params.source);
     if (params.tag) query.set('tag', params.tag);
     if (params.matchScore) query.set('matchScore', params.matchScore);
+    if (params.needsSampleRequest) query.set('needsSampleRequest', params.needsSampleRequest);
     if (params.search) query.set('search', params.search);
     if (params.format) query.set('format', params.format);
     if (params.from) query.set('from', params.from);
@@ -4117,6 +4139,16 @@ export const crmApi = {
           if (band === 'partial' && !(n != null && n >= 55 && n < 80)) return false;
           if (band === 'weak' && !(n != null && n >= 30 && n < 55)) return false;
           if (band === 'poor' && !(n != null && n >= 0 && n < 30)) return false;
+        }
+        if (params.needsSampleRequest) {
+          const flag = params.needsSampleRequest.toLowerCase();
+          const wants = flag === 'true' || flag === '1' || flag === 'yes';
+          const doesnt = flag === 'false' || flag === '0' || flag === 'no';
+          const needs = Boolean(
+            lead.commercialRequirement?.needsSampleRequest || lead.qualification?.sampleRequired
+          );
+          if (wants && !needs) return false;
+          if (doesnt && needs) return false;
         }
         if (params.search) {
           const term = params.search.toLowerCase();
@@ -5093,11 +5125,20 @@ export const crmApi = {
         merged,
         settings.qualification_match
       );
+      const needsSampleRequest = Boolean(
+        (commercial as LeadCommercialRequirement).needsSampleRequest ??
+          merged.needsSampleRequest
+      );
       items[index].commercialRequirement = {
         ...merged,
+        needsSampleRequest,
         score,
         scoreBreakdown: breakdown,
         scoredAt: new Date().toISOString(),
+      };
+      items[index].qualification = {
+        ...(items[index].qualification || {}),
+        sampleRequired: needsSampleRequest,
       };
       saveLocalLeads(items);
       return { success: true, data: items[index] };
@@ -5627,7 +5668,7 @@ export const crmApi = {
         totalQuotations,
         outstandingBalance,
         paymentsThisMonth: Number(raw.paymentsThisMonth ?? raw.payments ?? 0) || 0,
-        defaultCurrency: String(raw.defaultCurrency || 'INR'),
+        defaultCurrency: String(raw.defaultCurrency || getRuntimeDefaultCurrency()),
         contacts: contactCount,
         projects: totalProjects,
         invoices: unpaidInvoices,
@@ -8333,7 +8374,7 @@ export const crmApi = {
           available: true,
           keyId: 'rzp_test_mockKeyId123',
           businessName: 'Root CRM',
-          currency: 'INR',
+          currency: getRuntimeDefaultCurrency(),
         },
       };
     }
@@ -8351,7 +8392,7 @@ export const crmApi = {
     } catch (error) {
       rethrowUnlessMockFallback(error);
       const invoice = getLocalInvoiceOrThrow(id);
-      const cur = String(body.currency || invoice.currency || 'INR').toUpperCase();
+      const cur = String(body.currency || invoice.currency || getRuntimeDefaultCurrency()).toUpperCase();
       const multiplier = ['JPY', 'KRW'].includes(cur) ? 1 : 100;
       const payAmount = body.amount != null ? Number(body.amount) : Number(invoice.balanceDue ?? invoice.grandTotal);
       const amountPaise = Math.round(payAmount * multiplier);
@@ -9506,7 +9547,23 @@ export const crmApi = {
       rethrowUnlessMockFallback(error);
       const item = getLocalSalesOrders().find((entry) => entry._id === id && !entry.isDeleted);
       if (!item) throw new ApiError('Sales order not found', 404);
-      return { success: true, data: item };
+      const opportunityId = String(item.opportunityId || '').trim();
+      if (!opportunityId) return { success: true, data: item };
+      const opp = getLocalOpportunities().find((entry) => entry._id === opportunityId && !entry.isDeleted);
+      return {
+        success: true,
+        data: {
+          ...item,
+          opportunityTitle: opp?.title || item.opportunityTitle || null,
+          opportunityStage: opp?.stage || item.opportunityStage || null,
+          opportunityStageType: opp?.stageType || item.opportunityStageType || null,
+          opportunityExpectedRevenue:
+            opp?.expectedRevenue != null
+              ? Number(opp.expectedRevenue)
+              : item.opportunityExpectedRevenue ?? null,
+          opportunityCurrency: opp?.currency || item.opportunityCurrency || null,
+        },
+      };
     }
   },
 
@@ -9999,7 +10056,7 @@ export const crmApi = {
         projectId: order.projectId || undefined,
         issueDate: new Date().toISOString().slice(0, 10),
         dueDate: due,
-        currency: order.currency || 'INR',
+        currency: order.currency || getRuntimeDefaultCurrency(),
         exchangeRate: 1,
         taxCalculation: 'after_discount',
         billingAddress: order.billingAddress,
@@ -10278,7 +10335,7 @@ export const crmApi = {
         stage,
         expectedRevenue: financials.expectedRevenue,
         value: financials.expectedRevenue,
-        currency: body.currency || 'INR',
+        currency: body.currency || getRuntimeDefaultCurrency(),
         probability,
         weightedRevenue: financials.weightedRevenue,
         shippingState: body.shippingState,
@@ -10405,7 +10462,7 @@ export const crmApi = {
         shippingState: opportunity.shippingState || 'Maharashtra',
         issueDate,
         validTill: valid.toISOString().slice(0, 10),
-        currency: opportunity.currency || 'INR',
+        currency: opportunity.currency || getRuntimeDefaultCurrency(),
         taxCalculation: 'after_discount',
         title: opportunity.title,
         lineItems: (products.length
@@ -10476,11 +10533,21 @@ export const crmApi = {
       const idx = items.findIndex((o) => o._id === id && !o.isDeleted);
       if (idx < 0) throw new ApiError('Opportunity not found', 404);
       const opportunity = items[idx];
-      if (opportunity.stage !== 'Won') {
+      const stageType = String(opportunity.stageType || '').trim().toUpperCase();
+      const isWon =
+        stageType === 'WON' || String(opportunity.stage || '').trim().toLowerCase() === 'won';
+      if (!isWon) {
         throw new ApiError('Only Won opportunities can be converted to sales orders', 400);
       }
       if (opportunity.generatedSalesOrderId) {
-        throw new ApiError('This opportunity converted', 400);
+        throw new ApiError(
+          'A Sales Order already exists for this Opportunity.',
+          409,
+          'SALES_ORDER_EXISTS',
+          undefined,
+          undefined,
+          { salesOrderId: opportunity.generatedSalesOrderId }
+        );
       }
       if (!opportunity.clientId) throw new ApiError('Opportunity must be linked to a client', 400);
       const products = opportunity.products || [];
@@ -10684,7 +10751,7 @@ export const crmApi = {
           progress,
           hoursLogged,
           hoursEstimate: Number(project.hoursEstimate) || 0,
-          currency: project.currency || 'INR',
+          currency: project.currency || getRuntimeDefaultCurrency(),
           taskStats: {
             total: tasks.length,
             completed: tasks.filter((t) => t.status === 'Completed').length,
@@ -10751,7 +10818,7 @@ export const crmApi = {
         priority: body.priority || 'Medium',
         status: body.status || 'Not Started',
         budget: Number(body.budget) || 0,
-        currency: body.currency || 'INR',
+        currency: body.currency || getRuntimeDefaultCurrency(),
         hoursEstimate: Number(body.hoursEstimate) || 0,
         progressCalculationMethod: body.progressCalculationMethod || 'tasks',
         startDate: body.startDate || null,
@@ -10966,7 +11033,7 @@ export const crmApi = {
             p.priority,
             p.status,
             p.budget ?? 0,
-            p.currency || 'INR',
+            p.currency || getRuntimeDefaultCurrency(),
             p.progress ?? 0,
             p.deadline || '',
             p.ownerName || '',
@@ -11141,7 +11208,7 @@ export const crmApi = {
         priority: body.priority || 'Medium',
         hoursEstimate: Number(body.hoursEstimate) || 0,
         budget: Number(body.budget) || 0,
-        currency: body.currency || 'INR',
+        currency: body.currency || getRuntimeDefaultCurrency(),
         milestones: body.milestones || [],
         tasks: body.tasks || [],
         createdAt: new Date().toISOString(),
@@ -11624,7 +11691,7 @@ export const crmApi = {
             _id: `comment_${Date.now()}`,
             taskId: created._id,
             userName: 'System',
-            body: `📧 **Completion notification email sent to client** (${clientEmail}) on ${new Date(now).toLocaleString()}`,
+            body: `**Completion notification email sent to client** (${clientEmail}) on ${new Date(now).toLocaleString()}`,
             createdAt: now,
           },
           ...(commentsMap[created._id] || []),
@@ -11738,7 +11805,7 @@ export const crmApi = {
             _id: `comment_${Date.now()}`,
             taskId: id,
             userName: 'System',
-            body: `📧 **Completion notification email sent to client** (${clientEmail}) on ${new Date(now).toLocaleString()}`,
+            body: `**Completion notification email sent to client** (${clientEmail}) on ${new Date(now).toLocaleString()}`,
             createdAt: now,
           },
           ...(commentsMap[id] || []),
@@ -13586,7 +13653,7 @@ export const crmApi = {
         category: body.category,
         price,
         amount: Number(body.amount ?? price),
-        currency: body.currency || 'INR',
+        currency: body.currency || getRuntimeDefaultCurrency(),
         exchangeRate: Number(body.exchangeRate) || 1,
         purchaseDate,
         expenseDate: body.expenseDate || purchaseDate,
@@ -13658,7 +13725,7 @@ export const crmApi = {
         projectId,
         title: body.title.trim(),
         amount: Number(body.amount),
-        currency: body.currency || 'INR',
+        currency: body.currency || getRuntimeDefaultCurrency(),
         category: body.category || 'General',
         status: 'Draft',
         date: body.date || new Date().toISOString().slice(0, 10),
@@ -14096,7 +14163,7 @@ export const crmApi = {
         category: body.category,
         amount: Number(body.amount ?? price),
         price,
-        currency: body.currency || 'INR',
+        currency: body.currency || getRuntimeDefaultCurrency(),
         exchangeRate: Number(body.exchangeRate || 1),
         frequency: body.frequency || 'monthly',
         customIntervalDays: Number(body.customIntervalDays || 30),
@@ -14403,7 +14470,7 @@ export const crmApi = {
             frequency: profile.frequency,
             cycleNumber: cycle,
             amount: Number(profile.price || profile.amount || 0),
-            currency: profile.currency || 'INR',
+            currency: profile.currency || getRuntimeDefaultCurrency(),
           });
           cursor = advanceRecurringDate(cursor, profile.frequency, profile.customIntervalDays);
           cycle += 1;
@@ -15114,7 +15181,7 @@ export const crmApi = {
 
       return {
         ...raw,
-        defaultCurrency: String(raw.defaultCurrency || 'INR'),
+        defaultCurrency: String(raw.defaultCurrency || getRuntimeDefaultCurrency()),
         buckets,
         invoices,
         totalUnpaid,
@@ -15361,7 +15428,7 @@ export const crmApi = {
               refundedAmount: 0,
               netAmount: 125000,
               status: 'Completed',
-              currency: 'INR',
+              currency: getRuntimeDefaultCurrency(),
             },
             {
               receiptNumber: 'RCP-2026-113',
@@ -15373,7 +15440,7 @@ export const crmApi = {
               refundedAmount: 0,
               netAmount: 85000,
               status: 'Completed',
-              currency: 'INR',
+              currency: getRuntimeDefaultCurrency(),
             },
             {
               receiptNumber: 'RCP-2026-112',
@@ -15385,7 +15452,7 @@ export const crmApi = {
               refundedAmount: 12000,
               netAmount: 23000,
               status: 'Refunded',
-              currency: 'INR',
+              currency: getRuntimeDefaultCurrency(),
             },
             {
               receiptNumber: 'RCP-2026-111',
@@ -15397,7 +15464,7 @@ export const crmApi = {
               refundedAmount: 0,
               netAmount: 210000,
               status: 'Completed',
-              currency: 'INR',
+              currency: getRuntimeDefaultCurrency(),
             },
           ],
         },
@@ -17009,11 +17076,24 @@ export const crmApi = {
       const client = getLocalClients().find((item) => item._id === body.clientId);
       if (!client) throw new ApiError('Client not found', 404);
       const items = getLocalFinanceList(CUSTOMER_FEEDBACK_STORE_KEY, INITIAL_WAVE_FEEDBACK);
+      const taskIds = Array.isArray(body.taskIds)
+        ? body.taskIds.map((id) => String(id || '').trim()).filter(Boolean)
+        : body.taskId
+          ? [String(body.taskId).trim()]
+          : [];
+      const taskName = String(
+        body.taskName ||
+          (Array.isArray(body.taskNames) ? body.taskNames.filter(Boolean).join(', ') : '') ||
+          ''
+      ).trim();
       const created: CustomerFeedbackItem = {
         ...body,
         _id: `feedback-${Date.now()}`,
         clientName: client.name,
         clientEmail: client.email,
+        taskId: taskIds[0] || body.taskId || null,
+        taskIds,
+        taskName,
         comments: body.comments?.trim() || '',
         submittedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
@@ -17332,7 +17412,7 @@ export const crmApi = {
         ctaUrl: `#/marketing?simulate=${campaign._id}`,
       };
       const previewSubject = `[TEST] ${renderMarketingTemplate(campaign.subject || campaign.emailSubject, sample)}`;
-      const previewHtml = `<div style="background:#fef3c7;padding:12px;border-radius:8px;margin-bottom:16px;font-weight:600;">⚠ This is a test preview email</div>${renderMarketingTemplate(
+      const previewHtml = `<div style="background:#fef3c7;padding:12px;border-radius:8px;margin-bottom:16px;font-weight:600;">This is a test preview email</div>${renderMarketingTemplate(
         campaign.content || campaign.emailContent,
         sample
       )}`;

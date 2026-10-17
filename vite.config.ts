@@ -1,3 +1,4 @@
+import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -13,6 +14,12 @@ export default defineConfig({
       },
     },
   ],
+  resolve: {
+    alias: {
+      // OpenNext CMS-style imports (e.g. `@/context/ThemeContext`)
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
   server: {
     port: 3000,
     proxy: {

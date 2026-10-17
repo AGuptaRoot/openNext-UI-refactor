@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 export type CrmRole =
   | 'crm-manager'
   | 'sales-manager'
@@ -228,7 +230,7 @@ export interface SectionDefinition {
   id: string;
   title: string;
   category: 'Alerts' | 'Overview' | 'Sales' | 'Projects' | 'Finance' | 'Support' | 'General';
-  icon: string;
+  icon: ReactNode;
   description: string;
 }
 

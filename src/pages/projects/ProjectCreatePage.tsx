@@ -23,6 +23,18 @@ import { AssignableUser } from '../../types/leads';
 import { AddLeadItemModal } from '../../components/leads/AddLeadItemModal';
 import { ProjectTemplateModal } from '../../components/projects/ProjectTemplateModal';
 import { LiveLinkModal } from '../../components/projects/LiveLinkModal';
+import {
+  Building2,
+  Check,
+  ClipboardList,
+  Flag,
+  FolderKanban,
+  Globe,
+  Mail,
+  Phone,
+  ScrollText,
+  Zap,
+} from 'lucide-react';
 import { ClientSelect } from '../../components/clients/ClientSelect';
 import { resolveClientAvatarColor } from '../../utils/clientAvatar';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
@@ -419,7 +431,7 @@ export const ProjectCreatePage: React.FC = () => {
             className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center text-xl font-bold select-none shrink-0"
             aria-hidden="true"
           >
-            📁
+            <FolderKanban className="h-6 w-6 shrink-0" aria-hidden />
           </div>
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wider text-blue-600 m-0">
@@ -443,7 +455,7 @@ export const ProjectCreatePage: React.FC = () => {
             onClick={() => setError(null)}
             className="text-red-700 hover:text-red-900 bg-transparent border-0 cursor-pointer p-0 text-xs font-bold"
           >
-            ✕
+            <CloseIcon sx={{ fontSize: 14 }} />
           </button>
         </div>
       )}
@@ -466,7 +478,7 @@ export const ProjectCreatePage: React.FC = () => {
 
               {!selectedClient ? (
                 <div className="py-8 px-4 text-center flex flex-col items-center justify-center">
-                  <div className="text-3xl mb-2 select-none opacity-80">🏢</div>
+                  <Building2 className="h-10 w-10 shrink-0 text-zinc-400 mb-2 opacity-80" aria-hidden />
                   <p className="text-xs text-zinc-500 m-0 leading-relaxed max-w-[220px]">
                     Select a client from the form to view their details, contact information, and account status.
                   </p>
@@ -518,7 +530,7 @@ export const ProjectCreatePage: React.FC = () => {
                         </span>
                         {selectedClient.category && (
                           <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-100 text-zinc-700 border border-zinc-200">
-                            🏷️ {selectedClient.category}
+                            {selectedClient.category}
                           </span>
                         )}
                       </div>
@@ -528,20 +540,29 @@ export const ProjectCreatePage: React.FC = () => {
                   {/* Info Row List */}
                   <div className="flex flex-col gap-2 pt-3 border-t border-zinc-100 text-xs">
                     <div className="flex justify-between items-center py-1">
-                      <span className="text-zinc-400 text-[11px]">✉ Email</span>
+                      <span className="inline-flex items-center gap-1 text-zinc-400 text-[11px]">
+                        <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        Email
+                      </span>
                       <span className="font-medium text-zinc-800 truncate max-w-[190px]" title={selectedClient.email}>
                         {selectedClient.email || '—'}
                       </span>
                     </div>
                     <div className="flex justify-between items-center py-1 border-t border-zinc-50">
-                      <span className="text-zinc-400 text-[11px]">📞 Phone</span>
+                      <span className="inline-flex items-center gap-1 text-zinc-400 text-[11px]">
+                        <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        Phone
+                      </span>
                       <span className="font-medium text-zinc-800">
                         {selectedClient.phone || '—'}
                       </span>
                     </div>
                     {selectedClient.website && (
                       <div className="flex justify-between items-center py-1 border-t border-zinc-50">
-                        <span className="text-zinc-400 text-[11px]">🌐 Website</span>
+                        <span className="inline-flex items-center gap-1 text-zinc-400 text-[11px]">
+                          <Globe className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          Website
+                        </span>
                         <a
                           href={selectedClient.website}
                           target="_blank"
@@ -554,7 +575,7 @@ export const ProjectCreatePage: React.FC = () => {
                     )}
                     {selectedClient.taxId && (
                       <div className="flex justify-between items-center py-1 border-t border-zinc-50">
-                        <span className="text-zinc-400 text-[11px]">🆔 Tax ID</span>
+                        <span className="text-zinc-400 text-[11px]">Tax ID</span>
                         <span className="font-mono text-zinc-800 text-[11px]">
                           {selectedClient.taxId}
                         </span>
@@ -601,7 +622,10 @@ export const ProjectCreatePage: React.FC = () => {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-blue-900">⚡ Reusable Project Template</span>
+                    <span className="inline-flex items-center gap-1.5 text-sm font-bold text-blue-900">
+                      <Zap className="h-4 w-4 shrink-0" aria-hidden />
+                      Reusable Project Template
+                    </span>
                     <span className="inline-block bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded border border-blue-200">
                       Optional
                     </span>
@@ -619,7 +643,7 @@ export const ProjectCreatePage: React.FC = () => {
                     <option value="">-- Blank Project (No Template) --</option>
                     {templates.map((t) => (
                       <option key={t._id} value={t._id}>
-                        📦 {t.name} ({(t.milestones || []).length} Milestones, {(t.tasks || []).length} Tasks)
+                        {t.name} ({(t.milestones || []).length} Milestones, {(t.tasks || []).length} Tasks)
                       </option>
                     ))}
                   </select>
@@ -629,7 +653,10 @@ export const ProjectCreatePage: React.FC = () => {
                     className="h-9 px-3 text-xs font-semibold rounded-lg border border-blue-300 bg-white text-blue-700 hover:bg-blue-50 cursor-pointer whitespace-nowrap shrink-0 transition-colors"
                     title="Manage or create project templates"
                   >
-                    📑 Templates
+                    <span className="inline-flex items-center gap-1">
+                      <ScrollText className="h-4 w-4 shrink-0" aria-hidden />
+                      Templates
+                    </span>
                   </button>
                 </div>
               </div>
@@ -637,13 +664,19 @@ export const ProjectCreatePage: React.FC = () => {
               {selectedTemplate && (
                 <div className="mt-3 pt-3 border-t border-dashed border-blue-200 text-xs text-zinc-700 flex flex-col gap-1">
                   <div>
-                    🚩 <strong className="font-semibold text-zinc-950">Milestones ({(selectedTemplate.milestones || []).length}):</strong>{' '}
+                    <strong className="inline-flex items-center gap-1 font-semibold text-zinc-950">
+                      <Flag className="h-4 w-4 shrink-0" aria-hidden />
+                      Milestones ({(selectedTemplate.milestones || []).length}):
+                    </strong>{' '}
                     <span className="text-zinc-600">
                       {(selectedTemplate.milestones || []).map((m) => (typeof m === 'string' ? m : (m as { name?: string }).name || '')).filter(Boolean).join(', ') || 'None'}
                     </span>
                   </div>
                   <div>
-                    📋 <strong className="font-semibold text-zinc-950">Tasks ({(selectedTemplate.tasks || []).length}):</strong>{' '}
+                    <strong className="inline-flex items-center gap-1 font-semibold text-zinc-950">
+                      <ClipboardList className="h-4 w-4 shrink-0" aria-hidden />
+                      Tasks ({(selectedTemplate.tasks || []).length}):
+                    </strong>{' '}
                     <span className="text-zinc-600">
                       {(selectedTemplate.tasks || []).map((t) => t.title).join(', ') || 'None'}
                     </span>
@@ -723,21 +756,11 @@ export const ProjectCreatePage: React.FC = () => {
                     value={priority}
                     onChange={(e) => setPriority(e.target.value)}
                   >
-                    {priorities.map((p) => {
-                      const emoji =
-                        p === 'Urgent'
-                          ? '🔥'
-                          : p === 'High'
-                          ? '⚡'
-                          : p === 'Medium'
-                          ? '🔹'
-                          : '⚪';
-                      return (
-                        <option key={p} value={p}>
-                          {emoji} {p} Priority
-                        </option>
-                      );
-                    })}
+                    {priorities.map((p) => (
+                      <option key={p} value={p}>
+                        {p} Priority
+                      </option>
+                    ))}
                   </select>
                 </label>
 
@@ -774,7 +797,7 @@ export const ProjectCreatePage: React.FC = () => {
                               isSelected ? 'bg-white text-zinc-950 border-white font-bold' : 'border-zinc-400'
                             }`}
                           >
-                            {isSelected ? '✓' : ''}
+                            {isSelected ? <Check className="h-2.5 w-2.5 shrink-0" aria-hidden /> : null}
                           </span>
                           <span>{t}</span>
                         </button>
@@ -1061,7 +1084,7 @@ export const ProjectCreatePage: React.FC = () => {
                           className="h-9 w-9 flex items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50 cursor-pointer bg-white"
                           title="Remove field"
                         >
-                          ✕
+                          <CloseIcon sx={{ fontSize: 16 }} />
                         </button>
                       </div>
                     </div>
@@ -1101,7 +1124,7 @@ export const ProjectCreatePage: React.FC = () => {
               <div>
                 <input
                   type="text"
-                  placeholder="🔍 Search team members by name or designation…"
+                  placeholder="Search team members by name or designation…"
                   className={fieldClass}
                   value={memberSearchQuery}
                   onChange={(e) => setMemberSearchQuery(e.target.value)}

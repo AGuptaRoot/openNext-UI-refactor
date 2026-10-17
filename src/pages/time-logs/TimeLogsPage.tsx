@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import StopIcon from '@mui/icons-material/Stop';
 import DownloadIcon from '@mui/icons-material/Download';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { crmApi } from '../../services/api';
 import { useDialog } from '../../context/DialogContext';
@@ -20,6 +21,8 @@ import {
 } from '../../types/timeLogs';
 import { TourButton } from '../../ui/tour';
 import { displayLabel, displayUserLabel } from '../../utils/displayLabels';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import { formatCrmMoney } from '../../utils/currency';
 
 const fieldClass =
   'h-9 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-zinc-500';
@@ -103,12 +106,9 @@ function formatClock(iso?: string): string {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function money(amount: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 2,
-  }).format(Number(amount) || 0);
+function formatMoney(value?: number, currency?: string) {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  return formatCrmMoney(value, currency, { maximumFractionDigits: 2 });
 }
 
 function normalizeDuration(hours: number, minutes: number): { hours: number; minutes: number; decimal: number } {
@@ -180,6 +180,7 @@ function emptyForm(overrides: Partial<{
 
 export const TimeLogsPage: React.FC = () => {
   const { alert, confirm } = useDialog();
+  const settingsCurrency = useDefaultCurrency();
   const [view, setView] = useState<ViewMode>('list');
   const [items, setItems] = useState<TimeLogItem[]>([]);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
@@ -218,6 +219,8 @@ export const TimeLogsPage: React.FC = () => {
   const [error, setError] = useState('');
   const [tick, setTick] = useState(0);
   const [form, setForm] = useState(emptyForm());
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
 
   const loadActiveTimer = useCallback(async () => {
     try {
@@ -630,10 +633,22 @@ export const TimeLogsPage: React.FC = () => {
     }
   };
 
-  const exportCsv = async () => {
+  useEffect(() => {
+    if (!exportOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [exportOpen]);
+
+  const exportData = async (format: 'csv' | 'json') => {
+    setExportOpen(false);
     try {
       const res = await crmApi.exportTimeLogs({
-        format: 'csv',
+        format,
         search: search || undefined,
         projectId: projectId || undefined,
         approvalStatus: approvalFilter || undefined,
@@ -647,11 +662,15 @@ export const TimeLogsPage: React.FC = () => {
               ? false
               : undefined,
       });
-      const blob = new Blob([res.data.content], { type: 'text/csv;charset=utf-8' });
+      const mime =
+        format === 'json' ? 'application/json;charset=utf-8' : 'text/csv;charset=utf-8';
+      const blob = new Blob([res.data.content], { type: mime });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = res.data.filename || `time-logs-${Date.now()}.csv`;
+      a.download =
+        res.data.filename ||
+        `time-logs-${Date.now()}.${format === 'json' ? 'json' : 'csv'}`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (reason) {
@@ -743,15 +762,37 @@ export const TimeLogsPage: React.FC = () => {
             <AddIcon sx={{ fontSize: 16 }} />
             Manual Time Entry
           </button>
-          <button
-            type="button"
-            data-tour="time-logs-export-btn"
-            onClick={exportCsv}
-            className={btnClass}
-          >
-            <DownloadIcon sx={{ fontSize: 16 }} />
-            Export CSV
-          </button>
+          <div className="relative" ref={exportRef} data-tour="time-logs-export-btn">
+            <button
+              type="button"
+              onClick={() => setExportOpen((open) => !open)}
+              className={btnClass}
+            >
+              <DownloadIcon sx={{ fontSize: 16 }} />
+              Export
+              <ExpandMoreIcon sx={{ fontSize: 16 }} />
+            </button>
+            {exportOpen && (
+              <div className="absolute right-0 z-20 mt-1 w-36 overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-lg">
+                <button
+                  type="button"
+                  data-tour="time-logs-export-csv"
+                  onClick={() => void exportData('csv')}
+                  className="w-full cursor-pointer border-0 bg-transparent px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-50"
+                >
+                  Export CSV
+                </button>
+                <button
+                  type="button"
+                  data-tour="time-logs-export-json"
+                  onClick={() => void exportData('json')}
+                  className="w-full cursor-pointer border-0 border-t border-zinc-100 bg-transparent px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-50"
+                >
+                  Export JSON
+                </button>
+              </div>
+            )}
+          </div>
           <TourButton moduleId="time-logs" className={btnClass} />
         </div>
       </div>
@@ -1203,10 +1244,10 @@ export const TimeLogsPage: React.FC = () => {
                           </span>
                         </td>
                         <td className="p-3 font-semibold text-zinc-800">
-                          {money(amount)}
+                          {formatMoney(amount, settingsCurrency)}
                           {item.status === 'Running' && Number(item.hourlyRate || 0) > 0 ? (
                             <div className="mt-0.5 text-[10px] font-normal text-zinc-500">
-                              @ {money(Number(item.hourlyRate || 0))}/hr
+                              @ {formatMoney(Number(item.hourlyRate || 0), settingsCurrency)}/hr
                             </div>
                           ) : null}
                         </td>
@@ -1304,7 +1345,7 @@ export const TimeLogsPage: React.FC = () => {
                   {tasks.map((item) => (
                     <option key={item._id} value={item._id}>
                       {item.title} · {displayLabel(item.projectName)}
-                      {item.assigneeName ? ` (👤 ${item.assigneeName})` : ''}
+                      {item.assigneeName ? ` (${item.assigneeName})` : ''}
                     </option>
                   ))}
                 </select>
@@ -1456,7 +1497,7 @@ export const TimeLogsPage: React.FC = () => {
             <p className="mt-0 mb-4 text-sm text-zinc-600">
               Started: {formatClock(checkInIso(running))} ·{' '}
               {running.isBillable !== false
-                ? `Billable (${money(Number(running.hourlyRate || 0))}/hr)`
+                ? `Billable (${formatMoney(Number(running.hourlyRate || 0), settingsCurrency)}/hr)`
                 : 'Non-billable'}
             </p>
             {(running.description || running.note) && (

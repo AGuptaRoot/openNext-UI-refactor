@@ -991,7 +991,7 @@ export const TasksPage: React.FC = () => {
                   <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
                     Client Review
                   </th>
-                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                  <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     Assigned To
                   </th>
                   <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -1145,10 +1145,10 @@ export const TasksPage: React.FC = () => {
                       {/* Column 7: Assigned To */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-zinc-900 text-[10px] font-bold text-white">
+                          <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
                             {userInitial}
                           </div>
-                          <span className="text-sm font-medium text-zinc-800">
+                          <span className="text-sm font-medium text-foreground">
                             {displayUserLabel(item.assigneeName || item.assignedUsername, item.assignedUsername || item.assignedTo, 'Unassigned')}
                           </span>
                         </div>

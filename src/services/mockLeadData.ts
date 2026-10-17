@@ -442,7 +442,7 @@ export const INITIAL_MOCK_LEADS: LeadItem[] = [
 export const INITIAL_SAVED_FILTERS: SavedLeadFilter[] = [
   {
     id: 'filter_hot',
-    name: '🔥 Hot Enterprise Leads',
+    name: 'Hot Enterprise Leads',
     isDefault: false,
     isShared: true,
     filters: {
@@ -451,7 +451,7 @@ export const INITIAL_SAVED_FILTERS: SavedLeadFilter[] = [
   },
   {
     id: 'filter_proposal',
-    name: '📄 Proposals Pending',
+    name: 'Proposals Pending',
     isDefault: false,
     isShared: true,
     filters: {
@@ -460,7 +460,7 @@ export const INITIAL_SAVED_FILTERS: SavedLeadFilter[] = [
   },
   {
     id: 'filter_qualified',
-    name: '✅ Qualified Opportunities',
+    name: 'Qualified Opportunities',
     isDefault: false,
     isShared: false,
     filters: {

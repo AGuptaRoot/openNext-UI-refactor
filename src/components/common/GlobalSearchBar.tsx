@@ -30,6 +30,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 
 import { useAuth } from '../../context/AuthContext';
 import { crmApi } from '../../services/api';
+import { formatCrmMoney } from '../../utils/currency';
 import { canFullyManageTasks } from '../../utils/permissions';
 
 interface SearchResultItem {
@@ -606,7 +607,11 @@ export const GlobalSearchBar: React.FC = () => {
                   items.push({
                     id: `inv-${iId}`,
                     title: inv.invoiceNo || 'Invoice Record',
-                    subtitle: [inv.clientName, inv.status, totalVal ? `₹${Number(totalVal).toLocaleString('en-IN')}` : '']
+                    subtitle: [
+                      inv.clientName,
+                      inv.status,
+                      totalVal ? formatCrmMoney(totalVal, inv.currency) : '',
+                    ]
                       .filter(Boolean)
                       .join(' · '),
                     category: 'Invoices',
@@ -660,7 +665,10 @@ export const GlobalSearchBar: React.FC = () => {
                   items.push({
                     id: `opp-${oId}`,
                     title: opp.title || 'Sales Opportunity',
-                    subtitle: [opp.stage, opp.value ? `₹${Number(opp.value).toLocaleString('en-IN')}` : '']
+                    subtitle: [
+                      opp.stage,
+                      opp.value ? formatCrmMoney(opp.value, opp.currency) : '',
+                    ]
                       .filter(Boolean)
                       .join(' · '),
                     category: 'Opportunities',

@@ -402,7 +402,7 @@ export const TaskCreatePage: React.FC = () => {
                           className="text-zinc-400 hover:text-red-600 text-xs p-1 border-none bg-transparent cursor-pointer"
                           title="Remove item"
                         >
-                          ✕
+                          <CloseIcon sx={{ fontSize: 14 }} />
                         </button>
                       </div>
                     ))}
@@ -453,10 +453,10 @@ export const TaskCreatePage: React.FC = () => {
                   onChange={(e) => update('milestoneId', e.target.value)}
                   disabled={!form.projectId}
                 >
-                  <option value="">🚩 None / General Task</option>
+                  <option value="">None / General Task</option>
                   {milestones.map((item) => (
                     <option key={item._id} value={item._id}>
-                      🚩 {item.title}
+                      {item.title}
                     </option>
                   ))}
                 </select>
@@ -471,10 +471,10 @@ export const TaskCreatePage: React.FC = () => {
                   onChange={(e) => update('dependsOnTaskId', e.target.value)}
                   disabled={!form.projectId}
                 >
-                  <option value="">🔗 None / No prerequisite</option>
+                  <option value="">None / No prerequisite</option>
                   {projectTasks.map((item) => (
                     <option key={item._id} value={item._id}>
-                      🔗 {item.title} [{item.status}]
+                      {item.title} [{item.status}]
                     </option>
                   ))}
                 </select>

@@ -1,7 +1,6 @@
 import { useCurrency } from '../context/CurrencyContext';
 import {
   FALLBACK_DEFAULT_CURRENCY,
-  CRM_SETTINGS_CURRENCY_CHANGED,
   normalizeCurrencyCode,
   getRuntimeDefaultCurrency,
 } from '../utils/currency';

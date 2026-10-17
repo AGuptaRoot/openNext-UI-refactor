@@ -35,6 +35,20 @@ import { VisitingCardLeadCaptureModal } from '../../components/leads/VisitingCar
 import { TourButton } from '../../ui/tour';
 import { restartLeadsTour } from '../../tours/LeadsTour';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import CloseIcon from '@mui/icons-material/Close';
+import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
+import {
+  ClipboardList,
+  FileJson,
+  FileText,
+  FolderOpen,
+  LayoutGrid,
+  Lock,
+  Save,
+  Target,
+  TrendingUp,
+  Upload,
+} from 'lucide-react';
 
 type ViewMode = 'list' | 'kanban' | 'report';
 
@@ -80,6 +94,9 @@ export const LeadsPage: React.FC = () => {
   const [filterMatchScore, setFilterMatchScore] = useState(
     () => searchParams.get('matchScore') || ''
   );
+  const [filterNeedsSample, setFilterNeedsSample] = useState(
+    () => searchParams.get('needsSampleRequest') || ''
+  );
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '');
   const [selectedPreset, setSelectedPreset] = useState('');
 
@@ -88,11 +105,13 @@ export const LeadsPage: React.FC = () => {
     const nextStatus = searchParams.get('status') || '';
     const nextSource = searchParams.get('source') || '';
     const nextMatch = searchParams.get('matchScore') || '';
+    const nextNeedsSample = searchParams.get('needsSampleRequest') || '';
     const nextQ = searchParams.get('q') || '';
     setFilterStage((prev) => (prev === nextStage ? prev : nextStage));
     setFilterStatus((prev) => (prev === nextStatus ? prev : nextStatus));
     setFilterSource((prev) => (prev === nextSource ? prev : nextSource));
     setFilterMatchScore((prev) => (prev === nextMatch ? prev : nextMatch));
+    setFilterNeedsSample((prev) => (prev === nextNeedsSample ? prev : nextNeedsSample));
     setSearchQuery((prev) => (prev === nextQ ? prev : nextQ));
   }, [searchParams]);
 
@@ -102,9 +121,18 @@ export const LeadsPage: React.FC = () => {
     if (filterStatus) params.set('status', filterStatus);
     if (filterSource) params.set('source', filterSource);
     if (filterMatchScore) params.set('matchScore', filterMatchScore);
+    if (filterNeedsSample) params.set('needsSampleRequest', filterNeedsSample);
     if (searchQuery) params.set('q', searchQuery);
     setSearchParams(params, { replace: true });
-  }, [filterStage, filterStatus, filterSource, filterMatchScore, searchQuery, setSearchParams]);
+  }, [
+    filterStage,
+    filterStatus,
+    filterSource,
+    filterMatchScore,
+    filterNeedsSample,
+    searchQuery,
+    setSearchParams,
+  ]);
 
   // Selection & Sorting State
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
@@ -198,6 +226,7 @@ export const LeadsPage: React.FC = () => {
           setFilterStatus(defaultFilter.filters.status || '');
           setFilterSource(defaultFilter.filters.source || '');
           setFilterMatchScore(defaultFilter.filters.matchScore || '');
+          setFilterNeedsSample(defaultFilter.filters.needsSampleRequest || '');
           setSearchQuery(defaultFilter.filters.search || '');
         }
       } catch (err) {
@@ -219,6 +248,7 @@ export const LeadsPage: React.FC = () => {
         status: filterStatus || undefined,
         source: filterSource || undefined,
         matchScore: filterMatchScore || undefined,
+        needsSampleRequest: filterNeedsSample || undefined,
         search: searchQuery.trim() || undefined,
         sort: currentSortField ? `${currentSortField}:${currentSortAsc ? 'asc' : 'desc'}` : undefined,
       });
@@ -268,7 +298,18 @@ export const LeadsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, currentView, filterStage, filterStatus, filterSource, filterMatchScore, searchQuery, currentSortField, currentSortAsc]);
+  }, [
+    page,
+    currentView,
+    filterStage,
+    filterStatus,
+    filterSource,
+    filterMatchScore,
+    filterNeedsSample,
+    searchQuery,
+    currentSortField,
+    currentSortAsc,
+  ]);
 
   useEffect(() => {
     loadLeads();
@@ -329,6 +370,7 @@ export const LeadsPage: React.FC = () => {
     setFilterStatus('');
     setFilterSource('');
     setFilterMatchScore('');
+    setFilterNeedsSample('');
     setSearchQuery('');
     setSelectedPreset('');
     setPage(1);
@@ -345,6 +387,7 @@ export const LeadsPage: React.FC = () => {
     setFilterStatus(filter.filters.status || '');
     setFilterSource(filter.filters.source || '');
     setFilterMatchScore(filter.filters.matchScore || '');
+    setFilterNeedsSample(filter.filters.needsSampleRequest || '');
     setSearchQuery(filter.filters.search || '');
     setPage(1);
   };
@@ -472,6 +515,7 @@ export const LeadsPage: React.FC = () => {
         status: filterStatus || undefined,
         source: filterSource || undefined,
         matchScore: filterMatchScore || undefined,
+        needsSampleRequest: filterNeedsSample || undefined,
         search: searchQuery.trim() || undefined,
         format,
       };
@@ -500,7 +544,7 @@ export const LeadsPage: React.FC = () => {
   if (isClient) {
     return (
       <div className="bg-white border border-zinc-300 rounded-xl p-12 text-center max-w-lg mx-auto my-12">
-        <span className="text-4xl block mb-2">🔒</span>
+        <Lock className="h-10 w-10 shrink-0 mx-auto mb-2 text-zinc-400" aria-hidden />
         <h2 className="text-xl font-bold text-zinc-950 mb-1">Access Restricted</h2>
         <p className="text-sm text-zinc-500 leading-relaxed">
           The Leads & Pipeline module is restricted to internal sales and account management teams.
@@ -526,7 +570,7 @@ export const LeadsPage: React.FC = () => {
             onClick={() => setToastMessage(null)}
             className="text-inherit hover:opacity-75 p-0 bg-transparent border-none cursor-pointer"
           >
-            ✕
+            <CloseIcon sx={{ fontSize: 16 }} aria-label="Dismiss" />
           </button>
         </div>
       )}
@@ -535,7 +579,7 @@ export const LeadsPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-zinc-200">
         <div>
           <div className="flex items-center gap-2.5 flex-wrap">
-            <span className="text-2xl">🎯</span>
+            <Target className="h-6 w-6 shrink-0 text-zinc-700" aria-hidden />
             <h1 className="text-2xl font-bold text-zinc-950 tracking-tight m-0">Leads</h1>
 
             <span
@@ -589,14 +633,14 @@ export const LeadsPage: React.FC = () => {
                   onClick={() => handleExport('csv')}
                   className="w-full text-left px-3.5 py-1.5 hover:bg-zinc-50 text-xs text-zinc-700 bg-transparent border-none cursor-pointer flex items-center gap-2"
                 >
-                  <span>📄</span> Export CSV
+                  <FileText className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden /> Export CSV
                 </button>
                 <button
                   type="button"
                   onClick={() => handleExport('json')}
                   className="w-full text-left px-3.5 py-1.5 hover:bg-zinc-50 text-xs text-zinc-700 bg-transparent border-none cursor-pointer flex items-center gap-2"
                 >
-                  <span>📦</span> Export JSON
+                  <FileJson className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden /> Export JSON
                 </button>
               </div>
             )}
@@ -610,7 +654,7 @@ export const LeadsPage: React.FC = () => {
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-xs font-semibold text-zinc-700 cursor-pointer transition-colors"
               title="Import Leads from CSV"
             >
-              <span>📥</span>
+              <Upload className="h-4 w-4 shrink-0" aria-hidden />
               <span>Import</span>
             </button>
           )}
@@ -655,7 +699,9 @@ export const LeadsPage: React.FC = () => {
               : 'bg-transparent text-zinc-600 border-transparent hover:text-zinc-950'
           }`}
         >
-          📋 List View
+          <span className="inline-flex items-center gap-1.5">
+            <ClipboardList className="h-4 w-4 shrink-0" aria-hidden /> List View
+          </span>
         </button>
 
         <button
@@ -668,7 +714,9 @@ export const LeadsPage: React.FC = () => {
               : 'bg-transparent text-zinc-600 border-transparent hover:text-zinc-950'
           }`}
         >
-          📊 Kanban Board
+          <span className="inline-flex items-center gap-1.5">
+            <LayoutGrid className="h-4 w-4 shrink-0" aria-hidden /> Kanban Board
+          </span>
         </button>
 
         <button
@@ -681,7 +729,9 @@ export const LeadsPage: React.FC = () => {
               : 'bg-transparent text-zinc-600 border-transparent hover:text-zinc-950'
           }`}
         >
-          📈 Funnel & BI Report
+          <span className="inline-flex items-center gap-1.5">
+            <TrendingUp className="h-4 w-4 shrink-0" aria-hidden /> Funnel & BI Report
+          </span>
         </button>
       </div>
 
@@ -690,7 +740,9 @@ export const LeadsPage: React.FC = () => {
         {/* Preset filter */}
         <div id="lead-saved-filter-wrap" className="flex flex-col gap-1">
           <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
-            📁 Preset
+            <span className="inline-flex items-center gap-1">
+              <FolderOpen className="h-3 w-3 shrink-0" aria-hidden /> Preset
+            </span>
           </span>
           <div className="flex items-center gap-1.5">
             <select
@@ -702,7 +754,7 @@ export const LeadsPage: React.FC = () => {
               <option value="">(None / Custom)</option>
               {savedFilters.map((f) => (
                 <option key={f.id} value={f.id}>
-                  {f.isDefault ? '⭐ ' : f.isShared ? '🌐 ' : ''}{f.name}
+                  {f.isDefault ? '[Default] ' : f.isShared ? '[Shared] ' : ''}{f.name}
                 </option>
               ))}
             </select>
@@ -713,7 +765,7 @@ export const LeadsPage: React.FC = () => {
               onClick={() => setSaveFilterModalOpen(true)}
               className="h-9 px-2.5 rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-xs font-medium text-zinc-700 cursor-pointer transition-colors whitespace-nowrap flex items-center gap-1"
             >
-              <span>💾</span>
+              <Save className="h-4 w-4 shrink-0" aria-hidden />
               <span>Save</span>
             </button>
             <button
@@ -723,7 +775,7 @@ export const LeadsPage: React.FC = () => {
               onClick={() => setManageFiltersModalOpen(true)}
               className="h-9 px-2.5 rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-xs font-medium text-zinc-700 cursor-pointer transition-colors flex items-center justify-center"
             >
-              ⚙️
+              <SettingsOutlinedIcon sx={{ fontSize: 16 }} aria-label="Manage presets" />
             </button>
           </div>
         </div>
@@ -833,6 +885,30 @@ export const LeadsPage: React.FC = () => {
           </div>
         )}
 
+        {/* Sample need filter (Commercial Requirement checkbox) */}
+        {currentView !== 'report' && (
+          <div id="lead-filter-sample-wrap" className="flex flex-col gap-1">
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+              Sample
+            </span>
+            <select
+              id="lead-filter-sample"
+              value={filterNeedsSample}
+              onChange={(e) => {
+                setFilterNeedsSample(e.target.value);
+                setSelectedPreset('');
+                setPage(1);
+              }}
+              className="text-xs border border-zinc-300 rounded-lg px-2.5 py-1.5 bg-white text-zinc-900 outline-none min-w-[150px] h-9 cursor-pointer"
+              title="Filter by Commercial Requirement → Lead needs sample request"
+            >
+              <option value="">All leads</option>
+              <option value="true">Needs sample request</option>
+              <option value="false">No sample request</option>
+            </select>
+          </div>
+        )}
+
         {/* Search input */}
         <div className="flex flex-col gap-1 flex-1 min-w-[180px]">
           <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
@@ -869,7 +945,7 @@ export const LeadsPage: React.FC = () => {
                 className="absolute right-2 text-zinc-400 hover:text-zinc-700 bg-transparent border-none cursor-pointer p-0 text-xs"
                 title="Clear search"
               >
-                ✕
+                <CloseIcon sx={{ fontSize: 16 }} aria-label="Dismiss" />
               </button>
             )}
           </div>
@@ -884,7 +960,7 @@ export const LeadsPage: React.FC = () => {
             title="Clear all filters"
             className="inline-flex items-center gap-1 text-xs font-semibold px-3 h-9 rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 cursor-pointer transition-colors whitespace-nowrap"
           >
-            <span>✕</span>
+            <CloseIcon sx={{ fontSize: 16 }} aria-label="Dismiss" />
             <span>Reset</span>
           </button>
 
@@ -989,6 +1065,7 @@ export const LeadsPage: React.FC = () => {
           status: filterStatus,
           source: filterSource,
           matchScore: filterMatchScore,
+          needsSampleRequest: filterNeedsSample,
           search: searchQuery,
         }}
         onSaved={(newFilter) => {

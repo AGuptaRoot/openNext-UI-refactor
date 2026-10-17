@@ -1,4 +1,5 @@
 import React from 'react';
+import { AlertTriangle, FileText, Receipt, Siren } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { InvoiceAgeingReportData } from '../../../types/reports';
 import {
@@ -66,7 +67,7 @@ export const AgeingReportTab: React.FC<AgeingReportTabProps> = ({ data }) => {
         <MetricCard
           label="Total Unpaid AR"
           value={formatMoney(totalUnpaid, currency)}
-          icon="🧾"
+          icon={<Receipt className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Receivables"
           sub="All open invoices"
           to="/invoices?status=Sent"
@@ -74,7 +75,7 @@ export const AgeingReportTab: React.FC<AgeingReportTabProps> = ({ data }) => {
         <MetricCard
           label="Total Past Due"
           value={formatMoney(totalOverdue, currency)}
-          icon="🚨"
+          icon={<Siren className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Overdue"
           sub="Past payment deadline"
           to="/invoices?status=Overdue"
@@ -82,7 +83,7 @@ export const AgeingReportTab: React.FC<AgeingReportTabProps> = ({ data }) => {
         <MetricCard
           label="Open Invoices"
           value={invoices.length}
-          icon="📄"
+          icon={<FileText className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Invoices"
           sub="Awaiting settlement"
           to="/invoices?status=Sent"
@@ -90,7 +91,7 @@ export const AgeingReportTab: React.FC<AgeingReportTabProps> = ({ data }) => {
         <MetricCard
           label="90+ Days Critical"
           value={formatMoney(Number(critical90) || 0, currency)}
-          icon="⚠️"
+          icon={<AlertTriangle className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Critical"
           sub="Severe default risk"
           to="/invoices?status=Overdue"

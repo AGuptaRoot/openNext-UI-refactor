@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { CheckCircle2, ClipboardList, TrendingUp, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
@@ -61,7 +62,7 @@ export const EmployeesReportTab: React.FC<EmployeesReportTabProps> = ({ data }) 
           <MetricCard
             label="Employees"
             value={totals.totalEmployees}
-            icon="👥"
+            icon={<Users className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
             hint="Team"
             sub="Assignable staff"
             to="/tasks"
@@ -69,7 +70,7 @@ export const EmployeesReportTab: React.FC<EmployeesReportTabProps> = ({ data }) 
           <MetricCard
             label="Assigned Tasks"
             value={totals.totalTasks}
-            icon="📋"
+            icon={<ClipboardList className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
             hint="Workload"
             sub="Across team"
             to="/tasks?due=open"
@@ -77,7 +78,7 @@ export const EmployeesReportTab: React.FC<EmployeesReportTabProps> = ({ data }) 
           <MetricCard
             label="Completed"
             value={totals.completedTasks}
-            icon="✅"
+            icon={<CheckCircle2 className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
             hint="Done"
             sub={`${totals.totalTasks > 0 ? Math.round((totals.completedTasks / totals.totalTasks) * 100) : 0}% of assigned`}
             to="/tasks?status=Completed"
@@ -85,7 +86,7 @@ export const EmployeesReportTab: React.FC<EmployeesReportTabProps> = ({ data }) 
           <MetricCard
             label="Avg Progress"
             value={`${totals.avgProgress}%`}
-            icon="📈"
+            icon={<TrendingUp className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
             hint="Delivery"
             sub="Per employee with work"
             to="/tasks?due=open"

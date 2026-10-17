@@ -88,6 +88,7 @@ export const QuotationCreatePage: React.FC = () => {
   const [leadId, setLeadId] = useState(presetLeadId);
   const [clientId, setClientId] = useState('');
   const [opportunityId, setOpportunityId] = useState('');
+  const [opportunitySourceCurrency, setOpportunitySourceCurrency] = useState<string | null>(null);
   const [shippingState, setShippingState] = useState(COMPANY_STATE_DEFAULT);
   const [issueDate, setIssueDate] = useState(localToday());
   const [validTill, setValidTill] = useState(addDays(localToday(), 30));
@@ -318,7 +319,11 @@ export const QuotationCreatePage: React.FC = () => {
       if (opp.shippingCharge != null) setShippingCharge(Number(opp.shippingCharge) || 0);
       if (opp.currency) {
         currencyLockedRef.current = true;
-        setCurrency(normalizeCurrencyCode(opp.currency, settingsCurrency));
+        const inherited = normalizeCurrencyCode(opp.currency, settingsCurrency);
+        setOpportunitySourceCurrency(inherited);
+        setCurrency(inherited);
+      } else {
+        setOpportunitySourceCurrency(null);
       }
 
       const products = Array.isArray(opp.products) ? opp.products : [];
@@ -635,6 +640,16 @@ export const QuotationCreatePage: React.FC = () => {
                 ))}
               </select>
             </FormField>
+            {opportunitySourceCurrency &&
+              normalizeCurrencyCode(currency, settingsCurrency) !==
+                normalizeCurrencyCode(opportunitySourceCurrency, settingsCurrency) && (
+                <div className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  Currency differs from linked opportunity (
+                  {normalizeCurrencyCode(opportunitySourceCurrency, settingsCurrency)} →{' '}
+                  {normalizeCurrencyCode(currency, settingsCurrency)}). Confirm the change. Inherited
+                  opportunity currency is not replaced by the global default.
+                </div>
+              )}
             <FormField label="Calculate tax" required>
               <select
                 className={financeFieldClass}

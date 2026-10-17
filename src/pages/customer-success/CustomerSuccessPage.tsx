@@ -5,12 +5,13 @@ import CloseIcon from '@mui/icons-material/Close';
 import DownloadIcon from '@mui/icons-material/Download';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import StarIcon from '@mui/icons-material/Star';
+import { AlertTriangle, ShoppingCart, Star } from 'lucide-react';
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { TourButton } from '../../ui/tour';
 import { ListPager, type ListPaginationMeta } from '../../components/common/ListPager';
 import { ClientSelect } from '../../components/clients/ClientSelect';
-import { ClientItem } from '../../types/clients';
+import { ClientItem, ClientRelatedTask } from '../../types/clients';
 import { getClientInitials, resolveClientAvatarColor } from '../../utils/clientAvatar';
 import {
   AccountHealthRecord,
@@ -20,12 +21,13 @@ import {
   CustomerFeedbackItem,
   CustomerSuccessSummary,
   FeedbackRatingSummary,
-  healthCategoryEmoji,
+  healthCategoryDotClass,
   healthCategoryTone,
 } from '../../types/customerSuccess';
 import { triggerFileDownload } from '../../utils/fileDownload';
 
 type MainTab = 'accounts' | 'reviews';
+type CsatModalStep = 1 | 2 | 3 | 4;
 
 const fieldClass =
   'h-9 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-zinc-400';
@@ -75,14 +77,19 @@ export const CustomerSuccessPage: React.FC = () => {
   const [success, setSuccess] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalStep, setModalStep] = useState(1);
+  const [modalStep, setModalStep] = useState<CsatModalStep>(1);
   const [saving, setSaving] = useState(false);
   const [hoverRating, setHoverRating] = useState(0);
+  const [relatedTasks, setRelatedTasks] = useState<ClientRelatedTask[]>([]);
+  const [loadingTasks, setLoadingTasks] = useState(false);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [form, setForm] = useState<CustomerFeedbackCreateInput>({
     clientId: '',
     rating: 0,
     category: 'Customer Service',
     comments: '',
+    taskIds: [],
+    taskName: '',
   });
 
   const setTab = useCallback(
@@ -181,12 +188,16 @@ export const CustomerSuccessPage: React.FC = () => {
     setModalOpen(true);
     setModalStep(1);
     setHoverRating(0);
+    setRelatedTasks([]);
+    setSelectedTaskIds([]);
     const lockedClientId = isClient ? myClientId || myProfileClient?._id || '' : '';
     setForm({
       clientId: lockedClientId,
       rating: 0,
       category: 'Customer Service',
       comments: '',
+      taskIds: [],
+      taskName: '',
     });
     setError('');
     setSuccess('');
@@ -201,6 +212,45 @@ export const CustomerSuccessPage: React.FC = () => {
     );
   }, [modalOpen, isClient, myClientId, myProfileClient?._id]);
 
+  const loadRelatedTasks = useCallback(async (clientId: string) => {
+    const id = String(clientId || '').trim();
+    if (!id) {
+      setRelatedTasks([]);
+      return;
+    }
+    setLoadingTasks(true);
+    try {
+      let rows: ClientRelatedTask[] = [];
+      try {
+        const clientTasksRes = await crmApi.getClientTasks(id);
+        rows = Array.isArray(clientTasksRes.data) ? clientTasksRes.data : [];
+      } catch {
+        rows = [];
+      }
+      if (!rows.length) {
+        const listRes = await crmApi.listTasks({ clientId: id, limit: 100, page: 1 });
+        rows = (listRes.data || []).map((task) => ({
+          _id: String(task._id),
+          title: String(task.title || 'Untitled task'),
+          status: task.status,
+          priority: task.priority,
+          dueDate: task.dueDate || undefined,
+          assigneeName: task.assigneeName || task.assignedUsername,
+        }));
+      }
+      setRelatedTasks(rows);
+    } catch {
+      setRelatedTasks([]);
+    } finally {
+      setLoadingTasks(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!modalOpen || modalStep < 3 || !form.clientId) return;
+    void loadRelatedTasks(form.clientId);
+  }, [modalOpen, modalStep, form.clientId, loadRelatedTasks]);
+
   const closeModal = useCallback(() => {
     if (saving) return;
     setModalOpen(false);
@@ -212,17 +262,17 @@ export const CustomerSuccessPage: React.FC = () => {
       if (tab === 'accounts' || tab === 'reviews') setTab(tab);
     };
     const onModal = (e: Event) => {
-      const detail = (e as CustomEvent<{ open?: boolean; step?: 1 | 2 | 3 }>).detail || {};
+      const detail = (e as CustomEvent<{ open?: boolean; step?: CsatModalStep }>).detail || {};
       if (detail.open === false) {
         setModalOpen(false);
         return;
       }
       if (detail.open === true) {
         openModal();
-        if (detail.step === 1 || detail.step === 2 || detail.step === 3) {
+        if (detail.step && detail.step >= 1 && detail.step <= 4) {
           // Allow tour to open mid-wizard without requiring prior Continue clicks.
           window.setTimeout(() => {
-            setModalStep(detail.step as 1 | 2 | 3);
+            setModalStep(detail.step as CsatModalStep);
             if ((detail.step as number) >= 2) {
               setForm((current) =>
                 current.rating >= 1 ? current : { ...current, rating: 5 }
@@ -232,7 +282,7 @@ export const CustomerSuccessPage: React.FC = () => {
         }
         return;
       }
-      if (detail.step === 1 || detail.step === 2 || detail.step === 3) {
+      if (detail.step && detail.step >= 1 && detail.step <= 4) {
         setModalStep(detail.step);
       }
     };
@@ -244,17 +294,31 @@ export const CustomerSuccessPage: React.FC = () => {
     };
   }, [setTab, openModal]);
 
+  const toggleTaskSelection = (taskId: string) => {
+    setSelectedTaskIds((prev) =>
+      prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]
+    );
+  };
+
   const submitCsat = async () => {
     setError('');
     setSuccess('');
     if (!form.clientId) return setError('Select a client.');
     if (form.rating < 1 || form.rating > 5) return setError('Select a star rating.');
     if (!form.category) return setError('Select a category.');
+    const taskNames = relatedTasks
+      .filter((task) => selectedTaskIds.includes(task._id))
+      .map((task) => task.title)
+      .filter(Boolean);
     setSaving(true);
     try {
       await crmApi.createCustomerFeedback({
         ...form,
         comments: form.comments?.trim() || undefined,
+        taskIds: selectedTaskIds,
+        taskId: selectedTaskIds[0],
+        taskName: taskNames.join(', '),
+        taskNames,
       });
       setModalOpen(false);
       setSuccess('CSAT review submitted successfully.');
@@ -477,9 +541,13 @@ export const CustomerSuccessPage: React.FC = () => {
                       <td className="px-4 py-3 min-w-[180px]">
                         <div className="flex items-center gap-2">
                           <span
-                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${healthCategoryTone(account.healthCategory)}`}
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${healthCategoryTone(account.healthCategory)}`}
                           >
-                            {healthCategoryEmoji(account.healthCategory)} {account.healthCategory}
+                            <span
+                              className={`h-2 w-2 shrink-0 rounded-full ${healthCategoryDotClass(account.healthCategory)}`}
+                              aria-hidden
+                            />
+                            {account.healthCategory}
                           </span>
                           <span className="text-xs font-semibold text-zinc-700">{account.healthScore}/100</span>
                         </div>
@@ -491,35 +559,44 @@ export const CustomerSuccessPage: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <span className="inline-flex rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-700">
-                          🛒 {account.factors.orderCount} orders
+                        <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-700">
+                          <ShoppingCart className="h-4 w-4 shrink-0" aria-hidden />
+                          {account.factors.orderCount} orders
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <span className="text-xs font-semibold text-zinc-700">
-                          ⭐ {account.factors.avgCsat != null ? account.factors.avgCsat.toFixed(1) : '—'} / 5
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-zinc-700">
+                          <Star className="h-4 w-4 shrink-0 text-amber-500" aria-hidden />
+                          {account.factors.avgCsat != null ? account.factors.avgCsat.toFixed(1) : '—'} / 5
                         </span>
                       </td>
                       <td className="px-4 py-3">
                         <span
-                          className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${
                             account.factors.openTickets > 0
                               ? 'bg-amber-50 text-amber-800'
                               : 'bg-zinc-100 text-zinc-600'
                           }`}
                         >
-                          ⚠️ {account.factors.openTickets} Open
+                          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+                          {account.factors.openTickets} Open
                         </span>
                       </td>
                       <td className="px-4 py-3">
                         <span
-                          className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold ${
                             account.factors.overdueInvoices > 0
                               ? 'bg-red-50 text-red-800'
                               : 'bg-zinc-100 text-zinc-600'
                           }`}
                         >
-                          🔴 {account.factors.overdueInvoices} Overdue
+                          <span
+                            className={`h-2 w-2 shrink-0 rounded-full ${
+                              account.factors.overdueInvoices > 0 ? 'bg-red-500' : 'bg-zinc-400'
+                            }`}
+                            aria-hidden
+                          />
+                          {account.factors.overdueInvoices} Overdue
                         </span>
                       </td>
                       <td className="px-4 py-3">
@@ -550,7 +627,10 @@ export const CustomerSuccessPage: React.FC = () => {
               {(ratingSummary?.distribution || []).map((row) => (
                 <div key={row.stars}>
                   <div className="mb-1 flex items-center justify-between text-xs text-zinc-600">
-                    <span className="font-semibold">{row.stars} ⭐</span>
+                    <span className="inline-flex items-center gap-0.5 font-semibold">
+                      {row.stars}
+                      <Star className="h-3.5 w-3.5 shrink-0 fill-amber-500 text-amber-500" aria-hidden />
+                    </span>
                     <span>
                       {row.count} · {row.percent}%
                     </span>
@@ -571,46 +651,75 @@ export const CustomerSuccessPage: React.FC = () => {
             {feedback.length === 0 ? (
               <div className="py-10 text-center text-sm text-zinc-500">No CSAT reviews yet.</div>
             ) : (
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {feedback.map((item) => (
-                  <article key={item._id} className="rounded-xl border border-zinc-100 bg-zinc-50/60 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold text-zinc-700 ring-1 ring-zinc-200">
-                          {initials(item.clientName)}
-                        </div>
-                        <div>
-                          <div className="font-semibold text-zinc-900">
-                            {item.clientName || 'Unknown client'}
+              <div className="overflow-x-auto rounded-xl border border-zinc-200">
+                <table className="min-w-full border-collapse text-left text-sm">
+                  <thead className="bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-500">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold">Client</th>
+                      <th className="px-4 py-3 font-semibold">Task</th>
+                      <th className="px-4 py-3 font-semibold">Rating</th>
+                      <th className="px-4 py-3 font-semibold">Category</th>
+                      <th className="px-4 py-3 font-semibold">Date</th>
+                      <th className="px-4 py-3 font-semibold">Comments</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {feedback.map((item) => (
+                      <tr key={item._id} className="border-t border-zinc-100 align-top">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2.5">
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-[11px] font-bold text-zinc-700">
+                              {initials(item.clientName)}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="truncate font-semibold text-zinc-900">
+                                {item.clientName || 'Unknown client'}
+                              </div>
+                              <div className="truncate text-xs text-zinc-500">
+                                {item.clientEmail || '—'}
+                              </div>
+                            </div>
                           </div>
-                          <div className="text-xs text-zinc-500">{item.clientEmail || '—'}</div>
-                        </div>
-                      </div>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                        {item.category}
-                      </span>
-                    </div>
-                    <div className="mt-3 flex items-center gap-2">
-                      <div className="flex">
-                        {[1, 2, 3, 4, 5].map((star) => (
-                          <StarIcon
-                            key={star}
-                            className={star <= item.rating ? 'text-amber-400' : 'text-zinc-200'}
-                            sx={{ fontSize: 18 }}
-                          />
-                        ))}
-                      </div>
-                      <span className="text-xs text-zinc-500">
-                        {formatDate(item.submittedAt || item.createdAt)}
-                      </span>
-                    </div>
-                    {item.comments && (
-                      <blockquote className="mb-0 mt-3 border-l-2 border-zinc-300 pl-3 text-sm italic text-zinc-600">
-                        “{item.comments}”
-                      </blockquote>
-                    )}
-                  </article>
-                ))}
+                        </td>
+                        <td className="px-4 py-3">
+                          {item.taskName ? (
+                            <span className="inline-flex max-w-[220px] rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-900">
+                              {item.taskName}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-zinc-400">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <StarIcon
+                                key={star}
+                                className={star <= item.rating ? 'text-amber-400' : 'text-zinc-200'}
+                                sx={{ fontSize: 16 }}
+                              />
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                            {item.category}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-zinc-500 whitespace-nowrap">
+                          {formatDate(item.submittedAt || item.createdAt)}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-zinc-600 max-w-[260px]">
+                          {item.comments ? (
+                            <span className="line-clamp-3 italic">“{item.comments}”</span>
+                          ) : (
+                            <span className="text-zinc-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
             <div className="-mx-5 mt-4">
@@ -633,7 +742,7 @@ export const CustomerSuccessPage: React.FC = () => {
             <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4">
               <div>
                 <h2 className="m-0 text-lg font-semibold text-zinc-950">Submit CSAT Review</h2>
-                <p className="mb-0 mt-1 text-xs text-zinc-500">Step {modalStep} of 3</p>
+                <p className="mb-0 mt-1 text-xs text-zinc-500">Step {modalStep} of 4</p>
               </div>
               <button
                 type="button"
@@ -652,7 +761,7 @@ export const CustomerSuccessPage: React.FC = () => {
               )}
 
               <div className="mb-5 flex gap-2">
-                {[1, 2, 3].map((step) => (
+                {[1, 2, 3, 4].map((step) => (
                   <div
                     key={step}
                     className={`h-1.5 flex-1 rounded-full ${step <= modalStep ? 'bg-slate-950' : 'bg-zinc-200'}`}
@@ -716,9 +825,16 @@ export const CustomerSuccessPage: React.FC = () => {
                         value={form.clientId}
                         required
                         placeholder="Search and select client…"
-                        onChange={(nextId) =>
-                          setForm((current) => ({ ...current, clientId: nextId }))
-                        }
+                        onChange={(nextId) => {
+                          setSelectedTaskIds([]);
+                          setRelatedTasks([]);
+                          setForm((current) => ({
+                            ...current,
+                            clientId: nextId,
+                            taskIds: [],
+                            taskName: '',
+                          }));
+                        }}
                       />
                     </label>
                   )}
@@ -755,7 +871,75 @@ export const CustomerSuccessPage: React.FC = () => {
               )}
 
               {modalStep === 3 && (
+                <div data-tour="cs-modal-tasks" className="space-y-3">
+                  <div>
+                    <div className="text-sm font-semibold text-zinc-900">Related tasks</div>
+                    <p className="mb-0 mt-1 text-xs text-zinc-500">
+                      Choose one or more of your related tasks this review is about. You can continue
+                      without selecting a task.
+                    </p>
+                  </div>
+                  {loadingTasks ? (
+                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-6 text-center text-sm text-zinc-500">
+                      Loading related tasks…
+                    </div>
+                  ) : relatedTasks.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-3 py-6 text-center text-sm text-zinc-500">
+                      No related tasks found for this account. Continue to add category & comments.
+                    </div>
+                  ) : (
+                    <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                      {relatedTasks.map((task) => {
+                        const checked = selectedTaskIds.includes(task._id);
+                        return (
+                          <label
+                            key={task._id}
+                            className={`flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 ${
+                              checked
+                                ? 'border-slate-950 bg-slate-50'
+                                : 'border-zinc-200 bg-white hover:border-zinc-300'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-slate-950 focus:ring-slate-950"
+                              checked={checked}
+                              onChange={() => toggleTaskSelection(task._id)}
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-sm font-semibold text-zinc-900">
+                                {task.title || 'Untitled task'}
+                              </span>
+                              <span className="mt-0.5 block text-[11px] text-zinc-500">
+                                {[task.status, task.priority, task.assigneeName]
+                                  .filter(Boolean)
+                                  .join(' · ') || 'Related task'}
+                              </span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {selectedTaskIds.length > 0 ? (
+                    <div className="text-xs font-medium text-zinc-600">
+                      {selectedTaskIds.length} task{selectedTaskIds.length === 1 ? '' : 's'} selected
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
+              {modalStep === 4 && (
                 <div data-tour="cs-modal-details" className="space-y-4">
+                  {selectedTaskIds.length > 0 ? (
+                    <div className="rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+                      <span className="font-semibold">Related task(s): </span>
+                      {relatedTasks
+                        .filter((task) => selectedTaskIds.includes(task._id))
+                        .map((task) => task.title)
+                        .join(', ')}
+                    </div>
+                  ) : null}
                   <fieldset className="border-0 p-0">
                     <legend className="mb-1.5 text-xs font-semibold text-zinc-700">Category *</legend>
                     <div className="flex flex-wrap gap-2">
@@ -797,12 +981,12 @@ export const CustomerSuccessPage: React.FC = () => {
               <button
                 type="button"
                 disabled={modalStep === 1 || saving}
-                onClick={() => setModalStep((step) => Math.max(1, step - 1))}
+                onClick={() => setModalStep((step) => Math.max(1, step - 1) as CsatModalStep)}
                 className="h-9 rounded-lg border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-700 disabled:opacity-40"
               >
                 Back
               </button>
-              {modalStep < 3 ? (
+              {modalStep < 4 ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -811,7 +995,7 @@ export const CustomerSuccessPage: React.FC = () => {
                     if (modalStep === 2 && (form.rating < 1 || form.rating > 5)) {
                       return setError('Select a star rating to continue.');
                     }
-                    setModalStep((step) => step + 1);
+                    setModalStep((step) => (step + 1) as CsatModalStep);
                   }}
                   className="h-9 rounded-lg border-0 bg-slate-950 px-4 text-sm font-semibold text-white"
                 >

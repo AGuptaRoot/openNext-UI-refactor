@@ -10,6 +10,8 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import CancelIcon from '@mui/icons-material/Cancel';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import EmailOutlinedIcon from '@mui/icons-material/EmailOutlined';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import WorkOutlineIcon from '@mui/icons-material/WorkOutline';
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useDialog } from '../../context/DialogContext';
@@ -103,6 +105,8 @@ export const SalesOrderDetailPage: React.FC = () => {
   const { confirm } = useDialog();
   const canWriteOrders = hasPermission('crm.orders.write') && !isClient;
   const canDeleteOrders = hasPermission('crm.orders.delete') && !isClient;
+  const canViewOpportunities =
+    (hasPermission('crm.opportunities.read') || hasPermission('crm.leads.read')) && !isClient;
   const [order, setOrder] = useState<SalesOrderItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -527,6 +531,25 @@ export const SalesOrderDetailPage: React.FC = () => {
                 </div>
               </div>
             )}
+            {order.opportunityId && (
+              <div>
+                <span className="text-[11px] font-semibold uppercase text-zinc-500">Opportunity</span>
+                <div>
+                  {canViewOpportunities ? (
+                    <Link
+                      to={`/opportunities/${order.opportunityId}`}
+                      className="font-semibold text-zinc-950 hover:underline"
+                    >
+                      {displayLabel(order.opportunityTitle) || 'Open Opportunity'}
+                    </Link>
+                  ) : (
+                    <span className="font-semibold text-zinc-950">
+                      {displayLabel(order.opportunityTitle) || 'Linked'}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
         <div data-tour="sales-orders-detail-actions" className="flex flex-wrap gap-2">
@@ -672,6 +695,84 @@ export const SalesOrderDetailPage: React.FC = () => {
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
           {info}
         </div>
+      )}
+
+      {order.opportunityId && (
+        <section
+          data-tour="sales-orders-detail-related-opportunity"
+          className="bg-white border border-sky-200 rounded-xl p-5"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-zinc-950 m-0 mb-1 inline-flex items-center gap-1.5">
+                <WorkOutlineIcon sx={{ fontSize: 16 }} />
+                Related Opportunity
+              </h2>
+              <p className="text-xs text-zinc-500 m-0">
+                Linked by opportunityId · one Sales Order per opportunity
+              </p>
+            </div>
+            {canViewOpportunities ? (
+              <Link
+                to={`/opportunities/${order.opportunityId}`}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-sky-300 bg-sky-50 px-3 text-xs font-semibold no-underline text-sky-900 hover:bg-sky-100"
+              >
+                <OpenInNewIcon sx={{ fontSize: 15 }} />
+                Open Opportunity
+              </Link>
+            ) : null}
+          </div>
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+            <div>
+              <div className="text-[11px] font-semibold uppercase text-zinc-500">Opportunity</div>
+              <div className="font-semibold text-zinc-950">
+                {canViewOpportunities ? (
+                  <Link
+                    to={`/opportunities/${order.opportunityId}`}
+                    className="text-zinc-950 no-underline hover:underline"
+                  >
+                    {displayLabel(order.opportunityTitle) || order.opportunityId}
+                  </Link>
+                ) : (
+                  displayLabel(order.opportunityTitle) || order.opportunityId
+                )}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold uppercase text-zinc-500">Stage</div>
+              <div>{order.opportunityStage || '—'}</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold uppercase text-zinc-500">Deal value</div>
+              <div>
+                {order.opportunityExpectedRevenue != null
+                  ? formatFinanceMoney(
+                      order.opportunityExpectedRevenue,
+                      order.opportunityCurrency || order.currency
+                    )
+                  : '—'}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold uppercase text-zinc-500">Currency</div>
+              <div>{order.opportunityCurrency || order.currency || '—'}</div>
+            </div>
+          </div>
+          <p className="mt-3 mb-0 text-sm font-semibold text-zinc-800">
+            {[
+              order.opportunityTitle || 'Opportunity',
+              order.opportunityStage || null,
+              order.opportunityExpectedRevenue != null
+                ? formatFinanceMoney(
+                    order.opportunityExpectedRevenue,
+                    order.opportunityCurrency || order.currency
+                  )
+                : null,
+            ]
+              .filter(Boolean)
+              .join(' | ')}
+          </p>
+        </section>
       )}
 
       <SalesOrderShippingTracker order={order} />
@@ -1138,7 +1239,7 @@ export const SalesOrderDetailPage: React.FC = () => {
                 <label className="flex flex-col gap-1">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-semibold uppercase text-zinc-500">
-                      Refund amount ({order.currency || '₹'}) *
+                      Refund amount ({getCurrencySymbol(order.currency || getRuntimeDefaultCurrency())}) *
                     </span>
                     {isClient && (
                       <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">

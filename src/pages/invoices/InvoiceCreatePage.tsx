@@ -148,6 +148,21 @@ export const InvoiceCreatePage: React.FC = () => {
     return salesOrders.filter(isSalesOrderDispatched);
   }, [salesOrders]);
 
+  const sourceCurrencyHint = useMemo(() => {
+    const quote = quotations.find((q) => q._id === quotationId);
+    const order = salesOrders.find((o) => o._id === salesOrderId);
+    const rawSource = String(quote?.currency || order?.currency || '')
+      .trim()
+      .toUpperCase();
+    if (!/^[A-Z]{3}$/.test(rawSource)) return '';
+    const current = normalizeCurrencyCode(currency, settingsCurrency);
+    if (rawSource === current) return '';
+    const label = quote
+      ? `quotation ${quote.quotationNo || quote._id}`
+      : `sales order ${(order as SalesOrderItem | undefined)?.orderNumber || salesOrderId}`;
+    return `Currency differs from ${label} (${rawSource} → ${current}). Confirm the change and keep a valid exchange rate for base-currency reporting. Inherited source currency is not replaced by the global default.`;
+  }, [quotationId, salesOrderId, quotations, salesOrders, currency, settingsCurrency]);
+
   useEffect(() => {
     if (!fromScan) {
       crmApi.getNextInvoiceNumber().then((result) => setInvoiceNo(result.data.invoiceNo)).catch(() => setInvoiceNo(''));
@@ -638,6 +653,11 @@ export const InvoiceCreatePage: React.FC = () => {
                 onChange={(e) => setExchangeRate(Number(e.target.value))}
               />
             </FormField>
+            {sourceCurrencyHint ? (
+              <div className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                {sourceCurrencyHint}
+              </div>
+            ) : null}
             <FormField label="Calculate tax" required>
               <select
                 className={financeFieldClass}

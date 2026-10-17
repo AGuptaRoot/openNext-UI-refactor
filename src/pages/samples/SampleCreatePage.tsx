@@ -9,11 +9,17 @@ import { LeadItem } from '../../types/leads';
 import { OpportunityItem } from '../../types/opportunities';
 import { CrmSettings } from '../../types/admin';
 import { ClientSelect } from '../../components/clients/ClientSelect';
+import { SampleUrgencyDot } from '../../components/icons/SampleUrgencyDot';
+import {
+  CheckCircle2,
+  ClipboardList,
+  MapPin,
+  XCircle,
+} from 'lucide-react';
 import {
   SAMPLE_PRODUCT_PRESETS,
   SAMPLE_UNITS,
   SAMPLE_URGENCIES,
-  sampleUrgencyEmoji,
   sampleUrgencyTone,
   type SampleCreateInput,
   type SampleLinkType,
@@ -21,6 +27,9 @@ import {
   type SampleProductPreset,
   type SampleUrgency,
 } from '../../types/samples';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import { getCurrencySymbol, normalizeCurrencyCode } from '../../utils/currency';
+import { CURRENCY_OPTIONS } from '../../components/finance/FinanceFormElements';
 
 const fieldClass =
   'h-10 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-zinc-500';
@@ -59,6 +68,7 @@ function isOpportunitySelectableForSample(stage?: string | null): boolean {
 export const SampleCreatePage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const settingsCurrency = useDefaultCurrency();
   const [clients, setClients] = useState<ClientItem[]>([]);
   const [leads, setLeads] = useState<LeadItem[]>([]);
   const [opportunities, setOpportunities] = useState<OpportunityItem[]>([]);
@@ -80,6 +90,10 @@ export const SampleCreatePage: React.FC = () => {
     urgency: 'Normal',
     deliveryAddress: '',
     notes: '',
+    isChargeable: false,
+    chargeAmount: 0,
+    currency: settingsCurrency,
+    exchangeRate: 1,
   });
 
   const availableUnits = useMemo(() => {
@@ -299,6 +313,7 @@ export const SampleCreatePage: React.FC = () => {
       const combinedProductName = validItems.map((it) => it.productName.trim()).join(', ');
       const primaryUnit = validItems[0]?.unit || 'pcs';
 
+      const currencyCode = normalizeCurrencyCode(form.currency, settingsCurrency);
       const created = await crmApi.createSample({
         ...form,
         leadId: form.linkType === 'lead' ? form.leadId : form.linkType === 'opportunity' ? form.leadId || undefined : undefined,
@@ -314,6 +329,11 @@ export const SampleCreatePage: React.FC = () => {
         unit: primaryUnit,
         items: validItems,
         recipientName: recipient,
+        isChargeable: Boolean(form.isChargeable),
+        chargeAmount: form.isChargeable ? Number(form.chargeAmount) || 0 : 0,
+        currency: currencyCode,
+        currencyCode,
+        exchangeRate: form.exchangeRate && form.exchangeRate > 0 ? form.exchangeRate : 1,
       });
       const returnTo = searchParams.get('returnTo');
       navigate(
@@ -469,7 +489,10 @@ export const SampleCreatePage: React.FC = () => {
                     </div>
                   )}
                   {recipientAddress && (
-                    <div className="mt-1 text-xs text-zinc-500">📍 {recipientAddress}</div>
+                    <div className="mt-1 inline-flex items-center gap-1 text-xs text-zinc-500">
+                      <MapPin className="h-4 w-4 shrink-0" aria-hidden />
+                      {recipientAddress}
+                    </div>
                   )}
                   {recipientAddress && form.linkType !== 'opportunity' && (
                     <button
@@ -477,7 +500,10 @@ export const SampleCreatePage: React.FC = () => {
                       onClick={copyAddress}
                       className="mt-2 h-8 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-700"
                     >
-                      📋 Copy Address to Shipping
+                      <span className="inline-flex items-center gap-1">
+                        <ClipboardList className="h-4 w-4 shrink-0" aria-hidden />
+                        Copy Address to Shipping
+                      </span>
                     </button>
                   )}
                 </div>
@@ -624,11 +650,106 @@ export const SampleCreatePage: React.FC = () => {
             </section>
 
             <section
+              data-tour="samples-create-billing"
+              className="rounded-xl border border-zinc-300 bg-white p-5"
+            >
+              <h2 className="mt-0 text-base font-bold text-zinc-950">3. Billing (optional)</h2>
+              <label className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-zinc-800">
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.isChargeable)}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setForm((current) => {
+                      const next = { ...current, isChargeable: checked };
+                      if (checked && current.linkType === 'opportunity' && current.opportunityId) {
+                        const opp = opportunities.find((o) => o._id === current.opportunityId);
+                        if (opp?.currency) {
+                          next.currency = normalizeCurrencyCode(opp.currency, settingsCurrency);
+                        } else if (!current.currency) {
+                          next.currency = settingsCurrency;
+                        }
+                      } else if (checked && !current.currency) {
+                        next.currency = settingsCurrency;
+                      }
+                      return next;
+                    });
+                  }}
+                />
+                This sample is chargeable
+              </label>
+              {form.isChargeable && (
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <label className="block">
+                    <span className={labelClass}>Charge amount *</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      className={fieldClass}
+                      value={form.chargeAmount ?? 0}
+                      onChange={(event) =>
+                        update('chargeAmount', Math.max(0, Number(event.target.value) || 0))
+                      }
+                    />
+                  </label>
+                  <label className="block">
+                    <span className={labelClass}>Currency *</span>
+                    <select
+                      className={fieldClass}
+                      value={normalizeCurrencyCode(form.currency, settingsCurrency)}
+                      onChange={(event) =>
+                        update(
+                          'currency',
+                          normalizeCurrencyCode(event.target.value, settingsCurrency)
+                        )
+                      }
+                    >
+                      {Array.from(
+                        new Set([
+                          ...CURRENCY_OPTIONS,
+                          form.currency || '',
+                          settingsCurrency,
+                        ])
+                      )
+                        .filter(Boolean)
+                        .map((code) => (
+                          <option key={code} value={code}>
+                            {code} ({getCurrencySymbol(code)})
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  {normalizeCurrencyCode(form.currency, settingsCurrency) !==
+                    normalizeCurrencyCode(settingsCurrency) && (
+                    <label className="block">
+                      <span className={labelClass}>Exchange rate *</span>
+                      <input
+                        type="number"
+                        min={0.0001}
+                        step={0.0001}
+                        className={fieldClass}
+                        value={form.exchangeRate ?? 1}
+                        onChange={(event) =>
+                          update('exchangeRate', Number(event.target.value) || 1)
+                        }
+                      />
+                    </label>
+                  )}
+                </div>
+              )}
+              <p className="mt-2 mb-0 text-[11px] text-zinc-500">
+                Defaults from Settings ({settingsCurrency}) or linked opportunity currency. Saved on
+                this sample only.
+              </p>
+            </section>
+
+            <section
               data-tour="samples-create-urgency"
               className="rounded-xl border border-zinc-300 bg-white p-5"
             >
               <h2 className="mt-0 text-base font-bold text-zinc-950">
-                3. Dispatch Urgency & Priority SLA
+                4. Dispatch Urgency & Priority SLA
               </h2>
               <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
                 {SAMPLE_URGENCIES.map((urgency) => (
@@ -643,7 +764,8 @@ export const SampleCreatePage: React.FC = () => {
                     }`}
                   >
                     <div>
-                      {sampleUrgencyEmoji(urgency)} {urgency}
+                      <SampleUrgencyDot urgency={urgency} />
+                      {urgency}
                     </div>
                   </button>
                 ))}
@@ -697,7 +819,11 @@ export const SampleCreatePage: React.FC = () => {
                     key={item.empty}
                     className={`flex items-start gap-2 ${item.ok ? 'text-emerald-700' : 'text-red-600'}`}
                   >
-                    <span>{item.ok ? '✅' : '❌'}</span>
+                    {item.ok ? (
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+                    ) : (
+                      <XCircle className="h-4 w-4 shrink-0 text-red-600" aria-hidden />
+                    )}
                     <span>{item.ok ? item.label : item.empty}</span>
                   </li>
                 ))}

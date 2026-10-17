@@ -12,6 +12,7 @@ interface SaveLeadFilterModalProps {
     source?: string;
     tag?: string;
     matchScore?: string;
+    needsSampleRequest?: string;
     search?: string;
   };
   onSaved: (newFilter: SavedLeadFilter) => void;
@@ -48,9 +49,9 @@ export const SaveLeadFilterModal: React.FC<SaveLeadFilterModalProps> = ({
   if (activeFilters.matchScore) {
     const matchLabels: Record<string, string> = {
       unscored: 'Not scored',
-      strong: 'Strong (?80%)',
-      partial: 'Partial (55�79%)',
-      weak: 'Weak (30�54%)',
+      strong: 'Strong (≥80%)',
+      partial: 'Partial (55–79%)',
+      weak: 'Weak (30–54%)',
       poor: 'Poor (<30%)',
       scored: 'Scored',
     };
@@ -59,6 +60,11 @@ export const SaveLeadFilterModal: React.FC<SaveLeadFilterModalProps> = ({
     );
   } else if (activeFilters.tag) {
     criteriaList.push(`Tag: ${activeFilters.tag}`);
+  }
+  if (activeFilters.needsSampleRequest === 'true') {
+    criteriaList.push('Sample: Needs sample request');
+  } else if (activeFilters.needsSampleRequest === 'false') {
+    criteriaList.push('Sample: No sample request');
   }
   if (activeFilters.search) criteriaList.push(`Search: "${activeFilters.search}"`);
 
@@ -79,6 +85,7 @@ export const SaveLeadFilterModal: React.FC<SaveLeadFilterModalProps> = ({
           status: activeFilters.status || '',
           source: activeFilters.source || '',
           matchScore: activeFilters.matchScore || '',
+          needsSampleRequest: activeFilters.needsSampleRequest || '',
           search: activeFilters.search || '',
         },
         isDefault,

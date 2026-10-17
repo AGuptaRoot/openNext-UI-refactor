@@ -14,6 +14,7 @@ import {
   type RequestTypeField,
   type RequestTypeOption,
 } from '../../types/request-types';
+import { getDefaultCurrencySymbol } from '../../utils/currency';
 
 const inputClass =
   'h-9 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-400';
@@ -379,6 +380,7 @@ export const DynamicFormBuilder: React.FC<DynamicFormBuilderProps> = ({
   showMatchConfig = true,
   disabled = false,
 }) => {
+  const currencySym = getDefaultCurrencySymbol();
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const editingField = useMemo(
@@ -488,7 +490,7 @@ export const DynamicFormBuilder: React.FC<DynamicFormBuilderProps> = ({
                         </span>
                         {(item.minAmount != null || item.maxAmount != null || item.matchNumberMin != null || item.matchNumberMax != null) ? (
                           <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 border border-emerald-200 font-mono">
-                            Range: ₹{(item.minAmount ?? item.matchNumberMin)?.toLocaleString() ?? '0'} – ₹{(item.maxAmount ?? item.matchNumberMax)?.toLocaleString() ?? '∞'}
+                            Range: {currencySym}{(item.minAmount ?? item.matchNumberMin)?.toLocaleString() ?? '0'} – {currencySym}{(item.maxAmount ?? item.matchNumberMax)?.toLocaleString() ?? '∞'}
                           </span>
                         ) : null}
                       </div>

@@ -49,6 +49,8 @@ export interface LeadCommercialRequirement {
   values?: Record<string, string | number | string[] | null>;
   /** Lead-specific selectable options keyed by field.key */
   customOptions?: Record<string, Array<{ value: string; label: string }>>;
+  /** Product request types only — lead needs a sample request. */
+  needsSampleRequest?: boolean;
   matchedRequirements?: QualificationScoreBreakdownItem[];
   unmatchedRequirements?: QualificationScoreBreakdownItem[];
   missingRequirements?: QualificationScoreBreakdownItem[];
@@ -128,6 +130,7 @@ export function emptyCommercialRequirement(
     requestTypeKey: '',
     values: {},
     customOptions: {},
+    needsSampleRequest: false,
     matchedRequirements: [],
     unmatchedRequirements: [],
     missingRequirements: [],

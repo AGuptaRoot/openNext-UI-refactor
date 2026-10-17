@@ -96,7 +96,7 @@ export const ClientListView: React.FC<ClientListViewProps> = ({
                       className="flex items-center gap-3 bg-transparent border-none cursor-pointer p-0 text-left"
                     >
                       <div
-                        className="w-9 h-9 rounded-lg text-white flex items-center justify-center text-xs font-bold flex-shrink-0 overflow-hidden"
+                        className="w-9 h-9 rounded-lg crm-on-solid flex items-center justify-center text-xs font-bold flex-shrink-0 overflow-hidden"
                         style={{ backgroundColor: resolveClientAvatarColor(client.avatarColor) }}
                       >
                         {client.avatarUrl ? (
@@ -119,8 +119,8 @@ export const ClientListView: React.FC<ClientListViewProps> = ({
                         </span>
                       </div>
                       <div>
-                        <div className="text-sm font-semibold text-zinc-950">{client.name}</div>
-                        <div className="text-[11px] text-zinc-500">
+                        <div className="text-sm font-semibold text-foreground">{client.name}</div>
+                        <div className="text-[11px] text-muted-foreground">
                           {formatClientAddressLine(client) || '—'}
                         </div>
                       </div>
@@ -129,11 +129,11 @@ export const ClientListView: React.FC<ClientListViewProps> = ({
                   <td className="px-4 py-3 text-xs text-zinc-700">{client.category || '—'}</td>
                   <td className="px-4 py-3">
                     <span
-                      className={`inline-flex text-[11px] font-semibold px-2 py-0.5 rounded border ${
-                        client.status === 'Active'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : 'bg-zinc-100 text-zinc-600 border-zinc-200'
-                      }`}
+                      className={
+                        client.status === 'Active' || !client.status
+                          ? 'crm-badge crm-badge-success'
+                          : 'crm-badge crm-badge-neutral'
+                      }
                     >
                       {client.status || 'Active'}
                     </span>

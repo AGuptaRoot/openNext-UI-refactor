@@ -1,4 +1,5 @@
 import React from 'react';
+import { CheckCircle2, CircleDollarSign, Hash, Undo2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { PaymentReconciliationReportData } from '../../../types/reports';
 import {
@@ -42,7 +43,7 @@ export const PaymentReconciliationReportTab: React.FC<PaymentReconciliationRepor
         <MetricCard
           label="Total Payments"
           value={data.totalPaymentsCount ?? 0}
-          icon="🔢"
+          icon={<Hash className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Volume"
           sub="Transactions logged"
           to="/payments"
@@ -50,7 +51,7 @@ export const PaymentReconciliationReportTab: React.FC<PaymentReconciliationRepor
         <MetricCard
           label="Gross Inflow"
           value={formatMoney(data.grossAmount ?? 0)}
-          icon="💰"
+          icon={<CircleDollarSign className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Gross"
           sub="Total received"
           to="/payments?status=Completed"
@@ -58,7 +59,7 @@ export const PaymentReconciliationReportTab: React.FC<PaymentReconciliationRepor
         <MetricCard
           label="Refunds Processed"
           value={formatMoney(data.totalRefunds ?? 0)}
-          icon="↩️"
+          icon={<Undo2 className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Refunds"
           sub="Disbursed returns"
           to="/payments?status=Refunded"
@@ -66,7 +67,7 @@ export const PaymentReconciliationReportTab: React.FC<PaymentReconciliationRepor
         <MetricCard
           label="Net Collected"
           value={formatMoney(data.netCollected ?? 0)}
-          icon="✅"
+          icon={<CheckCircle2 className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Net"
           sub="Gross - Refunds"
           to="/payments?status=Completed"

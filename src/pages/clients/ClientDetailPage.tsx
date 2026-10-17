@@ -104,13 +104,15 @@ const statusPill = (status?: string) => {
   const active = value.toLowerCase() === 'active';
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-        active
-          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-          : 'border-zinc-200 bg-zinc-100 text-zinc-700'
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+        active ? 'crm-badge-success' : 'crm-badge-neutral'
       }`}
+      style={{ borderWidth: 1, borderStyle: 'solid' }}
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-emerald-600' : 'bg-zinc-400'}`} />
+      <span
+        className="h-1.5 w-1.5 rounded-full"
+        style={{ backgroundColor: active ? 'var(--success)' : 'var(--muted-foreground)' }}
+      />
       {value}
     </span>
   );
@@ -910,17 +912,17 @@ export const ClientDetailPage: React.FC = () => {
             <Link
               to="/clients"
               data-tour="clients-detail-back"
-              className="mb-3 inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-600 no-underline hover:text-zinc-950"
+              className="mb-3 inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground no-underline hover:text-foreground"
             >
               <ArrowBackIcon sx={{ fontSize: 16 }} />
               Clients
             </Link>
-            <p className="m-0 mb-1 text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+            <p className="m-0 mb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
               Client profile
             </p>
             <div className="flex items-start gap-3">
               <div
-                className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl text-xl font-bold text-white"
+                className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl text-xl font-bold crm-on-solid"
                 style={{ backgroundColor: resolveClientAvatarColor(client.avatarColor) }}
               >
                 {client.avatarUrl ? (
@@ -937,34 +939,34 @@ export const ClientDetailPage: React.FC = () => {
                 )}
               </div>
               <div className="min-w-0">
-                <h1 className="m-0 text-2xl font-bold tracking-tight text-zinc-950">{client.name}</h1>
+                <h1 className="m-0 text-2xl font-bold tracking-tight text-foreground">{client.name}</h1>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
                   {statusPill(client.status)}
                   {client.category ? (
-                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-semibold text-zinc-700">
+                    <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-semibold text-foreground">
                       {client.category}
                     </span>
                   ) : null}
                   {(client.tags || []).slice(0, 4).map((tag) => (
                     <span
                       key={tag}
-                      className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-zinc-600"
+                      className="rounded-full border border-border bg-card px-2 py-0.5 text-[10px] font-semibold text-muted-foreground"
                     >
                       {tag}
                     </span>
                   ))}
                   {client.email ? (
-                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-medium text-zinc-600">
+                    <span className="rounded-full border border-border bg-card px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                       {client.email}
                     </span>
                   ) : null}
                   {client.phone ? (
-                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-medium text-zinc-600">
+                    <span className="rounded-full border border-border bg-card px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                       {client.phone}
                     </span>
                   ) : null}
                   {client.taxId ? (
-                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-medium text-zinc-600">
+                    <span className="rounded-full border border-border bg-card px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                       Tax: {client.taxId}
                     </span>
                   ) : null}

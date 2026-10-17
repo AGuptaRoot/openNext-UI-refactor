@@ -14,6 +14,8 @@ import {
   formatContactName,
 } from '../../types/contacts';
 import { ListPager } from '../../components/common/ListPager';
+import { TourButton } from '../../ui/tour';
+import { restartContactsTour } from '../../tours/ContactsTour';
 
 const PAGE_SIZE = 20;
 
@@ -105,7 +107,7 @@ export const ContactsPage: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <div data-tour="contacts-tour-landing" className="flex flex-col gap-5">
       {toast && (
         <div
           className={`fixed top-20 right-6 z-[80] px-4 py-2.5 rounded-lg text-xs font-semibold border ${
@@ -119,7 +121,7 @@ export const ContactsPage: React.FC = () => {
       )}
 
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 pb-1 border-b border-zinc-200">
-        <div>
+        <div data-tour="contacts-title">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 m-0 mb-1">
             Sales
           </p>
@@ -128,7 +130,7 @@ export const ContactsPage: React.FC = () => {
             People directory shared across leads. Reuse a contact instead of retyping details.
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div data-tour="contacts-header-actions" className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
             onClick={() => void loadContacts()}
@@ -137,9 +139,11 @@ export const ContactsPage: React.FC = () => {
             <RefreshIcon sx={{ fontSize: 15 }} />
             Refresh
           </button>
+          <TourButton moduleId="contacts" onRestart={restartContactsTour} />
           {canWrite && (
             <button
               type="button"
+              data-tour="contacts-create-btn"
               onClick={() => navigate('/contacts/create')}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg border border-zinc-950 bg-zinc-950 text-white hover:bg-zinc-800 cursor-pointer"
             >
@@ -150,7 +154,10 @@ export const ContactsPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white border border-zinc-300 rounded-xl p-4 flex flex-wrap gap-3 items-end">
+      <div
+        data-tour="contacts-filters"
+        className="bg-white border border-zinc-300 rounded-xl p-4 flex flex-wrap gap-3 items-end"
+      >
         <label className="flex flex-col gap-1 min-w-[200px] flex-1">
           <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">
             Search
@@ -190,7 +197,10 @@ export const ContactsPage: React.FC = () => {
           Loading contacts…
         </div>
       ) : (
-        <div className="bg-white border border-zinc-300 rounded-xl overflow-hidden">
+        <div
+          data-tour="contacts-table"
+          className="bg-white border border-zinc-300 rounded-xl overflow-hidden"
+        >
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse min-w-[720px]">
               <thead>
@@ -223,7 +233,7 @@ export const ContactsPage: React.FC = () => {
                     </td>
                   </tr>
                 ) : (
-                  contacts.map((contact) => {
+                  contacts.map((contact, index) => {
                     const leadsCount =
                       Number(contact.leadsCount) || (contact.leadIds ? contact.leadIds.length : 0);
                     const clientsCount =
@@ -236,6 +246,8 @@ export const ContactsPage: React.FC = () => {
                     return (
                       <tr
                         key={contact._id}
+                        data-tour={index === 0 ? 'contacts-row-first' : undefined}
+                        data-contact-id={contact._id}
                         className="hover:bg-zinc-50 transition-colors cursor-pointer"
                         onClick={() => navigate(`/contacts/${contact._id}`)}
                       >
@@ -252,9 +264,13 @@ export const ContactsPage: React.FC = () => {
                                 (contact.name.charAt(0) || 'C').toUpperCase()
                               )}
                             </div>
-                            <span className="font-semibold text-zinc-950 truncate">
+                            <Link
+                              to={`/contacts/${contact._id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="font-semibold text-zinc-950 truncate no-underline hover:underline"
+                            >
                               {formatContactName(contact) || '—'}
-                            </span>
+                            </Link>
                           </div>
                         </td>
                         <td className="px-4 py-3 text-zinc-900 font-medium">

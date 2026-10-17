@@ -1,4 +1,5 @@
 import React from 'react';
+import { User } from 'lucide-react';
 
 import {
   CONTACT_GENDERS,
@@ -139,7 +140,7 @@ export const ContactFormFields: React.FC<ContactFormFieldsProps> = ({
           {values.photoUrl ? (
             <img src={values.photoUrl} alt="Contact" className="w-full h-full object-cover" />
           ) : (
-            '👤'
+            <User className="h-8 w-8 shrink-0 text-zinc-400" aria-hidden />
           )}
         </div>
         <div className="flex flex-col gap-1.5 min-w-0">

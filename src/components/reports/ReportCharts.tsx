@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useMemo } from 'react';
+import { BarChart3 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
   Area,
@@ -17,29 +18,60 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { useTheme } from '@/context/ThemeContext';
+import { getChartThemeColors } from '../../theme/cssVars';
 import {
   formatCrmMoney,
   getRuntimeDefaultCurrency,
   normalizeCurrencyCode,
 } from '../../utils/currency';
 
-export const CHART_GREYS = ['#09090b', '#27272a', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8'];
+/** Theme-aware chart palette (reads CSS vars; updates when CMS theme toggles). */
+export function useChartTheme() {
+  const { theme } = useTheme();
+  return useMemo(() => {
+    const c = getChartThemeColors();
+    return {
+      theme,
+      greys: c.series,
+      series: c.series,
+      grid: c.grid,
+      tick: c.tick,
+      axis: c.axis,
+      cursor: c.cursor,
+      tooltipStyle: {
+        borderRadius: 8,
+        border: `1px solid ${c.tooltipBorder}`,
+        background: c.tooltipBg,
+        color: c.tooltipFg,
+        fontSize: 12,
+        boxShadow: theme === 'dark' ? '0 8px 24px rgba(0,0,0,0.45)' : '0 8px 24px rgba(0,0,0,0.08)',
+      } as React.CSSProperties,
+      legendColor: c.mutedForeground,
+      card: c.card,
+      foreground: c.foreground,
+      mutedForeground: c.mutedForeground,
+      sliceStroke: c.card,
+    };
+  }, [theme]);
+}
 
-const tooltipStyle: React.CSSProperties = {
-  borderRadius: 8,
-  border: '1px solid #e4e4e7',
-  background: '#ffffff',
-  fontSize: 12,
-  boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
-};
+/** @deprecated Prefer useChartTheme().series — kept for callers that import CHART_GREYS. */
+export const CHART_GREYS = [
+  'var(--chart-series-1)',
+  'var(--chart-series-2)',
+  'var(--chart-series-3)',
+  'var(--chart-series-4)',
+  'var(--chart-series-5)',
+  'var(--chart-series-6)',
+];
 
 const emptyState = (message: string) => (
-  <div className="py-8 text-center text-xs text-zinc-400">{message}</div>
+  <div className="py-8 text-center text-xs text-muted-foreground">{message}</div>
 );
 
 export function formatMoney(amount: number | undefined, currency?: string): string {
   const code = normalizeCurrencyCode(currency, getRuntimeDefaultCurrency());
-  // Keep compact "USD 1,234.00" style used by reports, but follow CRM default.
   const num = Number(amount || 0);
   try {
     return `${code} ${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -60,7 +92,7 @@ export function formatDate(value: string | undefined): string {
 export interface MetricCardProps {
   label: string;
   value: string | number;
-  icon?: string;
+  icon?: React.ReactNode;
   hint?: string;
   sub?: string;
   /** When set, the card becomes a drill-down link to a filtered module page. */
@@ -70,7 +102,7 @@ export interface MetricCardProps {
 export const MetricCard: React.FC<MetricCardProps> = ({
   label,
   value,
-  icon = '📊',
+  icon = <BarChart3 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />,
   hint = 'Report',
   sub = 'Selected period',
   to,
@@ -78,17 +110,17 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   const body = (
     <>
       <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">{label}</span>
-        <span className="select-none text-sm text-zinc-400">{icon}</span>
+        <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{label}</span>
+        <span className="flex shrink-0 items-center text-muted-foreground">{icon}</span>
       </div>
-      <div className="my-1 font-mono text-2xl font-bold tracking-tight text-zinc-950">{value}</div>
-      <div className="mt-2 flex items-center gap-1.5 border-t border-zinc-100 pt-2 text-xs">
-        <span className="rounded border border-zinc-200 bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-800">
+      <div className="my-1 font-mono text-2xl font-bold tracking-tight text-foreground">{value}</div>
+      <div className="mt-2 flex items-center gap-1.5 border-t border-border pt-2 text-xs">
+        <span className="rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
           {hint}
         </span>
-        <span className="truncate text-[11px] text-zinc-500">{sub}</span>
+        <span className="truncate text-[11px] text-muted-foreground">{sub}</span>
         {to ? (
-          <span className="ml-auto shrink-0 text-[10px] font-semibold text-zinc-800 underline">
+          <span className="ml-auto shrink-0 text-[10px] font-semibold text-foreground underline">
             Open
           </span>
         ) : null}
@@ -100,7 +132,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
     return (
       <Link
         to={to}
-        className="flex flex-col justify-between rounded-xl border border-zinc-300 bg-white p-4 text-inherit no-underline shadow-none transition-colors hover:border-zinc-400 hover:bg-zinc-50"
+        className="flex flex-col justify-between rounded-xl border border-border bg-card p-4 text-inherit no-underline shadow-none transition-colors hover:border-muted-foreground hover:bg-muted"
         title={`Open filtered view: ${label}`}
       >
         {body}
@@ -109,7 +141,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   }
 
   return (
-    <div className="flex flex-col justify-between rounded-xl border border-zinc-300 bg-white p-4 shadow-none">
+    <div className="flex flex-col justify-between rounded-xl border border-border bg-card p-4 shadow-none">
       {body}
     </div>
   );
@@ -132,12 +164,12 @@ export const ChartCard: React.FC<ChartCardProps> = ({ title, subtitle, children,
   return (
     <div
       {...(tourId ? { 'data-tour': tourId } : {})}
-      className="flex flex-col justify-between rounded-xl border border-zinc-300 bg-white p-5 shadow-none"
+      className="flex flex-col justify-between rounded-xl border border-border bg-card p-5 shadow-none"
     >
       <div className="mb-4 flex items-start justify-between gap-2">
         <div>
-          <h3 className="m-0 text-sm font-bold tracking-tight text-zinc-950">{title}</h3>
-          {subtitle && <p className="m-0 mt-0.5 text-xs text-zinc-500">{subtitle}</p>}
+          <h3 className="m-0 text-sm font-bold tracking-tight text-foreground">{title}</h3>
+          {subtitle && <p className="m-0 mt-0.5 text-xs text-muted-foreground">{subtitle}</p>}
         </div>
         {action && <div>{action}</div>}
       </div>
@@ -155,6 +187,7 @@ export const VerticalBarChart: React.FC<{ items: VerticalBarItem[]; title?: stri
   items,
   title = 'Bar chart',
 }) => {
+  const chart = useChartTheme();
   if (!items.length) return emptyState('No chart data for this period.');
 
   const data = items.map((item) => ({
@@ -166,26 +199,26 @@ export const VerticalBarChart: React.FC<{ items: VerticalBarItem[]; title?: stri
     <div className="h-52 w-full" role="img" aria-label={title}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 12, right: 8, left: 0, bottom: 4 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
           <XAxis
             dataKey="name"
-            tick={{ fill: '#71717a', fontSize: 11 }}
-            axisLine={{ stroke: '#e4e4e7' }}
+            tick={{ fill: chart.tick, fontSize: 11 }}
+            axisLine={{ stroke: chart.axis }}
             tickLine={false}
             interval={0}
             angle={data.length > 6 ? -25 : 0}
             textAnchor={data.length > 6 ? 'end' : 'middle'}
             height={data.length > 6 ? 50 : 30}
           />
-          <YAxis tick={{ fill: '#71717a', fontSize: 11 }} axisLine={false} tickLine={false} width={36} />
+          <YAxis tick={{ fill: chart.tick, fontSize: 11 }} axisLine={false} tickLine={false} width={36} />
           <Tooltip
-            cursor={{ fill: '#f4f4f5' }}
-            contentStyle={tooltipStyle}
+            cursor={{ fill: chart.cursor }}
+            contentStyle={chart.tooltipStyle}
             formatter={(value: number) => [value, 'Value']}
           />
           <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={36}>
             {data.map((_, index) => (
-              <Cell key={`bar-${index}`} fill={CHART_GREYS[index % CHART_GREYS.length]} />
+              <Cell key={`bar-${index}`} fill={chart.series[index % chart.series.length]} />
             ))}
           </Bar>
         </BarChart>
@@ -203,39 +236,42 @@ export const LineChart: React.FC<{ items: LineChartItem[]; title?: string }> = (
   items,
   title = 'Line chart',
 }) => {
+  const chart = useChartTheme();
   if (!items.length) return emptyState('No trend data for this period.');
 
   const data = items.map((item) => ({
     name: item.label || '—',
     value: Number(item.value) || 0,
   }));
+  const stroke = chart.series[0];
+  const fillId = `reportLineFill-${chart.theme}`;
 
   return (
     <div className="h-52 w-full" role="img" aria-label={title}>
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={data} margin={{ top: 12, right: 12, left: 0, bottom: 4 }}>
           <defs>
-            <linearGradient id="reportLineFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#09090b" stopOpacity={0.18} />
-              <stop offset="100%" stopColor="#09090b" stopOpacity={0.02} />
+            <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={stroke} stopOpacity={0.18} />
+              <stop offset="100%" stopColor={stroke} stopOpacity={0.02} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
           <XAxis
             dataKey="name"
-            tick={{ fill: '#71717a', fontSize: 11 }}
-            axisLine={{ stroke: '#e4e4e7' }}
+            tick={{ fill: chart.tick, fontSize: 11 }}
+            axisLine={{ stroke: chart.axis }}
             tickLine={false}
           />
-          <YAxis tick={{ fill: '#71717a', fontSize: 11 }} axisLine={false} tickLine={false} width={36} />
-          <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [value, 'Value']} />
+          <YAxis tick={{ fill: chart.tick, fontSize: 11 }} axisLine={false} tickLine={false} width={36} />
+          <Tooltip contentStyle={chart.tooltipStyle} formatter={(value: number) => [value, 'Value']} />
           <Area
             type="monotone"
             dataKey="value"
-            stroke="#09090b"
+            stroke={stroke}
             strokeWidth={2.5}
-            fill="url(#reportLineFill)"
-            dot={{ r: 3, fill: '#09090b', strokeWidth: 0 }}
+            fill={`url(#${fillId})`}
+            dot={{ r: 3, fill: stroke, strokeWidth: 0 }}
             activeDot={{ r: 5 }}
           />
         </AreaChart>
@@ -253,6 +289,7 @@ export const DonutChart: React.FC<{ items: DonutItem[]; title?: string }> = ({
   items,
   title = 'Donut chart',
 }) => {
+  const chart = useChartTheme();
   const filtered = items.filter((item) => Number(item.value) > 0);
   if (!filtered.length) return emptyState('No distribution data.');
 
@@ -276,19 +313,19 @@ export const DonutChart: React.FC<{ items: DonutItem[]; title?: string }> = ({
               innerRadius={42}
               outerRadius={62}
               paddingAngle={1.5}
-              stroke="#ffffff"
+              stroke={chart.sliceStroke}
               strokeWidth={2}
             >
               {data.map((_, index) => (
-                <Cell key={`slice-${index}`} fill={CHART_GREYS[index % CHART_GREYS.length]} />
+                <Cell key={`slice-${index}`} fill={chart.series[index % chart.series.length]} />
               ))}
             </Pie>
-            <Tooltip contentStyle={tooltipStyle} formatter={(value: number, name: string) => [value, name]} />
+            <Tooltip contentStyle={chart.tooltipStyle} formatter={(value: number, name: string) => [value, name]} />
           </PieChart>
         </ResponsiveContainer>
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="font-mono text-base font-bold text-zinc-950">{total}</span>
-          <span className="text-[10px] text-zinc-500">Total</span>
+          <span className="font-mono text-base font-bold text-foreground">{total}</span>
+          <span className="text-[10px] text-muted-foreground">Total</span>
         </div>
       </div>
 
@@ -298,13 +335,13 @@ export const DonutChart: React.FC<{ items: DonutItem[]; title?: string }> = ({
             <div className="flex min-w-0 items-center gap-1.5">
               <span
                 className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                style={{ backgroundColor: CHART_GREYS[index % CHART_GREYS.length] }}
+                style={{ backgroundColor: chart.series[index % chart.series.length] }}
               />
-              <span className="truncate text-[11px] text-zinc-600" title={item.name}>
+              <span className="truncate text-[11px] text-muted-foreground" title={item.name}>
                 {item.name}
               </span>
             </div>
-            <span className="font-mono text-[11px] font-bold text-zinc-900">{item.value}</span>
+            <span className="font-mono text-[11px] font-bold text-foreground">{item.value}</span>
           </div>
         ))}
       </div>
@@ -324,6 +361,7 @@ export const DualLineChart: React.FC<{
   bLabel?: string;
   title?: string;
 }> = ({ items, aLabel = 'Income', bLabel = 'Expenses', title = 'Income vs Expenses' }) => {
+  const chart = useChartTheme();
   if (!items.length) return emptyState('No cash-flow trend data.');
 
   const data = items.map((item) => ({
@@ -336,35 +374,35 @@ export const DualLineChart: React.FC<{
     <div className="h-56 w-full" role="img" aria-label={title}>
       <ResponsiveContainer width="100%" height="100%">
         <RechartsLineChart data={data} margin={{ top: 12, right: 12, left: 0, bottom: 4 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
           <XAxis
             dataKey="name"
-            tick={{ fill: '#71717a', fontSize: 11 }}
-            axisLine={{ stroke: '#e4e4e7' }}
+            tick={{ fill: chart.tick, fontSize: 11 }}
+            axisLine={{ stroke: chart.axis }}
             tickLine={false}
           />
-          <YAxis tick={{ fill: '#71717a', fontSize: 11 }} axisLine={false} tickLine={false} width={42} />
-          <Tooltip contentStyle={tooltipStyle} />
+          <YAxis tick={{ fill: chart.tick, fontSize: 11 }} axisLine={false} tickLine={false} width={42} />
+          <Tooltip contentStyle={chart.tooltipStyle} />
           <Legend
             verticalAlign="top"
             height={28}
-            wrapperStyle={{ fontSize: 12, color: '#52525b' }}
+            wrapperStyle={{ fontSize: 12, color: chart.legendColor }}
           />
           <Line
             type="monotone"
             dataKey={aLabel}
-            stroke="#09090b"
+            stroke={chart.series[0]}
             strokeWidth={2.5}
-            dot={{ r: 3, fill: '#09090b', strokeWidth: 0 }}
+            dot={{ r: 3, fill: chart.series[0], strokeWidth: 0 }}
             activeDot={{ r: 5 }}
           />
           <Line
             type="monotone"
             dataKey={bLabel}
-            stroke="#a1a1aa"
+            stroke={chart.series[1]}
             strokeWidth={2}
             strokeDasharray="4 4"
-            dot={{ r: 2.5, fill: '#a1a1aa', strokeWidth: 0 }}
+            dot={{ r: 2.5, fill: chart.series[1], strokeWidth: 0 }}
             activeDot={{ r: 4 }}
           />
         </RechartsLineChart>
@@ -379,6 +417,7 @@ export const HorizontalBar: React.FC<{
   max: number;
   to?: string;
 }> = ({ label, value, max, to }) => {
+  const chart = useChartTheme();
   const data = [
     {
       name: label,
@@ -388,7 +427,7 @@ export const HorizontalBar: React.FC<{
 
   const row = (
     <>
-      <span className="w-28 truncate text-xs font-medium text-zinc-700" title={label}>
+      <span className="w-28 truncate text-xs font-medium text-foreground" title={label}>
         {label}
       </span>
       <div className="h-6 min-w-0 flex-1">
@@ -396,11 +435,16 @@ export const HorizontalBar: React.FC<{
           <BarChart data={data} layout="vertical" margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
             <XAxis type="number" domain={[0, Math.max(max, 1)]} hide />
             <YAxis type="category" dataKey="name" hide />
-            <Bar dataKey="value" fill="#09090b" radius={[999, 999, 999, 999]} background={{ fill: '#f4f4f5' }} />
+            <Bar
+              dataKey="value"
+              fill={chart.series[0]}
+              radius={[999, 999, 999, 999]}
+              background={{ fill: chart.cursor }}
+            />
           </BarChart>
         </ResponsiveContainer>
       </div>
-      <span className="w-12 text-right font-mono text-xs font-bold text-zinc-900">{value}</span>
+      <span className="w-12 text-right font-mono text-xs font-bold text-foreground">{value}</span>
     </>
   );
 
@@ -408,7 +452,7 @@ export const HorizontalBar: React.FC<{
     return (
       <Link
         to={to}
-        className="flex items-center gap-3 rounded-md py-1 text-inherit no-underline hover:bg-zinc-50"
+        className="flex items-center gap-3 rounded-md py-1 text-inherit no-underline hover:bg-muted"
         title={`Open filtered view: ${label}`}
       >
         {row}
@@ -428,20 +472,20 @@ export const ReportLinkTile: React.FC<{
 }> = ({ label, value, to, muted }) => (
   <Link
     to={to}
-    className={`block rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-center text-inherit no-underline transition-colors hover:border-zinc-400 hover:bg-white ${
+    className={`block rounded-lg border border-border bg-muted p-3 text-center text-inherit no-underline transition-colors hover:border-muted-foreground hover:bg-card ${
       muted ? 'opacity-80' : ''
     }`}
     title={`Open ${label}`}
   >
-    <span className="text-[11px] font-semibold uppercase text-zinc-500">{label}</span>
+    <span className="text-[11px] font-semibold uppercase text-muted-foreground">{label}</span>
     <p
       className={`m-0 mt-0.5 font-mono text-lg font-bold ${
-        muted ? 'text-zinc-500' : 'text-zinc-900'
+        muted ? 'text-muted-foreground' : 'text-foreground'
       }`}
     >
       {value}
     </p>
-    <span className="mt-1 inline-block text-[10px] font-semibold text-zinc-700 underline">
+    <span className="mt-1 inline-block text-[10px] font-semibold text-foreground underline">
       View list
     </span>
   </Link>
@@ -449,8 +493,8 @@ export const ReportLinkTile: React.FC<{
 
 export const ReportEmptyState: React.FC<{ message: string }> = ({ message }) => {
   return (
-    <div className="rounded-xl border border-zinc-300 bg-white p-10 text-center shadow-none">
-      <p className="m-0 text-xs text-zinc-500">{message}</p>
+    <div className="rounded-xl border border-border bg-card p-10 text-center shadow-none">
+      <p className="m-0 text-xs text-muted-foreground">{message}</p>
     </div>
   );
 };

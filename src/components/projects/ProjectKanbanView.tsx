@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import { ProjectItem, priorityBadgeClass } from '../../types/projects';
 import { KanbanBoard, KanbanCard, KanbanColumn, KanbanColumnDropHint } from '../dndkit';
+import { Archive } from 'lucide-react';
 
 export type ProjectKanbanViewProps = {
   projects: ProjectItem[];
@@ -126,7 +127,10 @@ export const ProjectKanbanView: React.FC<ProjectKanbanViewProps> = ({
                         )}
                         {p.isArchived && (
                           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-200">
-                            📦 Archived
+                            <span className="inline-flex items-center gap-0.5">
+                              <Archive className="h-3 w-3 shrink-0" aria-hidden />
+                              Archived
+                            </span>
                           </span>
                         )}
                         <span className="text-[10px] text-zinc-500">

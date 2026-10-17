@@ -8,6 +8,7 @@ import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import CircularProgress from '@mui/material/CircularProgress';
 import Tooltip from '@mui/material/Tooltip';
+import { CheckCircle2, User } from 'lucide-react';
 
 import { useAuth } from '../../context/AuthContext';
 import { useDialog } from '../../context/DialogContext';
@@ -293,7 +294,7 @@ export const ContactDetailPage: React.FC = () => {
   const title = formatContactName(contact) || 'Contact';
 
   return (
-    <div className="flex flex-col gap-5 pb-20">
+    <div data-tour="contacts-detail" className="flex flex-col gap-5 pb-20">
       {toast && (
         <div
           className={`fixed top-20 right-6 z-[80] px-4 py-2.5 rounded-lg text-xs font-semibold border ${
@@ -328,8 +329,8 @@ export const ContactDetailPage: React.FC = () => {
                 className="w-16 h-16 rounded-lg object-cover border border-zinc-200 shrink-0"
               />
             ) : (
-              <div className="w-16 h-16 rounded-lg bg-zinc-100 border border-zinc-200 flex items-center justify-center text-2xl text-zinc-400 shrink-0 select-none">
-                👤
+              <div className="w-16 h-16 rounded-lg bg-zinc-100 border border-zinc-200 flex items-center justify-center shrink-0 select-none">
+                <User className="h-8 w-8 shrink-0 text-zinc-400" aria-hidden />
               </div>
             )}
             <div className="min-w-0">
@@ -384,7 +385,11 @@ export const ContactDetailPage: React.FC = () => {
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <form onSubmit={handleSave} className="lg:col-span-8 flex flex-col gap-6">
+        <form
+          data-tour="contacts-detail-form"
+          onSubmit={handleSave}
+          className="lg:col-span-8 flex flex-col gap-6"
+        >
           <section className="bg-white border border-zinc-300 rounded-xl p-6">
             <h3 className="text-xs font-bold text-zinc-950 uppercase tracking-wider mb-4 pb-2 border-b border-zinc-100">
               Contact Details
@@ -395,6 +400,7 @@ export const ContactDetailPage: React.FC = () => {
               disabled={!canWrite || saving}
               onFieldBlur={(vals) => void checkValues(vals)}
               onUploadError={(msg) => showToast(msg, 'error')}
+              tourPrefix="contacts-detail"
             />
           </section>
           {canWrite && (
@@ -412,7 +418,10 @@ export const ContactDetailPage: React.FC = () => {
 
         <aside className="lg:col-span-4 flex flex-col gap-6">
           {/* Section 1: Directly Linked Records */}
-          <section className="bg-white border border-zinc-300 rounded-xl p-5 shadow-xs">
+          <section
+            data-tour="contacts-detail-links"
+            className="bg-white border border-zinc-300 rounded-xl p-5 shadow-xs"
+          >
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center gap-1.5">
                 <LinkIcon sx={{ fontSize: 16 }} className="text-zinc-600" />
@@ -666,8 +675,9 @@ export const ContactDetailPage: React.FC = () => {
                         </span>
                       </Link>
                       {item.isDirectlyLinked ? (
-                        <span className="shrink-0 text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
-                          ✓ Linked
+                        <span className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                          <CheckCircle2 className="h-3 w-3 shrink-0" aria-hidden />
+                          Linked
                         </span>
                       ) : (
                         <span className="shrink-0 text-[10px] font-medium text-zinc-600 bg-zinc-100 border border-zinc-200 rounded-full px-2 py-0.5">

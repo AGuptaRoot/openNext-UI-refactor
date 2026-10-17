@@ -4,6 +4,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import AddIcon from '@mui/icons-material/Add';
+import { Calendar, RefreshCw, Zap } from 'lucide-react';
 
 import { crmApi } from '../../services/api';
 import { TaskItem } from '../../types/tasks';
@@ -84,7 +85,7 @@ export const RecurringTasksModal: React.FC<RecurringTasksModalProps> = ({
         {/* Modal Header */}
         <div className="p-4 sm:px-6 border-b border-zinc-200 flex items-center justify-between bg-zinc-50 flex-wrap gap-2">
           <div className="flex items-center gap-2.5">
-            <span className="text-xl">🔄</span>
+            <RefreshCw className="h-[18px] w-[18px] shrink-0 text-zinc-700" aria-hidden />
             <div>
               <h2 className="text-base font-bold text-zinc-950 m-0">Recurring Tasks &amp; Schedules</h2>
               <p className="m-0 mt-0.5 text-xs text-zinc-500">
@@ -101,7 +102,14 @@ export const RecurringTasksModal: React.FC<RecurringTasksModalProps> = ({
               className="h-8 px-3 rounded-lg bg-zinc-950 hover:bg-zinc-800 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer border-none disabled:opacity-50 transition-colors"
             >
               <PlayArrowIcon sx={{ fontSize: 14 }} />
-              <span>{processing ? 'Processing…' : '⚡ Run Due Now'}</span>
+              {processing ? (
+                <span>Processing…</span>
+              ) : (
+                <span className="inline-flex items-center gap-1">
+                  <Zap className="h-4 w-4 shrink-0" aria-hidden />
+                  Run Due Now
+                </span>
+              )}
             </button>
 
             <button
@@ -248,7 +256,10 @@ export const RecurringTasksModal: React.FC<RecurringTasksModalProps> = ({
                                   isDue ? 'text-amber-700 font-bold' : 'text-zinc-700'
                                 }`}
                               >
-                                <span>📅 {task.recurringNextDate}</span>
+                                <span className="inline-flex items-center gap-1">
+                                  <Calendar className="h-4 w-4 shrink-0" aria-hidden />
+                                  {task.recurringNextDate}
+                                </span>
                                 {isDue && (
                                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">
                                     Due Now

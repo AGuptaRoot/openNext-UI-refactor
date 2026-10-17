@@ -71,7 +71,7 @@ function toEditForm(item: ExpenseItem): EditFormState {
   return {
     itemName: item.itemName || item.title || '',
     price: Number(item.price || item.amount || 0),
-    currency: item.currency || 'INR',
+    currency: item.currency || getRuntimeDefaultCurrency(),
     purchaseDate: toDateInput(item.purchaseDate || item.expenseDate),
     category: item.category || 'Other',
     purchasedFrom: item.purchasedFrom || '',

@@ -1,4 +1,14 @@
 import React from 'react';
+import {
+  Ban,
+  CheckCircle2,
+  FolderOpen,
+  Link2,
+  Target,
+  TrendingUp,
+  Trophy,
+  Users,
+} from 'lucide-react';
 import { LeadConversionReportData } from '../../../types/reports';
 import {
   MetricCard,
@@ -71,7 +81,7 @@ export const ConversionReportTab: React.FC<ConversionReportTabProps> = ({ data }
         <MetricCard
           label="Total leads"
           value={totalLeads}
-          icon="👥"
+          icon={<Users className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Volume"
           sub="In selected period"
           to={withClient('/leads', clientId)}
@@ -79,7 +89,7 @@ export const ConversionReportTab: React.FC<ConversionReportTabProps> = ({ data }
         <MetricCard
           label="Won leads"
           value={wonLeads}
-          icon="🏆"
+          icon={<Trophy className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Pipeline"
           sub={`Stage = Won · win rate ${winRate}%`}
           to={withClient('/leads?stage=Won', clientId)}
@@ -87,7 +97,7 @@ export const ConversionReportTab: React.FC<ConversionReportTabProps> = ({ data }
         <MetricCard
           label="Converted to client"
           value={convertedLeads}
-          icon="✅"
+          icon={<CheckCircle2 className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Conversion"
           sub="Lead → Client completed"
           to={withClient('/leads?stage=Won', clientId)}
@@ -95,7 +105,7 @@ export const ConversionReportTab: React.FC<ConversionReportTabProps> = ({ data }
         <MetricCard
           label="Conversion rate"
           value={`${conversionRate}%`}
-          icon="🎯"
+          icon={<Target className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Rate"
           sub="Converted / total leads"
           to={withClient('/leads', clientId)}
@@ -106,7 +116,7 @@ export const ConversionReportTab: React.FC<ConversionReportTabProps> = ({ data }
         <MetricCard
           label="Lost leads"
           value={lostLeads}
-          icon="⛔"
+          icon={<Ban className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Closed-lost"
           sub="Stage = Lost"
           to={withClient('/leads?stage=Lost', clientId)}
@@ -114,7 +124,7 @@ export const ConversionReportTab: React.FC<ConversionReportTabProps> = ({ data }
         <MetricCard
           label="Win rate"
           value={`${winRate}%`}
-          icon="📈"
+          icon={<TrendingUp className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Pipeline"
           sub="Won stage / total leads"
           to={withClient('/leads?stage=Won', clientId)}
@@ -122,7 +132,7 @@ export const ConversionReportTab: React.FC<ConversionReportTabProps> = ({ data }
         <MetricCard
           label="Open / other"
           value={Math.max(0, totalLeads - wonLeads - lostLeads)}
-          icon="📂"
+          icon={<FolderOpen className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="In progress"
           sub="Not won or lost yet"
           to={withClient('/leads', clientId)}
@@ -130,7 +140,7 @@ export const ConversionReportTab: React.FC<ConversionReportTabProps> = ({ data }
         <MetricCard
           label="Won vs converted"
           value={`${wonLeads} / ${convertedLeads}`}
-          icon="🔗"
+          icon={<Link2 className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />}
           hint="Compare"
           sub="Won stage vs client created"
           to={withClient('/leads?stage=Won', clientId)}

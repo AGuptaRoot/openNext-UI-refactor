@@ -7,6 +7,13 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import {
+  Download,
+  PartyPopper,
+  Rocket,
+  Search,
+  Settings,
+} from 'lucide-react';
 
 import { crmApi } from '../../services/api';
 import { triggerFileDownload } from '../../utils/fileDownload';
@@ -326,7 +333,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
         {/* Header */}
         <div className="px-5 py-3.5 border-b border-zinc-200 flex items-center justify-between bg-zinc-50/70">
           <div className="flex items-center gap-3">
-            <span className="text-xl">📥</span>
+            <Download className="h-[18px] w-[18px] shrink-0 text-zinc-700" aria-hidden />
             <div>
               <h2 className="m-0 text-base font-bold text-zinc-950">Bulk Import {entityLabel}</h2>
               <p className="m-0 text-xs text-zinc-500">
@@ -450,7 +457,10 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
 
               {/* Import Options / Defaults */}
               <div className="p-4 rounded-xl border border-zinc-200 bg-zinc-50/60 flex flex-col gap-3">
-                <div className="text-xs font-bold text-zinc-900">⚙️ Import Settings & Defaults</div>
+                <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-900">
+                  <Settings className="h-4 w-4 shrink-0" aria-hidden />
+                  Import Settings & Defaults
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {isLeads ? (
                     <>
@@ -813,7 +823,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
           {/* STEP 3: COMPLETION / RESULT SUMMARY */}
           {step === 3 && (
             <div className="py-8 text-center flex flex-col items-center justify-center gap-3">
-              <div className="text-5xl">🎉</div>
+              <PartyPopper className="h-12 w-12 shrink-0 text-emerald-600" aria-hidden />
               <h3 className="text-lg font-bold text-zinc-900 m-0">Import Completed!</h3>
               <p className="text-xs text-zinc-500 max-w-sm m-0">
                 Your batch import for {entityLabel} was successfully processed.
@@ -859,7 +869,14 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                 disabled={analyzing || (!file && !pastedText.trim())}
                 className="px-4 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 text-white text-xs font-semibold cursor-pointer border-none shadow-xs transition-colors disabled:opacity-50"
               >
-                {analyzing ? 'Analyzing CSV…' : '🔍 Analyze & Preview'}
+                {analyzing ? (
+                  'Analyzing CSV…'
+                ) : (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Search className="h-4 w-4 shrink-0" aria-hidden />
+                    Analyze & Preview
+                  </span>
+                )}
               </button>
             )}
 
@@ -870,7 +887,14 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                 disabled={executing || kpiCounts.valid === 0}
                 className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-semibold cursor-pointer border-none shadow-xs transition-colors disabled:opacity-50"
               >
-                {executing ? 'Importing…' : `🚀 Import ${kpiCounts.valid} Valid ${entityLabel}`}
+                {executing ? (
+                  'Importing…'
+                ) : (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Rocket className="h-4 w-4 shrink-0" aria-hidden />
+                    {`Import ${kpiCounts.valid} Valid ${entityLabel}`}
+                  </span>
+                )}
               </button>
             )}
 

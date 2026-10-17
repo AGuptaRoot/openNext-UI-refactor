@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { CheckCircle2 } from 'lucide-react';
 import Box from '@mui/material/Box';
 import Stepper from '@mui/material/Stepper';
 import Step from '@mui/material/Step';
@@ -527,8 +528,9 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
                           <div className="text-[11px]">
                             <strong>Order intent:</strong>{' '}
                             {sample.feedback.interestedInOrder ? (
-                              <span className="text-emerald-700 font-semibold">
-                                ✓ Interested in placing bulk order
+                              <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold">
+                                <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+                                Interested in placing bulk order
                               </span>
                             ) : (
                               <span className="text-zinc-600">Not currently interested</span>

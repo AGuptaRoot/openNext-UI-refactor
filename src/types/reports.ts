@@ -23,7 +23,6 @@ export interface ReportRolePermissions {
 
 export interface ReportRolePreset {
   title: string;
-  icon: string;
   subtitle: string;
   allowedReports: ReportTabId[];
 }

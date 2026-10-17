@@ -495,7 +495,10 @@ export const ProjectsPage: React.FC = () => {
                     : 'bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-50'
                 }`}
               >
-                📦 {filterArchived === 'true' ? 'Show Active' : 'Archived Projects'}
+                <span className="inline-flex items-center gap-1.5">
+                  <ArchiveOutlinedIcon sx={{ fontSize: 14 }} />
+                  {filterArchived === 'true' ? 'Show Active' : 'Archived Projects'}
+                </span>
               </button>
               {canWrite && (
                 <button
@@ -797,7 +800,10 @@ export const ProjectsPage: React.FC = () => {
                           )}
                           {p.isArchived && (
                             <span className="inline-block mt-1 text-[10px] font-bold px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-200">
-                              📦 Archived
+                              <span className="inline-flex items-center gap-0.5">
+                                <ArchiveOutlinedIcon sx={{ fontSize: 12 }} />
+                                Archived
+                              </span>
                             </span>
                           )}
                         </td>

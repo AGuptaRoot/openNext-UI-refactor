@@ -15,6 +15,15 @@ import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutl
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
+import {
+  AlertCircle,
+  Calendar,
+  Check,
+  CheckCircle2,
+  MapPin,
+  Tag,
+  User,
+} from 'lucide-react';
 
 import { crmApi } from '../../services/api';
 import { isLeadConvertibleStage, resolveWonStage } from '../../utils/leadPipeline';
@@ -301,6 +310,9 @@ export const LeadDetailPage: React.FC = () => {
     address: '',
     city: '',
     state: '',
+    country: '',
+    postalCode: '',
+    placeId: '',
     latitude: '' as number | '',
     longitude: '' as number | '',
     photoUrl: '',
@@ -458,9 +470,12 @@ export const LeadDetailPage: React.FC = () => {
         leadType: leadData.leadType || '',
         requestType: leadData.requestType || '',
         requestTypeId: resolvedRequestTypeId,
-        address: leadData.address || '',
+        address: leadData.address || leadData.formattedAddress || '',
         city: leadData.city || '',
         state: leadData.state || '',
+        country: leadData.country || '',
+        postalCode: leadData.postalCode || '',
+        placeId: leadData.placeId || '',
         latitude: leadData.latitude != null ? leadData.latitude : '',
         longitude: leadData.longitude != null ? leadData.longitude : '',
         photoUrl: leadData.photoUrl || '',
@@ -684,8 +699,12 @@ export const LeadDetailPage: React.FC = () => {
           ? null
           : detailsForm.requestTypeId || null,
         address: detailsForm.address.trim(),
+        formattedAddress: detailsForm.address.trim(),
         city: detailsForm.city.trim(),
         state: detailsForm.state.trim(),
+        country: detailsForm.country.trim(),
+        postalCode: detailsForm.postalCode.trim(),
+        placeId: detailsForm.placeId.trim(),
         latitude: detailsForm.latitude === '' ? null : Number(detailsForm.latitude),
         longitude: detailsForm.longitude === '' ? null : Number(detailsForm.longitude),
         photoUrl: detailsForm.photoUrl.trim(),
@@ -746,7 +765,7 @@ export const LeadDetailPage: React.FC = () => {
     }
   };
 
-  // Geolocation / map pin → fetch address from Google Maps (OSM fallback)
+  // Geolocation / “Use my location” → reverse-geocode and sync all location fields
   const applyCoordsAndGeocode = async (lat: number, lng: number) => {
     setDetailsForm((prev) => ({
       ...prev,
@@ -761,7 +780,8 @@ export const LeadDetailPage: React.FC = () => {
         longitude: lng,
         city: geo.city || prev.city,
         state: geo.state || prev.state,
-        // Prefer Google/OSM formatted address when pin moved; keep typed text if user already filled and lookup empty
+        country: geo.country || prev.country,
+        postalCode: geo.postcode || prev.postalCode,
         address: geo.addressLine || prev.address,
       }));
       const place = [geo.city, geo.state].filter(Boolean).join(', ') || geo.addressLine;
@@ -1024,7 +1044,7 @@ export const LeadDetailPage: React.FC = () => {
               />
             ) : (
               <div className="w-16 h-16 rounded-lg bg-zinc-100 border border-zinc-200 flex items-center justify-center text-2xl text-zinc-400 shrink-0 select-none">
-                👤
+                <User className="h-8 w-8 shrink-0 text-zinc-400" aria-hidden />
               </div>
             )}
             <div>
@@ -1032,7 +1052,8 @@ export const LeadDetailPage: React.FC = () => {
                 <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Lead Profile</span>
                 {lead.convertedClientId && (
                   <span className="text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded">
-                    ✓ Converted Client
+                    <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+                    Converted Client
                   </span>
                 )}
               </div>
@@ -1112,17 +1133,24 @@ export const LeadDetailPage: React.FC = () => {
                 )}
                 {lead.followUpSummary?.hasOverdue ? (
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded font-bold text-xs">
-                    🚨 Follow-up Overdue ({lead.followUpSummary.overdueDays}d)
+                    <span className="inline-flex items-center gap-1">
+                      <AlertCircle className="h-4 w-4 shrink-0" aria-hidden />
+                      Follow-up Overdue ({lead.followUpSummary.overdueDays}d)
+                    </span>
                   </span>
                 ) : lead.followUpSummary?.openCount ? (
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded font-medium text-xs">
-                    📅 {lead.followUpSummary.openCount} Open Follow-up(s)
+                    <span className="inline-flex items-center gap-1">
+                      <Calendar className="h-4 w-4 shrink-0" aria-hidden />
+                      {lead.followUpSummary.openCount} Open Follow-up(s)
+                    </span>
                   </span>
                 ) : null}
                 {Array.isArray(lead.tags) &&
                   lead.tags.map((t) => (
                     <span key={t} className="inline-flex items-center gap-1 px-2.5 py-1 bg-zinc-50 border border-zinc-200 rounded text-zinc-700 font-medium">
-                      🏷️ {t}
+                      <Tag className="h-4 w-4 shrink-0" aria-hidden />
+                      {t}
                     </span>
                   ))}
                 {!lead.convertedClientId && canWrite && (
@@ -1348,7 +1376,7 @@ export const LeadDetailPage: React.FC = () => {
                     />
                   ) : (
                     <div className="w-24 h-24 rounded-lg bg-zinc-200 border border-zinc-300 flex items-center justify-center text-4xl text-zinc-400 mb-2 select-none">
-                      👤
+                      <User className="h-8 w-8 shrink-0 text-zinc-400" aria-hidden />
                     </div>
                   )}
                   <p className="text-[11px] text-zinc-500 m-0">JPG, PNG, WEBP, GIF — max 5MB</p>
@@ -1444,7 +1472,10 @@ export const LeadDetailPage: React.FC = () => {
                       Improve quality by adding: <strong className="text-zinc-700">{lead.dataQuality.missing.join(', ')}</strong>
                     </p>
                   ) : (
-                    <p className="text-[11px] text-emerald-700 font-medium m-0">✓ All quality checks are complete.</p>
+                    <p className="text-[11px] text-emerald-700 font-medium m-0 inline-flex items-center gap-1">
+                      <Check className="h-4 w-4 shrink-0" aria-hidden />
+                      All quality checks are complete.
+                    </p>
                   )}
                 </div>
               )}
@@ -1797,7 +1828,8 @@ export const LeadDetailPage: React.FC = () => {
                             : 'bg-zinc-50 text-zinc-700 border-zinc-200 hover:border-zinc-400'
                         }`}
                       >
-                        🏷️ {tag}
+                        <Tag className="h-4 w-4 shrink-0" aria-hidden />
+                        {tag}
                       </button>
                     );
                   })}
@@ -1916,6 +1948,9 @@ export const LeadDetailPage: React.FC = () => {
                         address: place.address,
                         city: place.city || prev.city,
                         state: place.state || prev.state,
+                        country: place.country || prev.country,
+                        postalCode: place.postcode || prev.postalCode,
+                        placeId: place.placeId || prev.placeId,
                         latitude: place.lat,
                         longitude: place.lng,
                       }));
@@ -1928,9 +1963,6 @@ export const LeadDetailPage: React.FC = () => {
                     onChange={(lat, lng) => {
                       setDetailsForm((prev) => ({ ...prev, latitude: lat, longitude: lng }));
                     }}
-                    onSettle={(lat, lng) => {
-                      void applyCoordsAndGeocode(lat, lng);
-                    }}
                     height="260px"
                   />
                 </div>
@@ -1941,7 +1973,9 @@ export const LeadDetailPage: React.FC = () => {
                     <textarea
                       rows={2}
                       value={detailsForm.address}
-                      onChange={(e) => setDetailsForm({ ...detailsForm, address: e.target.value })}
+                      onChange={(e) =>
+                        setDetailsForm({ ...detailsForm, address: e.target.value, placeId: '' })
+                      }
                       className="w-full px-3 py-2 text-xs border border-zinc-200 rounded focus:border-zinc-950 focus:outline-none"
                     />
                   </div>
@@ -1962,6 +1996,26 @@ export const LeadDetailPage: React.FC = () => {
                       maxLength={120}
                       value={detailsForm.state}
                       onChange={(e) => setDetailsForm({ ...detailsForm, state: e.target.value })}
+                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded focus:border-zinc-950 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 mb-1">Country</label>
+                    <input
+                      type="text"
+                      maxLength={120}
+                      value={detailsForm.country}
+                      onChange={(e) => setDetailsForm({ ...detailsForm, country: e.target.value })}
+                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded focus:border-zinc-950 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 mb-1">Postal Code</label>
+                    <input
+                      type="text"
+                      maxLength={32}
+                      value={detailsForm.postalCode}
+                      onChange={(e) => setDetailsForm({ ...detailsForm, postalCode: e.target.value })}
                       className="w-full px-3 py-2 text-xs border border-zinc-200 rounded focus:border-zinc-950 focus:outline-none"
                     />
                   </div>
@@ -2371,7 +2425,10 @@ export const LeadDetailPage: React.FC = () => {
                           <td className="py-3 px-4 font-bold text-zinc-950">{ev.title}</td>
                           <td className="py-3 px-4">
                             <span className="px-2 py-0.5 bg-zinc-100 border border-zinc-200 rounded text-[11px] font-medium text-zinc-700">
-                              📌 {ev.eventType}
+                              <span className="inline-flex items-center gap-1">
+                                <MapPin className="h-4 w-4 shrink-0" aria-hidden />
+                                {ev.eventType}
+                              </span>
                             </span>
                           </td>
                           <td className="py-3 px-4 text-zinc-600">
@@ -2811,7 +2868,7 @@ export const LeadDetailPage: React.FC = () => {
                         <td className="py-3 px-4 font-semibold text-zinc-900">
                           {formatFinanceMoney(
                             opp.expectedRevenue ?? opp.value ?? 0,
-                            opp.currency || 'INR'
+                            opp.currency || getRuntimeDefaultCurrency()
                           )}
                         </td>
                         <td className="py-3 px-4 text-zinc-600">

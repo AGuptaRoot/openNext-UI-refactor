@@ -15,6 +15,7 @@ import type { ClientAddress, ClientItem } from '../../types/clients';
 import type { CrmSettings } from '../../types/admin';
 import {
   CreatePageHeader,
+  CURRENCY_OPTIONS,
   FormField,
   FormSection,
   INDIAN_STATES,
@@ -28,6 +29,8 @@ import { useFinanceOptions } from '../../components/finance/useFinanceOptions';
 import { ClientSelect } from '../../components/clients/ClientSelect';
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
 import { calculateFinanceTotals, clampDiscountValue } from '../../utils/financeTotals';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import { getCurrencySymbol, normalizeCurrencyCode } from '../../utils/currency';
 
 const CREATE_STATUSES: SalesOrderStatus[] = ['Approved', 'Draft', 'Processing', 'Cancelled'];
 
@@ -40,6 +43,7 @@ function formatAddress(addr?: ClientAddress | string | null): string {
 export const SalesOrderCreatePage: React.FC = () => {
   const navigate = useNavigate();
   const { clients, projects } = useFinanceOptions();
+  const settingsCurrency = useDefaultCurrency();
 
   const [orderNumber, setOrderNumber] = useState(`SO-${new Date().getFullYear()}-`);
   const [clientId, setClientId] = useState('');
@@ -60,11 +64,20 @@ export const SalesOrderCreatePage: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currency, setCurrency] = useState(settingsCurrency);
+  const [exchangeRate, setExchangeRate] = useState(1);
+  const [currencyLocked, setCurrencyLocked] = useState(false);
 
   const [sources, setSources] = useState<string[]>([...DEFAULT_SALES_ORDER_SOURCES]);
   const [stateRates, setStateRates] = useState<Record<string, number>>({ ...DEFAULT_STATE_SHIPPING_RATES });
   const [freeThreshold, setFreeThreshold] = useState(FREE_SHIPPING_THRESHOLD_DEFAULT);
   const [settingsSnapshot, setSettingsSnapshot] = useState<CrmSettings | null>(null);
+
+  const orderCurrency = useMemo(
+    () => normalizeCurrencyCode(currency, settingsCurrency),
+    [currency, settingsCurrency]
+  );
+  const currencySymbol = getCurrencySymbol(orderCurrency);
 
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [newSourceName, setNewSourceName] = useState('');
@@ -80,6 +93,9 @@ export const SalesOrderCreatePage: React.FC = () => {
         const s = r.data;
         if (!s) return;
         setSettingsSnapshot(s);
+        if (!currencyLocked && s.default_currency) {
+          setCurrency(normalizeCurrencyCode(s.default_currency, settingsCurrency));
+        }
         if (s.company_state) {
           setCompanyState(s.company_state);
           setShippingState((curr) => (curr === 'Maharashtra' ? s.company_state : curr));
@@ -249,7 +265,6 @@ export const SalesOrderCreatePage: React.FC = () => {
         shippingState: shippingState.trim(),
         billingAddress: billingAddress.trim(),
         shippingAddress: shippingAddress.trim(),
-        currency: settingsSnapshot?.default_currency || undefined,
         lineItems: validLines.map((line) => ({
           description: line.description.trim(),
           sku: line.sku?.trim() || undefined,
@@ -260,6 +275,9 @@ export const SalesOrderCreatePage: React.FC = () => {
         discountType,
         discountValue: clampDiscountValue(discountType, discountValue),
         shippingCharge,
+        currency: orderCurrency,
+        currencyCode: orderCurrency,
+        exchangeRate: exchangeRate > 0 ? exchangeRate : 1,
         notes: notes.trim(),
       });
       const id = response.data?._id;
@@ -356,6 +374,36 @@ export const SalesOrderCreatePage: React.FC = () => {
                 </button>
               </div>
             </FormField>
+            <FormField label="Currency" required>
+              <select
+                className={financeFieldClass}
+                value={orderCurrency}
+                onChange={(event) => {
+                  setCurrencyLocked(true);
+                  setCurrency(normalizeCurrencyCode(event.target.value, settingsCurrency));
+                }}
+              >
+                {Array.from(new Set([...CURRENCY_OPTIONS, orderCurrency, settingsCurrency])).map(
+                  (code) => (
+                    <option key={code} value={code}>
+                      {code} ({getCurrencySymbol(code)})
+                    </option>
+                  )
+                )}
+              </select>
+            </FormField>
+            {orderCurrency !== normalizeCurrencyCode(settingsCurrency) && (
+              <FormField label="Exchange rate" required>
+                <input
+                  className={financeFieldClass}
+                  type="number"
+                  min="0.0001"
+                  step="0.0001"
+                  value={exchangeRate}
+                  onChange={(event) => setExchangeRate(Number(event.target.value) || 1)}
+                />
+              </FormField>
+            )}
             <FormField label="Status" required>
               <select
                 className={financeFieldClass}
@@ -477,7 +525,7 @@ export const SalesOrderCreatePage: React.FC = () => {
                 }}
               >
                 <option value="percent">Percent %</option>
-                <option value="amount">Amount ₹</option>
+                <option value="amount">Amount {currencySymbol}</option>
               </select>
             </FormField>
             <FormField label="Discount value">
@@ -650,7 +698,7 @@ export const SalesOrderCreatePage: React.FC = () => {
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-semibold text-zinc-500 uppercase">
-                  Default shipping fee (₹) *
+                  Default shipping fee ({currencySymbol}) *
                 </span>
                 <input
                   className={financeFieldClass}

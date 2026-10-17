@@ -1,11 +1,15 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import CloseIcon from '@mui/icons-material/Close';
+import { CrmRoleIcon } from '../../components/icons/CrmRoleIcon';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CircularProgress from '@mui/material/CircularProgress';
 
 import { useAuth } from '../../context/AuthContext';
 import { TourButton } from '../../ui/tour';
 import { crmApi } from '../../services/api';
+import { triggerFileDownload } from '../../utils/fileDownload';
 import {
   ReportTabId,
   ReportPeriod,
@@ -48,7 +52,6 @@ export const ALL_REPORT_TABS: ReportTabDefinition[] = [
 export const ROLE_PRESETS: Record<string, ReportRolePreset> = {
   'crm-manager': {
     title: 'CRM Manager (Executive)',
-    icon: '👑',
     subtitle: 'Executive reporting across sales pipeline, client projects, billable time, cash flow, and AR ageing.',
     allowedReports: [
       'sales',
@@ -64,31 +67,26 @@ export const ROLE_PRESETS: Record<string, ReportRolePreset> = {
   },
   'sales-manager': {
     title: 'Sales Manager',
-    icon: '📈',
     subtitle: 'Sales pipeline progression, lead conversion funnel, quotation metrics, and recurring contracts.',
     allowedReports: ['sales', 'conversion', 'recurring-invoices'],
   },
   'sales-representative': {
     title: 'Sales Representative',
-    icon: '🎯',
     subtitle: 'My deal pipeline progression, quotation status, and inbound lead conversion performance.',
     allowedReports: ['sales', 'conversion'],
   },
   'project-manager': {
     title: 'Project Lead',
-    icon: '📁',
     subtitle: 'Project delivery milestones, task completion progress, overdue deliverables, and billable hours.',
     allowedReports: ['projects', 'employees', 'time'],
   },
   'crm-employee': {
     title: 'Team Member (Delivery)',
-    icon: '💻',
     subtitle: 'Team deliverables, task execution progress, and personal logged labor hours.',
     allowedReports: ['projects', 'time'],
   },
   'finance-manager': {
     title: 'Finance Lead',
-    icon: '💳',
     subtitle: 'Financial cash flow, accounts receivable ageing, invoice collections, and reconciliations.',
     allowedReports: [
       'income-expense',
@@ -101,7 +99,6 @@ export const ROLE_PRESETS: Record<string, ReportRolePreset> = {
   },
   client: {
     title: 'Client (Customer Portal)',
-    icon: '👤',
     subtitle: 'Client Portal: review active project deliverable milestones, task progress, and account statements.',
     allowedReports: ['projects', 'ageing'],
   },
@@ -224,10 +221,23 @@ export const ReportsPage: React.FC = () => {
   // Loading & Data Cache
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // Cached data state for tabs
   const [tabData, setTabData] = useState<Record<string, unknown>>({});
+
+  useEffect(() => {
+    if (!exportOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [exportOpen]);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ text, type });
@@ -377,12 +387,60 @@ export const ReportsPage: React.FC = () => {
     loadActiveTabData();
   }, [loadActiveTabData]);
 
-  // Handle Export CSV
-  const handleExport = async () => {
+  const activeCacheKey = `${activeTab}_${queryParams.from}_${queryParams.to}_${queryParams.clientId || ''}`;
+  const currentData = tabData[activeCacheKey];
+
+  // Export CSV (server) or JSON (live report payload for active tab)
+  const handleExport = async (format: 'csv' | 'json') => {
+    setExportOpen(false);
     setExporting(true);
     try {
       const currentTabDef = ALL_REPORT_TABS.find((t) => t.id === activeTab);
       const exportKey = currentTabDef?.exportKey || activeTab;
+      if (format === 'json') {
+        let payload: unknown = currentData;
+        if (payload == null) {
+          switch (activeTab) {
+            case 'sales':
+              payload = (await crmApi.getSalesReport(queryParams)).data;
+              break;
+            case 'conversion':
+              payload = (await crmApi.getLeadConversionReport(queryParams)).data;
+              break;
+            case 'projects':
+              payload = (await crmApi.getProjectsReport(queryParams)).data;
+              break;
+            case 'employees':
+              payload = (await crmApi.getEmployeesReport(queryParams)).data;
+              break;
+            case 'time':
+              payload = (await crmApi.getTimeReport(queryParams)).data;
+              break;
+            case 'income-expense':
+              payload = (await crmApi.getIncomeExpenseReport(queryParams)).data;
+              break;
+            case 'ageing':
+              payload = (await crmApi.getInvoiceAgeingReport({ clientId: queryParams.clientId })).data;
+              break;
+            case 'recurring-invoices':
+              payload = (await crmApi.getRecurringInvoicesReport({ clientId: queryParams.clientId })).data;
+              break;
+            case 'payment-reconciliation':
+              payload = (await crmApi.getPaymentReconciliationReport(queryParams)).data;
+              break;
+            default:
+              payload = {};
+          }
+        }
+        const filename = `${exportKey}_report_${new Date().toISOString().slice(0, 10)}.json`;
+        triggerFileDownload({
+          filename,
+          content: JSON.stringify(payload ?? {}, null, 2),
+          format: 'json',
+        });
+        showToast(`Downloaded ${filename}`, 'success');
+        return;
+      }
       const filename = await crmApi.downloadReportCsv(exportKey, queryParams);
       showToast(`Downloaded ${filename}`, 'success');
     } catch (err: unknown) {
@@ -392,9 +450,6 @@ export const ReportsPage: React.FC = () => {
       setExporting(false);
     }
   };
-
-  const activeCacheKey = `${activeTab}_${queryParams.from}_${queryParams.to}_${queryParams.clientId || ''}`;
-  const currentData = tabData[activeCacheKey];
 
   const currentRolePreset = ROLE_PRESETS[activeRole] || ROLE_PRESETS['crm-employee'];
 
@@ -415,7 +470,7 @@ export const ReportsPage: React.FC = () => {
             onClick={() => setToastMessage(null)}
             className="text-inherit hover:opacity-75 p-0 bg-transparent border-none cursor-pointer"
           >
-            ✕
+            <CloseIcon sx={{ fontSize: 16 }} aria-label="Dismiss" />
           </button>
         </div>
       )}
@@ -427,11 +482,11 @@ export const ReportsPage: React.FC = () => {
       >
         <div data-tour="reports-title">
           <div className="flex items-center gap-2.5 flex-wrap">
-            <span className="text-2xl">{currentRolePreset.icon}</span>
+            <CrmRoleIcon role={activeRole} className="h-6 w-6 shrink-0 text-zinc-700" />
             <h1 className="text-2xl font-bold text-zinc-950 tracking-tight m-0">Reports</h1>
 
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 border border-zinc-200 rounded-lg text-xs font-semibold text-zinc-800">
-              <span>{currentRolePreset.icon}</span>
+              <CrmRoleIcon role={activeRole} className="h-4 w-4 shrink-0 text-zinc-700" />
               <span>{currentRolePreset.title || formatRoleName(activeRole)}</span>
               <span className="text-[10px] font-medium px-1.5 py-0.5 bg-zinc-200 text-zinc-700 rounded border border-zinc-300">
                 CRM role
@@ -446,16 +501,38 @@ export const ReportsPage: React.FC = () => {
         {/* Header Actions: Export & Refresh */}
         <div className="flex items-center gap-2 flex-wrap">
           {currentPerms.canExport && (
-            <button
-              type="button"
-              data-tour="reports-export-btn"
-              disabled={exporting}
-              onClick={handleExport}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 text-white text-xs font-semibold border border-zinc-950 cursor-pointer transition-colors disabled:opacity-50"
-            >
-              <FileDownloadOutlinedIcon sx={{ fontSize: 16 }} />
-              <span>{exporting ? 'Exporting…' : 'Export CSV'}</span>
-            </button>
+            <div className="relative" ref={exportRef} data-tour="reports-export-btn">
+              <button
+                type="button"
+                disabled={exporting}
+                onClick={() => setExportOpen((open) => !open)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 text-white text-xs font-semibold border border-zinc-950 cursor-pointer transition-colors disabled:opacity-50"
+              >
+                <FileDownloadOutlinedIcon sx={{ fontSize: 16 }} />
+                <span>{exporting ? 'Exporting…' : 'Export'}</span>
+                <ExpandMoreIcon sx={{ fontSize: 16 }} />
+              </button>
+              {exportOpen && (
+                <div className="absolute right-0 z-20 mt-1 w-36 overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-lg">
+                  <button
+                    type="button"
+                    data-tour="reports-export-csv"
+                    onClick={() => void handleExport('csv')}
+                    className="w-full cursor-pointer border-0 bg-transparent px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-50"
+                  >
+                    Export CSV
+                  </button>
+                  <button
+                    type="button"
+                    data-tour="reports-export-json"
+                    onClick={() => void handleExport('json')}
+                    className="w-full cursor-pointer border-0 border-t border-zinc-100 bg-transparent px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-50"
+                  >
+                    Export JSON
+                  </button>
+                </div>
+              )}
+            </div>
           )}
 
           <button
@@ -589,7 +666,7 @@ export const ReportsPage: React.FC = () => {
       {/* 4. Active Tab Content / Loading State */}
       {loading && !currentData ? (
         <div className="bg-white border border-zinc-300 rounded-xl p-16 text-center flex flex-col items-center justify-center gap-3">
-          <CircularProgress size={28} sx={{ color: '#09090b' }} />
+          <CircularProgress size={28} sx={{ color: 'var(--foreground)' }} />
           <span className="text-xs font-medium text-zinc-500">Loading report intelligence…</span>
         </div>
       ) : (

@@ -8,6 +8,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import FlagOutlinedIcon from '@mui/icons-material/FlagOutlined';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import PlaylistAddCheckIcon from '@mui/icons-material/PlaylistAddCheck';
+import { Flag, ScrollText, Timer, X } from 'lucide-react';
 
 import { crmApi } from '../../services/api';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
@@ -337,7 +338,7 @@ export const ProjectTemplateModal: React.FC<ProjectTemplateModalProps> = ({
               </button>
             )}
             <div className="w-8 h-8 rounded-lg bg-zinc-950 text-white flex items-center justify-center font-bold text-sm">
-              📑
+              <ScrollText className="h-[18px] w-[18px] shrink-0" aria-hidden />
             </div>
             <div>
               <h2 className="text-sm font-bold text-zinc-950 m-0">
@@ -402,7 +403,7 @@ export const ProjectTemplateModal: React.FC<ProjectTemplateModalProps> = ({
                 </div>
               ) : filteredTemplates.length === 0 ? (
                 <div className="py-12 text-center">
-                  <div className="text-3xl mb-2">📑</div>
+                  <ScrollText className="h-10 w-10 shrink-0 text-zinc-400 mb-2 mx-auto" aria-hidden />
                   <h3 className="text-sm font-bold text-zinc-900 m-0 mb-1">
                     No project templates configured
                   </h3>
@@ -461,7 +462,10 @@ export const ProjectTemplateModal: React.FC<ProjectTemplateModalProps> = ({
                             {(tpl.tasks || []).length} Tasks
                           </span>
                           <span>·</span>
-                          <span>⏱️ {tpl.hoursEstimate || 0} Estimated Hours</span>
+                          <span className="inline-flex items-center gap-1">
+                            <Timer className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
+                            {tpl.hoursEstimate || 0} Estimated Hours
+                          </span>
                         </div>
                       </div>
 
@@ -665,7 +669,7 @@ export const ProjectTemplateModal: React.FC<ProjectTemplateModalProps> = ({
                             className="text-red-500 hover:text-red-700 font-bold border-0 bg-transparent cursor-pointer p-1"
                             title="Remove milestone"
                           >
-                            ✕
+                            <X className="h-4 w-4 shrink-0" aria-hidden />
                           </button>
                         </div>
                       </div>
@@ -730,7 +734,10 @@ export const ProjectTemplateModal: React.FC<ProjectTemplateModalProps> = ({
                             <option value="">-- No Milestone --</option>
                             {milestones.map((m, mIdx) => (
                               <option key={mIdx} value={mIdx}>
-                                🚩 {m.name || `Milestone ${mIdx + 1}`}
+                                <span className="inline-flex items-center gap-1">
+                                  <Flag className="h-4 w-4 shrink-0" aria-hidden />
+                                  {m.name || `Milestone ${mIdx + 1}`}
+                                </span>
                               </option>
                             ))}
                           </select>
@@ -784,7 +791,7 @@ export const ProjectTemplateModal: React.FC<ProjectTemplateModalProps> = ({
                             className="text-red-500 hover:text-red-700 font-bold border-0 bg-transparent cursor-pointer p-1 ml-1"
                             title="Remove task"
                           >
-                            ✕
+                            <X className="h-4 w-4 shrink-0" aria-hidden />
                           </button>
                         </div>
                       </div>

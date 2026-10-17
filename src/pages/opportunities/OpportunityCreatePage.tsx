@@ -20,12 +20,29 @@ import { ContactSelect } from '../../components/contacts/ContactSelect';
 import { PersonContact, formatContactName } from '../../types/contacts';
 import { useOpportunityStages } from '../../hooks/useOpportunityStages';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
-import { formatCrmMoney, getCurrencySymbol } from '../../utils/currency';
+import { formatCrmMoney, getCurrencySymbol, normalizeCurrencyCode } from '../../utils/currency';
+import { CURRENCY_OPTIONS } from '../../components/finance/FinanceFormElements';
 import {
   canAssignOpportunityOwner,
   formatAssignableUserLabel,
   isAssignableSalesRepresentative,
 } from '../../utils/permissions';
+import { OpportunityStageIcon } from '../../components/icons/OpportunityStageIcon';
+import {
+  BarChart3,
+  Briefcase,
+  Building2,
+  Calendar,
+  CheckCircle2,
+  Lightbulb,
+  Lock,
+  Package,
+  Save,
+  Target,
+  User,
+  XCircle,
+  Zap,
+} from 'lucide-react';
 
 const DEFAULT_COMPANY_STATE = 'Maharashtra';
 
@@ -74,8 +91,14 @@ export const OpportunityCreatePage: React.FC = () => {
 
   // Form State
   const [title, setTitle] = useState('');
-  const [clientId, setClientId] = useState(searchParams.get('clientId') || '');
-  const [leadId, setLeadId] = useState(searchParams.get('leadId') || '');
+  const initialLeadId = searchParams.get('leadId') || '';
+  const initialClientId = searchParams.get('clientId') || '';
+  /** Create Opportunity For — Lead or Client (never both selectors). */
+  const [linkType, setLinkType] = useState<'lead' | 'client'>(
+    initialLeadId ? 'lead' : 'client'
+  );
+  const [clientId, setClientId] = useState(initialLeadId ? '' : initialClientId);
+  const [leadId, setLeadId] = useState(initialLeadId);
   const [salesOwner, setSalesOwner] = useState('');
   const [selectedContact, setSelectedContact] = useState<PersonContact | null>(null);
   const [contactPerson, setContactPerson] = useState('');
@@ -85,6 +108,9 @@ export const OpportunityCreatePage: React.FC = () => {
   const [probability, setProbability] = useState(defaultStage?.probability ?? 10);
   const [expectedCloseDate, setExpectedCloseDate] = useState(defaultCloseDate());
   const [lostReason, setLostReason] = useState('');
+  /** Per-record currency (defaults from Settings; not rewritten when global default changes). */
+  const [currency, setCurrency] = useState(settingsCurrency);
+  const [exchangeRate, setExchangeRate] = useState(1);
   const [dealValue, setDealValue] = useState<number>(0);
   const [lines, setLines] = useState<LineDraft[]>([newLine()]);
   const [shippingState, setShippingState] = useState(DEFAULT_COMPANY_STATE);
@@ -106,7 +132,7 @@ export const OpportunityCreatePage: React.FC = () => {
   };
 
   const fieldClass =
-    'h-9 px-3 text-xs border border-zinc-300 rounded-lg outline-none focus:border-zinc-950 w-full box-border bg-white text-zinc-900 placeholder:text-zinc-400';
+    'h-9 px-3 text-xs border border-border rounded-lg outline-none focus:border-foreground w-full box-border bg-card text-foreground placeholder:text-muted-foreground';
 
   useEffect(() => {
     let cancelled = false;
@@ -202,18 +228,35 @@ export const OpportunityCreatePage: React.FC = () => {
     return byName?.id || '';
   };
 
-  // Prefill from ?leadId= once leads list is loaded
-  useEffect(() => {
-    if (leadPrefillDone || !leadId || !leads.length) return;
-    const lead = leads.find((l) => l._id === leadId);
-    if (!lead) return;
-    setLeadPrefillDone(true);
-    if (!title.trim()) {
+  const applyLeadBudget = (lead: LeadItem) => {
+    const qual = lead.qualification;
+    const candidates: Array<number | string | null | undefined> = [
+      qual?.budget,
+      qual?.expectedRevenue,
+      lead.value,
+      (lead as LeadItem & { budget?: number | string }).budget,
+      (lead as LeadItem & { expectedRevenue?: number | null }).expectedRevenue,
+    ];
+    for (const raw of candidates) {
+      const n = Number(raw);
+      if (Number.isFinite(n) && n > 0) {
+        setDealValue(n);
+        return;
+      }
+    }
+  };
+
+  const syncFromLead = (lead: LeadItem, opts?: { forceTitle?: boolean }) => {
+    if (opts?.forceTitle || !title.trim()) {
       setTitle(`Deal with ${lead.company || lead.contactName || lead.name || 'Lead'}`);
     }
     if (canAssignOwner && !salesOwner.trim()) {
       const ownerId = resolveLeadOwnerId(lead);
       if (ownerId) setSalesOwner(ownerId);
+    }
+    applyLeadBudget(lead);
+    if (lead.currency) {
+      setCurrency(normalizeCurrencyCode(lead.currency, settingsCurrency));
     }
     if (lead.contactId) {
       void crmApi
@@ -235,18 +278,22 @@ export const OpportunityCreatePage: React.FC = () => {
       if (!contactEmail.trim() && lead.email) setContactEmail(lead.email);
       if (!contactMobile.trim() && lead.phone) setContactMobile(lead.phone);
     }
+  };
+
+  // Prefill from ?leadId= once leads list is loaded
+  useEffect(() => {
+    if (leadPrefillDone || !leadId || !leads.length) return;
+    const lead = leads.find((l) => l._id === leadId);
+    if (!lead) return;
+    setLeadPrefillDone(true);
+    setLinkType('lead');
+    setClientId('');
+    syncFromLead(lead);
   }, [
     leadId,
     leads,
     leadPrefillDone,
-    title,
-    contactPerson,
-    contactEmail,
-    contactMobile,
-    salesOwner,
-    canAssignOwner,
-    salesRepOptions,
-  ]);
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedClient = clients.find((c) => c._id === clientId);
   const selectedLead = leads.find((l) => l._id === leadId);
@@ -260,7 +307,7 @@ export const OpportunityCreatePage: React.FC = () => {
     return [...INDIAN_STATES].sort((a, b) => a.localeCompare(b));
   }, []);
 
-  // Financial Totals: subtotal = dealValue
+  // Estimated Deal Value only (no weighted forecast on create form)
   const totals = useMemo(() => {
     const validLines: OpportunityProductLine[] = [];
 
@@ -279,22 +326,22 @@ export const OpportunityCreatePage: React.FC = () => {
     }
 
     const value = Math.max(0, Number(dealValue) || 0);
-    const weightedForecast = Math.round(value * (probability / 100) * 100) / 100;
 
     return {
       subtotal: value,
       totalTax: 0,
       shipping: 0,
       grandTotal: value,
-      weightedForecast,
       validLines,
+      estimatedDealValue: value,
       expectedRevenue: value,
     };
-  }, [lines, dealValue, probability]);
+  }, [lines, dealValue]);
 
   // Client Selection Handler
   const handleClientChange = (newClientId: string) => {
     setClientId(newClientId);
+    setLeadId('');
     setSelectedContact(null);
     const client = clients.find((c) => c._id === newClientId);
     if (client) {
@@ -334,40 +381,24 @@ export const OpportunityCreatePage: React.FC = () => {
     showToast('Contact details auto-filled from client profile!', 'success');
   };
 
-  // Inbound Lead Link Handler: auto-fills deal details
+  const handleLinkTypeChange = (next: 'lead' | 'client') => {
+    setLinkType(next);
+    setSelectedContact(null);
+    if (next === 'lead') {
+      setClientId('');
+    } else {
+      setLeadId('');
+    }
+  };
+
+  // Inbound Lead Link Handler: auto-fills deal details + Estimated Deal Value from Lead budget
   const handleLeadChange = (newLeadId: string) => {
     setLeadId(newLeadId);
+    setClientId('');
     setSelectedContact(null);
     const lead = leads.find((l) => l._id === newLeadId);
     if (lead) {
-      if (!title.trim()) {
-        setTitle(`Deal with ${lead.company || lead.contactName || lead.name || 'Lead'}`);
-      }
-      if (canAssignOwner && !salesOwner.trim()) {
-        const ownerId = resolveLeadOwnerId(lead);
-        if (ownerId) setSalesOwner(ownerId);
-      }
-      // Prefer Contacts-module person linked to the lead when available
-      if (lead.contactId) {
-        void crmApi
-          .getContact(lead.contactId)
-          .then((res) => {
-            if (res.data) applyPersonContact(res.data);
-          })
-          .catch(() => {
-            if (!contactPerson.trim() && (lead.contactName || lead.name)) {
-              setContactPerson(lead.contactName || lead.name || '');
-            }
-            if (!contactEmail.trim() && lead.email) setContactEmail(lead.email);
-            if (!contactMobile.trim() && lead.phone) setContactMobile(lead.phone);
-          });
-      } else {
-        if (!contactPerson.trim() && (lead.contactName || lead.name)) {
-          setContactPerson(lead.contactName || lead.name || '');
-        }
-        if (!contactEmail.trim() && lead.email) setContactEmail(lead.email);
-        if (!contactMobile.trim() && lead.phone) setContactMobile(lead.phone);
-      }
+      syncFromLead(lead);
       showToast(`Linked lead: ${lead.company || lead.name}`, 'info');
     }
   };
@@ -424,8 +455,12 @@ export const OpportunityCreatePage: React.FC = () => {
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
-    if (!clientId && !leadId) {
-      showToast('Select a Client Account or an Inbound Lead', 'error');
+    if (linkType === 'lead' && !leadId) {
+      showToast('Select a Lead to create this opportunity', 'error');
+      return;
+    }
+    if (linkType === 'client' && !clientId) {
+      showToast('Select a Client to create this opportunity', 'error');
       return;
     }
     if (!title.trim()) {
@@ -445,9 +480,12 @@ export const OpportunityCreatePage: React.FC = () => {
     try {
       await crmApi.createOpportunity({
         title: title.trim(),
-        clientId: clientId || undefined,
-        clientName: selectedClient?.name || selectedClient?.companyName,
-        leadId: leadId || undefined,
+        clientId: linkType === 'client' ? clientId || undefined : undefined,
+        clientName:
+          linkType === 'client'
+            ? selectedClient?.name || selectedClient?.companyName
+            : undefined,
+        leadId: linkType === 'lead' ? leadId || undefined : undefined,
         salesOwner: canAssignOwner ? salesOwner.trim() || undefined : undefined,
         stage,
         probability,
@@ -457,9 +495,12 @@ export const OpportunityCreatePage: React.FC = () => {
         contactMobile: contactMobile.trim() || undefined,
         contactId: selectedContact?._id || undefined,
         products: totals.validLines,
-        expectedRevenue: totals.expectedRevenue,
-        value: totals.expectedRevenue,
-        currency: settingsCurrency,
+        estimatedDealValue: totals.estimatedDealValue,
+        expectedRevenue: totals.estimatedDealValue,
+        value: totals.estimatedDealValue,
+        currency: normalizeCurrencyCode(currency, settingsCurrency),
+        currencyCode: normalizeCurrencyCode(currency, settingsCurrency),
+        exchangeRate: exchangeRate > 0 ? exchangeRate : 1,
         shippingState,
         shippingCharge: totals.shipping,
         lostReason: isOpportunityLostStage(stage) ? lostReason.trim() : undefined,
@@ -476,7 +517,7 @@ export const OpportunityCreatePage: React.FC = () => {
     return (
       <div className="flex w-full flex-col gap-4 py-12">
         <div className="bg-white border border-zinc-300 rounded-xl p-6 text-center">
-          <span className="text-3xl block mb-2">🔒</span>
+          <Lock className="h-10 w-10 shrink-0 text-zinc-400 mx-auto mb-2" aria-hidden />
           <h1 className="text-lg font-bold text-zinc-950 m-0">Permission Denied</h1>
           <p className="text-sm text-zinc-500 mt-2 mb-4">
             You do not have permission to create opportunities. Contact your CRM administrator.
@@ -538,7 +579,8 @@ export const OpportunityCreatePage: React.FC = () => {
             </p>
             <div className="flex items-center gap-2.5 mt-0.5 flex-wrap">
               <h1 className="text-2xl font-bold text-zinc-950 m-0 tracking-tight flex items-center gap-2">
-                <span>💼</span> New Opportunity Deal
+                <Briefcase className="h-[18px] w-[18px] shrink-0 text-zinc-800" aria-hidden />
+                New Opportunity Deal
               </h1>
               <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
                 {stage} ({probability}%)
@@ -561,7 +603,14 @@ export const OpportunityCreatePage: React.FC = () => {
             disabled={saving}
             className="px-4 py-1.5 rounded-lg border border-zinc-950 bg-zinc-950 text-white hover:bg-zinc-800 text-xs font-bold cursor-pointer disabled:opacity-50 transition-colors shadow-none"
           >
-            {saving ? 'Saving Deal…' : '💾 Save Opportunity Deal'}
+            {saving ? (
+              'Saving Deal…'
+            ) : (
+              <span className="inline-flex items-center gap-1.5">
+                <Save className="h-4 w-4 shrink-0" aria-hidden />
+                Save Opportunity Deal
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -580,16 +629,93 @@ export const OpportunityCreatePage: React.FC = () => {
             className="bg-white border border-zinc-300 rounded-xl p-5 shadow-none flex flex-col gap-4"
           >
             <div className="flex items-center gap-2.5 border-b border-zinc-100 pb-3">
-              <span className="text-xl">🏢</span>
+              <Building2 className="h-[18px] w-[18px] shrink-0 text-zinc-700" aria-hidden />
               <div>
                 <h2 className="text-sm font-bold text-zinc-950 m-0">
                   1. Deal Overview &amp; Account Link
                 </h2>
                 <p className="text-xs text-zinc-500 m-0 mt-0.5">
-                  Link either a client account or an inbound lead (at least one), then assign sales ownership.
+                  Choose Lead or Client first, then complete the deal details.
                 </p>
               </div>
             </div>
+
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-4">
+                <p className="m-0 mb-3 text-xs font-semibold text-zinc-700">
+                  Create Opportunity For *
+                </p>
+                <div className="flex flex-wrap gap-4" data-tour="opportunities-create-link-type">
+                  <label className="inline-flex items-center gap-2 text-sm font-semibold text-zinc-800 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="opp-link-type"
+                      checked={linkType === 'lead'}
+                      onChange={() => handleLinkTypeChange('lead')}
+                    />
+                    Lead
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-sm font-semibold text-zinc-800 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="opp-link-type"
+                      checked={linkType === 'client'}
+                      onChange={() => handleLinkTypeChange('client')}
+                    />
+                    Client
+                  </label>
+                </div>
+              </div>
+
+              {linkType === 'lead' ? (
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                    Lead *
+                  </label>
+                  <select
+                    className={fieldClass}
+                    value={leadId}
+                    onChange={(e) => handleLeadChange(e.target.value)}
+                    data-tour="opportunities-create-lead"
+                    required
+                  >
+                    <option value="">Select lead…</option>
+                    {leads.map((l) => {
+                      const comp = l.company || 'Individual Prospect';
+                      const contact = l.contactName || l.name ? ` (${l.contactName || l.name})` : '';
+                      return (
+                        <option key={l._id} value={l._id}>
+                          {comp}
+                          {contact}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {!leadId ? (
+                    <p className="m-0 mt-1 text-[11px] text-amber-700">
+                      Select a lead to create this opportunity. Lead budget fills Estimated Deal
+                      Value (editable).
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                    Client *
+                  </label>
+                  <ClientSelect
+                    clients={clients}
+                    value={clientId}
+                    placeholder="Select client account…"
+                    onChange={(nextId) => handleClientChange(nextId)}
+                    required
+                  />
+                  {!clientId ? (
+                    <p className="m-0 mt-1 text-[11px] text-amber-700">
+                      Select a client to create this opportunity.
+                    </p>
+                  ) : null}
+                </div>
+              )}
 
             {/* Quick Deal Templates Chips */}
             <div>
@@ -604,7 +730,10 @@ export const OpportunityCreatePage: React.FC = () => {
                     onClick={() => applyTemplate(idx)}
                     className="px-3 py-1 rounded-full border border-zinc-200 bg-zinc-50 hover:bg-zinc-100 text-xs font-medium text-zinc-700 cursor-pointer transition-colors"
                   >
-                    ⚡ {tpl.label}
+                    <span className="inline-flex items-center gap-1">
+                      <Zap className="h-4 w-4 shrink-0" aria-hidden />
+                      {tpl.label}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -629,7 +758,7 @@ export const OpportunityCreatePage: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                    Estimated Deal Value ({getCurrencySymbol(settingsCurrency)})
+                    Estimated Deal Value ({getCurrencySymbol(currency)})
                   </label>
                   <input
                     type="number"
@@ -640,52 +769,52 @@ export const OpportunityCreatePage: React.FC = () => {
                     value={dealValue || ''}
                     onChange={(e) => setDealValue(Math.max(0, Number(e.target.value) || 0))}
                   />
+                  <p className="m-0 mt-1 text-[11px] text-zinc-500">
+                    Uses the Opportunity currency ({normalizeCurrencyCode(currency, settingsCurrency)}
+                    ). Prefills from Lead budget when creating for a Lead.
+                  </p>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                    Client Account
-                    <small className="font-normal text-zinc-500"> (or lead below)</small>
-                  </label>
-                  <ClientSelect
-                    clients={clients}
-                    value={clientId}
-                    placeholder="Select client account…"
-                    onChange={(nextId) => handleClientChange(nextId)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                    Inbound Lead
-                    <small className="font-normal text-zinc-500"> (or client above)</small>
-                  </label>
+                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Currency *</label>
                   <select
                     className={fieldClass}
-                    value={leadId}
-                    onChange={(e) => handleLeadChange(e.target.value)}
-                    data-tour="opportunities-create-lead"
+                    value={normalizeCurrencyCode(currency, settingsCurrency)}
+                    onChange={(e) => setCurrency(normalizeCurrencyCode(e.target.value, settingsCurrency))}
                   >
-                    <option value="">-- None / Direct client deal --</option>
-                    {leads.map((l) => {
-                      const comp = l.company || 'Individual Prospect';
-                      const contact = l.contactName || l.name ? ` (${l.contactName || l.name})` : '';
-                      return (
-                        <option key={l._id} value={l._id}>
-                          {comp}
-                          {contact}
-                        </option>
-                      );
-                    })}
+                    {Array.from(new Set([...CURRENCY_OPTIONS, currency, settingsCurrency])).map((code) => (
+                      <option key={code} value={code}>
+                        {code} ({getCurrencySymbol(code)})
+                      </option>
+                    ))}
                   </select>
-                  {!hasAccountLink ? (
-                    <p className="m-0 mt-1 text-[11px] text-amber-700">
-                      Choose a client or a lead to create this opportunity.
-                    </p>
-                  ) : null}
+                  <p className="mt-1 mb-0 text-[11px] text-zinc-500">
+                    Defaults from Settings ({settingsCurrency}). Saved on this deal only — global changes
+                    do not rewrite existing records.
+                  </p>
                 </div>
+                {normalizeCurrencyCode(currency, settingsCurrency) !==
+                  normalizeCurrencyCode(settingsCurrency) && (
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                      Exchange rate *
+                    </label>
+                    <input
+                      type="number"
+                      min={0.0001}
+                      step={0.0001}
+                      className={fieldClass}
+                      value={exchangeRate}
+                      onChange={(e) => setExchangeRate(Number(e.target.value) || 1)}
+                    />
+                    <p className="mt-1 mb-0 text-[11px] text-amber-800">
+                      Currency differs from global default ({settingsCurrency}). Set exchange rate for
+                      base-currency reporting.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -787,7 +916,10 @@ export const OpportunityCreatePage: React.FC = () => {
                   onClick={autoFillContactDetails}
                   className="px-2.5 py-1 text-xs font-semibold rounded-md border border-zinc-200 bg-white hover:bg-zinc-100 text-zinc-800 cursor-pointer transition-colors whitespace-nowrap self-start sm:self-auto"
                 >
-                  ⚡ Auto-fill Contact Info
+                  <span className="inline-flex items-center gap-1">
+                    <Zap className="h-4 w-4 shrink-0" aria-hidden />
+                    Auto-fill Contact Info
+                  </span>
                 </button>
               )}
             </div>
@@ -796,15 +928,15 @@ export const OpportunityCreatePage: React.FC = () => {
           {/* SECTION 2: Pipeline Stage & Win Probability */}
           <div
             data-tour="opportunities-section-stage"
-            className="bg-white border border-zinc-300 rounded-xl p-5 shadow-none flex flex-col gap-4"
+            className="bg-card border border-border rounded-xl p-5 shadow-none flex flex-col gap-4"
           >
-            <div className="flex items-center gap-2.5 border-b border-zinc-100 pb-3">
-              <span className="text-xl">🎯</span>
+            <div className="flex items-center gap-2.5 border-b border-border pb-3">
+              <Target className="h-[18px] w-[18px] shrink-0 text-foreground" aria-hidden />
               <div>
-                <h2 className="text-sm font-bold text-zinc-950 m-0">
+                <h2 className="text-sm font-bold text-foreground m-0">
                   2. Pipeline Stage &amp; Win Probability
                 </h2>
-                <p className="text-xs text-zinc-500 m-0 mt-0.5">
+                <p className="text-xs text-muted-foreground m-0 mt-0.5">
                   Select the sales progress milestone to forecast weighted pipeline revenue.
                 </p>
               </div>
@@ -820,41 +952,46 @@ export const OpportunityCreatePage: React.FC = () => {
                     onClick={() => selectStage(s.key)}
                     className={`border-2 rounded-xl p-3 cursor-pointer flex flex-col gap-1 transition-all ${
                       isSelected
-                        ? 'border-blue-500 bg-blue-50/50'
-                        : 'border-zinc-200 bg-white hover:border-zinc-300'
+                        ? 'border-[var(--info-border)] bg-[var(--info-bg)]'
+                        : 'border-border bg-card hover:border-muted-foreground'
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-xs" style={{ color: s.color }}>
-                        {s.icon} {s.label}
+                      <span
+                        className="font-bold text-xs inline-flex items-center gap-1"
+                        style={{ color: s.color || 'var(--foreground)' }}
+                      >
+                        <OpportunityStageIcon iconKey={s.icon} className="h-4 w-4 shrink-0" />
+                        {s.label}
                       </span>
                       <input
                         type="radio"
                         name="stageRadio"
                         checked={isSelected}
                         onChange={() => selectStage(s.key)}
-                        className="accent-blue-600"
+                        className="accent-[var(--info-foreground)]"
                       />
                     </div>
                     <div className="flex items-center justify-between mt-0.5">
-                      <span className="text-[11px] font-bold text-zinc-600">
+                      <span className="text-[11px] font-bold text-foreground">
                         {s.probability}% Prob
                       </span>
                     </div>
-                    <small className="text-[10px] text-zinc-400 leading-snug">{s.desc}</small>
+                    <small className="text-[10px] text-muted-foreground leading-snug">{s.desc}</small>
                   </label>
                 );
               })}
             </div>
 
             {/* Slider & Close Date */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-zinc-50 border border-zinc-200 rounded-lg p-3.5 items-center">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-muted border border-border rounded-lg p-3.5 items-center">
               <div>
-                <div className="flex justify-between items-center text-xs font-semibold text-zinc-700 mb-1.5">
+                <div className="flex justify-between items-center text-xs font-semibold text-foreground mb-1.5">
                   <span>
-                    Win Probability: <strong className="text-blue-600 font-bold">{probability}%</strong>
+                    Win Probability:{' '}
+                    <strong className="font-bold text-[var(--info-foreground)]">{probability}%</strong>
                   </span>
-                  <small className="text-[10px] text-zinc-400 font-normal">
+                  <small className="text-[10px] text-muted-foreground font-normal">
                     Adjust slider if custom probability
                   </small>
                 </div>
@@ -865,13 +1002,16 @@ export const OpportunityCreatePage: React.FC = () => {
                   step={5}
                   value={probability}
                   onChange={(e) => setProbability(Number(e.target.value))}
-                  className="w-full accent-blue-600 cursor-pointer"
+                  className="w-full cursor-pointer accent-[var(--info-foreground)]"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                  Expected Close Date 📅
+                <label className="block text-xs font-semibold text-foreground mb-1">
+                  <span className="inline-flex items-center gap-1">
+                    Expected Close Date
+                    <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                  </span>
                 </label>
                 <input
                   type="date"
@@ -906,7 +1046,7 @@ export const OpportunityCreatePage: React.FC = () => {
             className="bg-white border border-zinc-300 rounded-xl p-5 shadow-none flex flex-col gap-4"
           >
             <div className="flex items-center gap-2.5 border-b border-zinc-100 pb-3">
-              <span className="text-xl">👤</span>
+              <User className="h-[18px] w-[18px] shrink-0 text-zinc-700" aria-hidden />
               <div>
                 <h2 className="text-sm font-bold text-zinc-950 m-0">
                   3. Primary Contact Person
@@ -991,7 +1131,7 @@ export const OpportunityCreatePage: React.FC = () => {
           >
             <div className="flex items-center justify-between border-b border-zinc-100 pb-3 flex-wrap gap-2">
               <div className="flex items-center gap-2.5">
-                <span className="text-xl">📦</span>
+                <Package className="h-[18px] w-[18px] shrink-0 text-zinc-700" aria-hidden />
                 <div>
                   <h2 className="text-sm font-bold text-zinc-950 m-0">
                     4. Proposed Products &amp; Line Items
@@ -1092,7 +1232,14 @@ export const OpportunityCreatePage: React.FC = () => {
               disabled={saving}
               className="px-5 py-2 rounded-lg border border-zinc-950 bg-zinc-950 text-white hover:bg-zinc-800 text-xs font-bold cursor-pointer disabled:opacity-50 transition-colors shadow-none"
             >
-              {saving ? 'Saving Deal…' : '💾 Save Opportunity Deal'}
+              {saving ? (
+                'Saving Deal…'
+              ) : (
+                <span className="inline-flex items-center gap-1.5">
+                  <Save className="h-4 w-4 shrink-0" aria-hidden />
+                  Save Opportunity Deal
+                </span>
+              )}
             </button>
           </div>
         </form>
@@ -1105,7 +1252,10 @@ export const OpportunityCreatePage: React.FC = () => {
           {/* Summary Card */}
           <div className="bg-white border border-zinc-300 rounded-xl p-5 shadow-none flex flex-col gap-3.5">
             <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
-              <h3 className="text-sm font-bold text-zinc-950 m-0">📊 Pipeline Summary</h3>
+              <h3 className="text-sm font-bold text-zinc-950 m-0 inline-flex items-center gap-1.5">
+                <BarChart3 className="h-[18px] w-[18px] shrink-0" aria-hidden />
+                Pipeline Summary
+              </h3>
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
                 {stage} ({probability}%)
               </span>
@@ -1152,21 +1302,15 @@ export const OpportunityCreatePage: React.FC = () => {
                 <strong className="text-zinc-900 font-bold">{totals.validLines.length} item(s)</strong>
               </div>
 
-              {/* Total & Weighted Highlight */}
               <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 flex flex-col gap-2 mt-1">
                 <div className="flex justify-between items-center">
-                  <span className="text-[11px] font-bold uppercase text-sky-900">Total Deal Value</span>
-                  <strong className="text-base font-extrabold text-sky-950">
-                    {formatCrmMoney(totals.grandTotal, settingsCurrency, { maximumFractionDigits: 0 })}
-                  </strong>
-                </div>
-
-                <div className="flex justify-between items-center border-t border-dashed border-sky-200 pt-2 text-[11px]">
-                  <span className="font-semibold text-sky-800">
-                    Weighted Forecast ({probability}%):
+                  <span className="text-[11px] font-bold uppercase text-sky-900">
+                    Estimated Deal Value
                   </span>
-                  <strong className="font-bold text-sky-950">
-                    {formatCrmMoney(totals.weightedForecast, settingsCurrency, { maximumFractionDigits: 0 })}
+                  <strong className="text-base font-extrabold text-sky-950">
+                    {formatCrmMoney(totals.estimatedDealValue, currency, {
+                      maximumFractionDigits: 0,
+                    })}
                   </strong>
                 </div>
               </div>
@@ -1180,19 +1324,33 @@ export const OpportunityCreatePage: React.FC = () => {
                 </span>
                 <ul className="list-none p-0 m-0 flex flex-col gap-1.5 text-xs">
                   <li className={`flex items-center gap-1.5 ${hasAccountLink ? 'text-emerald-700' : 'text-red-600'}`}>
-                    <span>{hasAccountLink ? '✅' : '❌'}</span>
+                    {hasAccountLink ? (
+                      <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+                    ) : (
+                      <XCircle className="h-4 w-4 shrink-0" aria-hidden />
+                    )}
                     <span>
                       {hasAccountLink
                         ? `${clientId ? 'Client' : 'Lead'}: ${accountLinkLabel || 'Selected'}`
-                        : 'Client or lead selected'}
+                        : linkType === 'lead'
+                          ? 'Lead selected'
+                          : 'Client selected'}
                     </span>
                   </li>
                   <li className={`flex items-center gap-1.5 ${title.trim() ? 'text-emerald-700' : 'text-red-600'}`}>
-                    <span>{title.trim() ? '✅' : '❌'}</span>
+                    {title.trim() ? (
+                      <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+                    ) : (
+                      <XCircle className="h-4 w-4 shrink-0" aria-hidden />
+                    )}
                     <span>{title.trim() ? `Title: ${title.slice(0, 24)}${title.length > 24 ? '…' : ''}` : 'Opportunity title entered'}</span>
                   </li>
                   <li className={`flex items-center gap-1.5 ${totals.validLines.length > 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-                    <span>{totals.validLines.length > 0 ? '✅' : '❌'}</span>
+                    {totals.validLines.length > 0 ? (
+                      <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+                    ) : (
+                      <XCircle className="h-4 w-4 shrink-0" aria-hidden />
+                    )}
                     <span>
                       {totals.validLines.length > 0
                         ? `${totals.validLines.length} proposed item(s)`
@@ -1207,7 +1365,8 @@ export const OpportunityCreatePage: React.FC = () => {
           {/* Pipeline Workflow Card */}
           <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-xs text-emerald-900 leading-relaxed">
             <strong className="flex items-center gap-1.5 text-xs font-bold text-emerald-950 mb-1">
-              💡 Pipeline Workflow
+              <Lightbulb className="h-4 w-4 shrink-0" aria-hidden />
+              Pipeline Workflow
             </strong>
             <p className="m-0 text-emerald-800">
               Once saved, you can track stage transitions, request product samples for the client, and seamlessly convert winning deals into formal GST Quotations &amp; Sales Orders with 1-click.
