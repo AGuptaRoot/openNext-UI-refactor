@@ -1,4 +1,4 @@
-﻿export * from './dashboard';
+export * from './dashboard';
 export * from './leads';
 export * from './contacts';
 export * from './reports';
@@ -13,6 +13,7 @@ export * from './invoices';
 export * from './payments';
 export * from './sales-orders';
 export * from './samples';
+export * from './add-ons';
 export * from './tickets';
 export * from './customer-success';
 export * from './marketing';

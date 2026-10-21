@@ -58,14 +58,19 @@ export function extractRouteIdFromHref(href: string, pluginId = PLUGIN_ID): stri
 
 /**
  * Hide specific CRM module links in the parent OpenNext CMS sidebar (e.g. Dashboard for clients).
+ * Also matches by visible label text when `labels` is provided (extension pages like Travel).
  */
 export function hideParentSidebarRoutes(
   routeIds: string[],
-  pluginId = PLUGIN_ID
+  pluginId = PLUGIN_ID,
+  labels: string[] = []
 ): void {
   if (typeof window === 'undefined' || window.parent === window) return;
   const hideSet = new Set(routeIds.map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
-  if (!hideSet.size) return;
+  const labelSet = new Set(
+    labels.map((l) => String(l || '').trim().toLowerCase()).filter(Boolean)
+  );
+  if (!hideSet.size && !labelSet.size) return;
 
   try {
     const parentDoc = window.parent.document;
@@ -76,13 +81,22 @@ export function hideParentSidebarRoutes(
     anchors.forEach((anchor) => {
       const href = anchor.getAttribute('href') || '';
       const anchorRoute = (extractRouteIdFromHref(href, pluginId) || DASHBOARD_ROUTE_ID).toLowerCase();
+      const label = String(anchor.textContent || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
       const row =
         anchor.closest<HTMLElement>('button') ||
         anchor.closest<HTMLElement>('[class*="justify-start"]') ||
         anchor.closest<HTMLElement>('li') ||
         anchor;
 
-      if (hideSet.has(anchorRoute)) {
+      const hideByRoute = hideSet.has(anchorRoute);
+      const hideByLabel =
+        labelSet.has(label) ||
+        [...labelSet].some((want) => label === want || label.startsWith(want + ' '));
+
+      if (hideByRoute || hideByLabel) {
         row.style.display = 'none';
         row.setAttribute('data-crm-nav-hidden', '1');
         row.setAttribute('aria-hidden', 'true');

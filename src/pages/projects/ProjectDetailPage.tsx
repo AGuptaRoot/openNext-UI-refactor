@@ -392,12 +392,12 @@ export const ProjectDetailPage: React.FC = () => {
 
   const refreshMembers = useCallback(async () => {
     if (!id) return;
-    const [m, u] = await Promise.all([
-      crmApi.getProjectMembers(id),
-      crmApi.getAssignableUsers().catch(() => ({ data: [] as AssignableUser[] })),
-    ]);
-    setMembers(m.data || []);
-    setUsers(u.data || []);
+          const [m, u] = await Promise.all([
+            crmApi.getProjectMembers(id),
+            crmApi.getAssignableUsers().catch(() => ({ data: [] as AssignableUser[] })),
+          ]);
+            setMembers(m.data || []);
+            setUsers(u.data || []);
   }, [id]);
 
   const refreshDocuments = useCallback(async () => {
@@ -1266,7 +1266,7 @@ export const ProjectDetailPage: React.FC = () => {
                   {tag}
                 </span>
               ))}
-            </div>
+        </div>
           )}
           {(isLiveProjectStatus(project.status) || project.liveUrl) && (
             <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-violet-200 bg-violet-50/60 px-3 py-2">
@@ -1298,13 +1298,13 @@ export const ProjectDetailPage: React.FC = () => {
                 </a>
               ) : null}
               {canWrite && !isReadOnly ? (
-                <button
-                  type="button"
+              <button
+                type="button"
                   onClick={() => setLiveLinkModalOpen(true)}
                   className="inline-flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2 py-1 text-[11px] font-semibold text-violet-900 cursor-pointer hover:bg-violet-50"
-                >
+              >
                   {project.liveUrl ? 'Edit' : 'Add'} link
-                </button>
+              </button>
               ) : null}
             </div>
           )}
@@ -1326,18 +1326,18 @@ export const ProjectDetailPage: React.FC = () => {
 
         <div className="flex flex-wrap gap-2 shrink-0">
           {canWrite && !project.isDropped && isLiveProjectStatus(project.status) && (
-            <button
-              type="button"
+              <button
+                type="button"
               onClick={() => setLiveLinkModalOpen(true)}
               className={btnSecondary}
-            >
+              >
               <LinkIcon sx={{ fontSize: 15 }} />
               {project.liveUrl ? 'Edit live link' : 'Add live link'}
-            </button>
+              </button>
           )}
           {canWrite && !project.isDropped && (
-            <button
-              type="button"
+                <button
+                  type="button"
               data-tour="projects-edit-btn"
               onClick={() => navigate(`/projects/${id}/edit`)}
               className={btnSecondary}
@@ -1364,14 +1364,14 @@ export const ProjectDetailPage: React.FC = () => {
           {project.isDropped ? (
             canWrite && (
               <button type="button" onClick={handleReactivate} className={btnSecondary}>
-                Reactivate
-              </button>
+                  Reactivate
+                </button>
             )
           ) : (
             canDelete && (
               <button type="button" data-tour="projects-drop-btn" onClick={() => setDropOpen(true)} className={btnDanger}>
-                Drop
-              </button>
+                  Drop
+                </button>
             )
           )}
         </div>
@@ -1453,12 +1453,12 @@ export const ProjectDetailPage: React.FC = () => {
               .filter((c) => !c.hide)
               .map((c) => (
                 <div key={c.label} className="bg-white border border-zinc-300 rounded-xl p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                    {c.label}
-                  </div>
-                  <div className="text-lg font-bold text-zinc-950 mt-1">{c.value}</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                  {c.label}
                 </div>
-              ))}
+                <div className="text-lg font-bold text-zinc-950 mt-1">{c.value}</div>
+              </div>
+            ))}
           </div>
 
           <div data-tour="projects-overview-progress" className="bg-white border border-zinc-300 rounded-xl p-5">
@@ -1619,11 +1619,11 @@ export const ProjectDetailPage: React.FC = () => {
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                   {Object.entries(project.customFields).map(([k, v]) => (
-                    <p key={k} className="m-0 text-zinc-600">
-                      <span className="font-semibold text-zinc-950">{k}:</span> {String(v ?? '—')}
-                    </p>
-                  ))}
-                </div>
+                  <p key={k} className="m-0 text-zinc-600">
+                    <span className="font-semibold text-zinc-950">{k}:</span> {String(v ?? '—')}
+                  </p>
+                ))}
+            </div>
               </>
             )}
           </div>
@@ -1647,12 +1647,12 @@ export const ProjectDetailPage: React.FC = () => {
                     .filter((u) => !members.some((m) => m.userId === userOptionId(u)))
                     .map((u) => {
                       const uid = userOptionId(u);
-                      return (
-                        <option key={uid} value={uid}>
+                    return (
+                      <option key={uid} value={uid}>
                           {userOptionLabel(u)}
-                        </option>
-                      );
-                    })}
+                      </option>
+                    );
+                  })}
                 </select>
               </label>
               <label className="flex flex-col gap-1 w-32">
@@ -1678,19 +1678,19 @@ export const ProjectDetailPage: React.FC = () => {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left min-w-[560px]">
-                <thead>
-                  <tr className="border-b border-zinc-200">
-                    {['Name', 'Role', 'Rate', 'Actions'].map((h) => (
-                      <th
-                        key={h}
-                        className="px-2 py-2 text-[11px] font-semibold uppercase text-zinc-500"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
+              <thead>
+                <tr className="border-b border-zinc-200">
+                  {['Name', 'Role', 'Rate', 'Actions'].map((h) => (
+                    <th
+                      key={h}
+                      className="px-2 py-2 text-[11px] font-semibold uppercase text-zinc-500"
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
                   {members.map((m) => {
                     const displayName = getMemberDisplayName(m);
                     const email = getMemberEmail(m);
@@ -1720,8 +1720,8 @@ export const ProjectDetailPage: React.FC = () => {
                               )}
                             </div>
                           </div>
-                        </td>
-                        <td className="px-2 py-2.5 text-xs text-zinc-600">
+                    </td>
+                    <td className="px-2 py-2.5 text-xs text-zinc-600">
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-zinc-100 text-zinc-700">
                             {role}
                           </span>
@@ -1765,24 +1765,24 @@ export const ProjectDetailPage: React.FC = () => {
                               {formatMoney(m.hourlyRate, currency)}/h
                             </button>
                           )}
-                        </td>
-                        <td className="px-2 py-2.5">
+                    </td>
+                    <td className="px-2 py-2.5">
                           {canWrite && !isReadOnly && (
-                            <button
-                              type="button"
-                              onClick={() => removeMember(m.userId)}
+                        <button
+                          type="button"
+                          onClick={() => removeMember(m.userId)}
                               className="p-1.5 rounded-lg border border-red-200 text-red-600 bg-white cursor-pointer hover:bg-red-50 transition-colors"
                               title="Remove member"
-                            >
-                              <DeleteOutlineIcon sx={{ fontSize: 15 }} />
-                            </button>
-                          )}
-                        </td>
-                      </tr>
+                        >
+                          <DeleteOutlineIcon sx={{ fontSize: 15 }} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
                     );
                   })}
-                </tbody>
-              </table>
+              </tbody>
+            </table>
             </div>
           )}
         </div>
@@ -1798,12 +1798,12 @@ export const ProjectDetailPage: React.FC = () => {
                   <span className="text-[11px] font-semibold text-zinc-500 uppercase">
                     Title *
                   </span>
-                  <input
-                    className={fieldClass}
+                <input
+                  className={fieldClass}
                     value={msForm.title}
                     onChange={(e) => setMsForm({ ...msForm, title: e.target.value })}
-                  />
-                </label>
+                />
+              </label>
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-semibold text-zinc-500 uppercase">Cost</span>
                   <input
@@ -1832,13 +1832,13 @@ export const ProjectDetailPage: React.FC = () => {
                   <span className="text-[11px] font-semibold text-zinc-500 uppercase">
                     Start date
                   </span>
-                  <input
-                    type="date"
-                    className={fieldClass}
+                <input
+                  type="date"
+                  className={fieldClass}
                     value={msForm.startDate}
                     onChange={(e) => setMsForm({ ...msForm, startDate: e.target.value })}
-                  />
-                </label>
+                />
+              </label>
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-semibold text-zinc-500 uppercase">
                     End / due date
@@ -1870,15 +1870,15 @@ export const ProjectDetailPage: React.FC = () => {
                 />
               </label>
               <div>
-                <button
-                  type="button"
-                  onClick={addMilestone}
+              <button
+                type="button"
+                onClick={addMilestone}
                   disabled={saving}
                   className={btnPrimary}
-                >
+              >
                   <AddIcon sx={{ fontSize: 15 }} />
-                  Add Milestone
-                </button>
+                Add Milestone
+              </button>
               </div>
             </div>
           )}
@@ -1907,7 +1907,7 @@ export const ProjectDetailPage: React.FC = () => {
                     </span>
                     {ms.cost != null ? <span>· {formatMoney(ms.cost, currency)}</span> : null}
                     {ms.addCostToBudget ? <span>· +budget</span> : null}
-                  </div>
+                </div>
                   {(ms.summary || ms.description) && (
                     <p className="text-xs text-zinc-600 m-0 mt-1 line-clamp-2">
                       {ms.summary || ms.description}
@@ -1958,18 +1958,18 @@ export const ProjectDetailPage: React.FC = () => {
         <div className="bg-white border border-zinc-300 rounded-xl p-5 flex flex-col gap-4">
           <div className="flex flex-wrap gap-2 items-end justify-between">
             <div className="flex flex-wrap gap-2 flex-1">
-              <select
+            <select
                 className={`${fieldClass} max-w-[160px]`}
-                value={taskStatusFilter}
-                onChange={(e) => setTaskStatusFilter(e.target.value)}
-              >
-                <option value="">All statuses</option>
-                {DEFAULT_TASK_STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+              value={taskStatusFilter}
+              onChange={(e) => setTaskStatusFilter(e.target.value)}
+            >
+              <option value="">All statuses</option>
+              {DEFAULT_TASK_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
               <select
                 className={`${fieldClass} max-w-[180px]`}
                 value={taskMilestoneFilter}
@@ -2014,23 +2014,23 @@ export const ProjectDetailPage: React.FC = () => {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left min-w-[800px]">
-                <thead>
-                  <tr className="border-b border-zinc-200 bg-zinc-50">
+              <thead>
+                <tr className="border-b border-zinc-200 bg-zinc-50">
                     {['Title', 'Status', 'Priority', 'Feedback', 'Due', 'Assignee', ''].map(
                       (h) => (
-                        <th
-                          key={h || 'a'}
-                          className="px-3 py-2 text-[11px] font-semibold uppercase text-zinc-500"
-                        >
-                          {h}
-                        </th>
+                    <th
+                      key={h || 'a'}
+                      className="px-3 py-2 text-[11px] font-semibold uppercase text-zinc-500"
+                    >
+                      {h}
+                    </th>
                       )
                     )}
-                  </tr>
-                </thead>
-                <tbody>
+                </tr>
+              </thead>
+              <tbody>
                   {filteredTasks.map((t) => (
-                    <tr key={t._id} className="border-b border-zinc-100">
+                  <tr key={t._id} className="border-b border-zinc-100">
                       <td className="px-3 py-2.5 text-sm font-semibold text-zinc-950">
                         <Link
                           to={`/tasks/${t._id}`}
@@ -2039,49 +2039,49 @@ export const ProjectDetailPage: React.FC = () => {
                           {t.title}
                         </Link>
                       </td>
-                      <td className="px-3 py-2.5">
+                    <td className="px-3 py-2.5">
                         {canTaskStatus && !isReadOnly ? (
-                          <select
+                        <select
                             className="h-8 px-2 text-xs border border-zinc-300 rounded-lg bg-white"
-                            value={t.status}
-                            onChange={(e) => changeTaskStatus(t, e.target.value)}
-                          >
-                            {DEFAULT_TASK_STATUSES.map((s) => (
-                              <option key={s} value={s}>
-                                {s}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className="text-xs text-zinc-700">{t.status}</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span
-                          className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${priorityBadgeClass(t.priority)}`}
+                          value={t.status}
+                          onChange={(e) => changeTaskStatus(t, e.target.value)}
                         >
-                          {t.priority || '—'}
-                        </span>
-                      </td>
+                          {DEFAULT_TASK_STATUSES.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                          <span className="text-xs text-zinc-700">{t.status}</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span
+                        className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${priorityBadgeClass(t.priority)}`}
+                      >
+                        {t.priority || '—'}
+                      </span>
+                    </td>
                       <td className="px-3 py-2.5 text-[11px] text-zinc-600">
                         {t.clientFeedbackStatus || '—'}
                       </td>
-                      <td className="px-3 py-2.5 text-xs text-zinc-600">
+                    <td className="px-3 py-2.5 text-xs text-zinc-600">
                         {toDateInput(t.dueDate) || '—'}
                       </td>
                       <td className="px-3 py-2.5 text-xs text-zinc-600">
                         {displayUserLabel(t.assigneeName, t.assigneeId)}
-                      </td>
-                      <td className="px-3 py-2.5">
+                    </td>
+                    <td className="px-3 py-2.5">
                         {canTaskWrite && (
-                          <div className="flex gap-1">
-                            <button
-                              type="button"
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
                               onClick={() => openEditTaskModal(t)}
                               className="p-1.5 rounded-lg border border-zinc-300 bg-white cursor-pointer"
                               title="Edit"
-                            >
-                              <EditOutlinedIcon sx={{ fontSize: 14 }} />
+                          >
+                            <EditOutlinedIcon sx={{ fontSize: 14 }} />
                             </button>
                             {!isReadOnly && (
                               <>
@@ -2092,24 +2092,24 @@ export const ProjectDetailPage: React.FC = () => {
                                   title="Archive"
                                 >
                                   <ArchiveOutlinedIcon sx={{ fontSize: 14 }} />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => deleteTask(t._id)}
-                                  className="p-1.5 rounded-lg border border-red-200 text-red-600 bg-white cursor-pointer"
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteTask(t._id)}
+                            className="p-1.5 rounded-lg border border-red-200 text-red-600 bg-white cursor-pointer"
                                   title="Delete"
-                                >
-                                  <DeleteOutlineIcon sx={{ fontSize: 14 }} />
-                                </button>
+                          >
+                            <DeleteOutlineIcon sx={{ fontSize: 14 }} />
+                          </button>
                               </>
                             )}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
             </div>
           )}
         </div>
@@ -2206,8 +2206,8 @@ export const ProjectDetailPage: React.FC = () => {
                   <p className="text-xs text-zinc-500 m-0 mt-0.5">
                     Monitor billable team effort, task progress, and logged hours for this project.
                   </p>
-                </div>
-              </div>
+            </div>
+                      </div>
 
               {canTimeWrite && !isReadOnly && (
                 <button
@@ -2219,7 +2219,7 @@ export const ProjectDetailPage: React.FC = () => {
                   <span>Log Time</span>
                 </button>
               )}
-            </div>
+                      </div>
 
             {/* KPI Summary Cards */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -2229,11 +2229,11 @@ export const ProjectDetailPage: React.FC = () => {
                 </span>
                 <div className="text-xl font-bold text-zinc-950 font-mono">
                   {timeLogStats.totalHours} <span className="text-xs font-normal text-zinc-500">hrs</span>
-                </div>
+                    </div>
                 <span className="text-[11px] text-zinc-500">
                   {timeLogStats.count} {timeLogStats.count === 1 ? 'entry' : 'entries'} recorded
                 </span>
-              </div>
+            </div>
 
               <div className="bg-emerald-50/50 border border-emerald-200/60 rounded-xl p-3.5 flex flex-col gap-1">
                 <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider">
@@ -2241,7 +2241,7 @@ export const ProjectDetailPage: React.FC = () => {
                 </span>
                 <div className="text-xl font-bold text-emerald-950 font-mono">
                   {timeLogStats.billableHours} <span className="text-xs font-normal text-emerald-600">hrs</span>
-                </div>
+        </div>
                 <span className="text-[11px] text-emerald-600 font-medium">
                   {timeLogStats.billablePercent}% billable ratio
                 </span>
@@ -2280,7 +2280,7 @@ export const ProjectDetailPage: React.FC = () => {
                     sx={{ fontSize: 16 }}
                     className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none"
                   />
-                  <input
+                <input
                     type="text"
                     value={tlSearch}
                     onChange={(e) => setTlSearch(e.target.value)}
@@ -2313,8 +2313,8 @@ export const ProjectDetailPage: React.FC = () => {
                 </select>
 
                 {(tlSearch || tlFilterMember !== 'all' || tlFilterBillable !== 'all') && (
-                  <button
-                    type="button"
+              <button
+                type="button"
                     onClick={() => {
                       setTlSearch('');
                       setTlFilterMember('all');
@@ -2323,9 +2323,9 @@ export const ProjectDetailPage: React.FC = () => {
                     className="text-xs text-zinc-500 hover:text-zinc-800 underline border-none bg-transparent cursor-pointer"
                   >
                     Reset filters
-                  </button>
+              </button>
                 )}
-              </div>
+            </div>
 
               <div className="text-xs text-zinc-500 font-medium">
                 Showing <strong>{filteredTimeLogs.length}</strong> of <strong>{timeLogs.length}</strong> logs
@@ -2408,17 +2408,17 @@ export const ProjectDetailPage: React.FC = () => {
                                   {dateInfo.sub}
                                 </span>
                               )}
-                            </div>
+                  </div>
                           </td>
                           <td className="px-3.5 py-3">
                             <div className="flex items-center gap-2">
                               <div className="w-7 h-7 rounded-full bg-zinc-900 text-white text-[10px] font-bold flex items-center justify-center shrink-0 select-none shadow-xs">
                                 {initials}
-                              </div>
+                  </div>
                               <span className="text-xs font-semibold text-zinc-950 truncate max-w-[140px]">
                                 {memberName}
                               </span>
-                            </div>
+                </div>
                           </td>
                           <td className="px-3.5 py-3">
                             {tl.taskId ? (
@@ -2443,7 +2443,7 @@ export const ProjectDetailPage: React.FC = () => {
                                 <span className="text-[10px] text-zinc-400 font-normal">
                                   {formatMoney(hourly, currency)}/h
                                 </span>
-                              </div>
+              </div>
                             ) : (
                               <span className="text-zinc-400">—</span>
                             )}
@@ -2534,19 +2534,19 @@ export const ProjectDetailPage: React.FC = () => {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left min-w-[720px]">
-                <thead>
-                  <tr className="border-b border-zinc-200">
+              <thead>
+                <tr className="border-b border-zinc-200">
                     {['Title', 'Amount', 'Category', 'Status', 'Date', 'Actions'].map((h) => (
-                      <th
-                        key={h}
-                        className="px-2 py-2 text-[11px] font-semibold uppercase text-zinc-500"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
+                    <th
+                      key={h}
+                      className="px-2 py-2 text-[11px] font-semibold uppercase text-zinc-500"
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
                   {expenses.map((e) => {
                     const status = e.status || 'Draft';
                     return (
@@ -2561,9 +2561,9 @@ export const ProjectDetailPage: React.FC = () => {
                             <div className="text-[11px] text-zinc-500 font-normal">{e.note}</div>
                           ) : null}
                         </td>
-                        <td className="px-2 py-2.5 text-xs">
+                    <td className="px-2 py-2.5 text-xs">
                           {formatMoney(e.amount, e.currency || currency)}
-                        </td>
+                    </td>
                         <td className="px-2 py-2.5 text-xs text-zinc-600">
                           {e.category || '—'}
                         </td>
@@ -2618,11 +2618,11 @@ export const ProjectDetailPage: React.FC = () => {
                             )}
                           </div>
                         </td>
-                      </tr>
+                  </tr>
                     );
                   })}
-                </tbody>
-              </table>
+              </tbody>
+            </table>
             </div>
           )}
         </div>
@@ -2692,7 +2692,7 @@ export const ProjectDetailPage: React.FC = () => {
                   </p>
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <label className="flex flex-col gap-1">
+              <label className="flex flex-col gap-1">
                     <span className="text-[11px] font-semibold text-zinc-500 uppercase">Category</span>
                     <select
                       className={fieldClass}
@@ -2802,35 +2802,35 @@ export const ProjectDetailPage: React.FC = () => {
                     <span className="text-[11px] font-semibold text-zinc-500 uppercase">
                       Link name *
                     </span>
-                    <input
-                      className={fieldClass}
-                      value={docName}
-                      onChange={(e) => setDocName(e.target.value)}
+                <input
+                  className={fieldClass}
+                  value={docName}
+                  onChange={(e) => setDocName(e.target.value)}
                       placeholder="e.g. Design brief"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 sm:col-span-2">
+                />
+              </label>
+              <label className="flex flex-col gap-1 sm:col-span-2">
                     <span className="text-[11px] font-semibold text-zinc-500 uppercase">URL *</span>
-                    <input
-                      className={fieldClass}
-                      value={docUrl}
-                      onChange={(e) => setDocUrl(e.target.value)}
-                      placeholder="https://"
-                    />
-                  </label>
+                <input
+                  className={fieldClass}
+                  value={docUrl}
+                  onChange={(e) => setDocUrl(e.target.value)}
+                  placeholder="https://"
+                />
+              </label>
                   <label className="flex flex-col gap-1">
                     <span className="text-[11px] font-semibold text-zinc-500 uppercase">Category</span>
-                    <select
-                      className={fieldClass}
-                      value={docCat}
-                      onChange={(e) => setDocCat(e.target.value)}
-                    >
-                      {DEFAULT_DOC_CATEGORIES.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
+                <select
+                  className={fieldClass}
+                  value={docCat}
+                  onChange={(e) => setDocCat(e.target.value)}
+                >
+                  {DEFAULT_DOC_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
                   </label>
                   <label className="flex flex-col gap-1">
                     <span className="text-[11px] font-semibold text-zinc-500 uppercase">
@@ -2884,8 +2884,8 @@ export const ProjectDetailPage: React.FC = () => {
                     {documents
                       .filter((d) => !isProjectDocumentExternalLink(d))
                       .map((d) => (
-                        <div
-                          key={d._id}
+              <div
+                key={d._id}
                           className="px-4 py-3 flex flex-wrap items-center justify-between gap-2"
                         >
                           <div className="min-w-0">
@@ -2971,19 +2971,19 @@ export const ProjectDetailPage: React.FC = () => {
                             <div className="text-sm font-semibold text-zinc-950">
                               {d.name || 'Link'}
                             </div>
-                            <div className="text-[11px] text-zinc-500">
+                  <div className="text-[11px] text-zinc-500">
                               {d.category || 'General'}
                               {d.createdAt
                                 ? ` · ${new Date(d.createdAt).toLocaleDateString()}`
                                 : ''}
-                            </div>
+                  </div>
                             {d.url ? (
                               <div
                                 className="mt-0.5 text-[11px] text-zinc-500 truncate max-w-xl"
                                 title={d.url}
                               >
                                 {d.url}
-                              </div>
+                </div>
                             ) : null}
                           </div>
                           <div className="flex items-center gap-1.5">
@@ -3003,16 +3003,16 @@ export const ProjectDetailPage: React.FC = () => {
                               </a>
                             ) : null}
                             {canWrite && !isReadOnly && (
-                              <button
-                                type="button"
+                  <button
+                    type="button"
                                 onClick={() => void deleteDocument(d._id)}
-                                className="p-1.5 rounded-lg border border-red-200 text-red-600 bg-white cursor-pointer"
+                    className="p-1.5 rounded-lg border border-red-200 text-red-600 bg-white cursor-pointer"
                                 aria-label={`Delete ${d.name || 'link'}`}
-                              >
-                                <DeleteOutlineIcon sx={{ fontSize: 15 }} />
-                              </button>
-                            )}
-                          </div>
+                  >
+                    <DeleteOutlineIcon sx={{ fontSize: 15 }} />
+                  </button>
+                )}
+              </div>
                         </div>
                       ))}
                   </div>
@@ -3120,21 +3120,21 @@ export const ProjectDetailPage: React.FC = () => {
             </label>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-semibold text-zinc-500 uppercase">Status</span>
-                <select
-                  className={fieldClass}
-                  value={taskModal.status || 'To Do'}
-                  onChange={(e) => setTaskModal({ ...taskModal, status: e.target.value })}
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold text-zinc-500 uppercase">Status</span>
+              <select
+                className={fieldClass}
+                value={taskModal.status || 'To Do'}
+                onChange={(e) => setTaskModal({ ...taskModal, status: e.target.value })}
                   disabled={!canTaskWrite || isReadOnly}
-                >
-                  {DEFAULT_TASK_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              >
+                {DEFAULT_TASK_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-semibold text-zinc-500 uppercase">Priority</span>
                 <select
@@ -3227,16 +3227,16 @@ export const ProjectDetailPage: React.FC = () => {
                   disabled={!canTaskWrite || isReadOnly}
                 />
               </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-semibold text-zinc-500 uppercase">Due date</span>
-                <input
-                  type="date"
-                  className={fieldClass}
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold text-zinc-500 uppercase">Due date</span>
+              <input
+                type="date"
+                className={fieldClass}
                   value={toDateInput(taskModal.dueDate)}
-                  onChange={(e) => setTaskModal({ ...taskModal, dueDate: e.target.value })}
+                onChange={(e) => setTaskModal({ ...taskModal, dueDate: e.target.value })}
                   disabled={!canTaskWrite || isReadOnly}
-                />
-              </label>
+              />
+            </label>
             </div>
 
             <label className="flex items-center gap-2 cursor-pointer select-none">

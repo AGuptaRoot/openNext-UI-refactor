@@ -36,6 +36,20 @@ import { LeadLocationMap } from '../../components/leads/LeadLocationMap';
 import { AddLeadItemModal } from '../../components/leads/AddLeadItemModal';
 import { CommercialRequirementTab } from '../../components/leads/CommercialRequirementTab';
 import {
+  ExtensionFieldsSlot,
+  buildExtensionPayloadFromFields,
+  hydrateExtensionFieldValuesFromLead,
+  validateExtensionFields,
+} from '../../components/extensions/ExtensionFieldsSlot';
+import { ExtensionTab } from '../../components/extensions/ExtensionTab';
+import { useExtensions } from '../../hooks/useExtensions';
+import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import {
+  asExtensionBag,
+  isExtensionLeadGetMessage,
+  isExtensionLeadSyncMessage,
+} from '../../utils/extensionLeadEmbed';
+import {
   AttachmentPreviewModal,
   downloadAttachment,
   resolvePreviewKind,
@@ -165,9 +179,10 @@ type DetailTab =
   | 'proposal'
   | 'deal'
   | 'samples'
-  | 'audit';
+  | 'audit'
+  | string;
 
-const LEAD_TABS: DetailTab[] = [
+const LEAD_TABS: string[] = [
   'details',
   'qualification',
   'activities',
@@ -180,17 +195,25 @@ const LEAD_TABS: DetailTab[] = [
 ];
 
 function resolveLeadTab(raw: string | null): DetailTab {
-  const value = String(raw || '').trim().toLowerCase();
-  if (value === 'followups') return 'follow-ups';
-  if (value === 'deals' || value === 'opportunity' || value === 'opportunities') return 'deal';
-  if (value === 'sample' || value === 'sample-requests') return 'samples';
-  if ((LEAD_TABS as string[]).includes(value)) return value as DetailTab;
+  const value = String(raw || '').trim();
+  const lower = value.toLowerCase();
+  if (lower === 'followups') return 'follow-ups';
+  if (lower === 'deals' || lower === 'opportunity' || lower === 'opportunities') return 'deal';
+  if (lower === 'sample' || lower === 'sample-requests') return 'samples';
+  if (value.startsWith('ext__')) return value;
+  if (LEAD_TABS.includes(lower)) return lower as DetailTab;
   return 'details';
 }
 
 export const LeadDetailPage: React.FC = () => {
   const { confirm } = useDialog();
   const { hasPermission, isClient, activeRole, user } = useAuth();
+  const {
+    leadTabsForRequestType,
+    createFieldsForRequestType,
+    extensionPageUrl,
+  } = useExtensions();
+  const settingsCurrency = useDefaultCurrency();
   const canWrite = hasPermission('crm.leads.write') && !isClient;
   const canAssignOthers = canAssignToOtherUsers(user, { isClient, activeRole });
   const currentUserId = String(user?.userId || '').trim();
@@ -319,6 +342,10 @@ export const LeadDetailPage: React.FC = () => {
     tags: [] as string[],
   });
   const [savingDetails, setSavingDetails] = useState(false);
+  /** Same native field bags as Create Lead (no Details iframe). */
+  const [extensionFieldValues, setExtensionFieldValues] = useState<
+    Record<string, Record<string, unknown>>
+  >({});
   const [photoUploading, setPhotoUploading] = useState(false);
   const [docUploading] = useState(false);
   const [storageStatusHint, setStorageStatusHint] = useState('');
@@ -551,6 +578,135 @@ export const LeadDetailPage: React.FC = () => {
   const showDealTab = showProposalTab;
   const showSamplesTab = showProposalTab;
 
+  const selectedRequestType = useMemo(() => {
+    const byId = requestTypes.find((rt) => rt._id === detailsForm.requestTypeId);
+    if (byId) return byId;
+    return (
+      requestTypes.find(
+        (rt) =>
+          String(rt.name || '')
+            .trim()
+            .toLowerCase() === String(detailsForm.requestType || '').trim().toLowerCase()
+      ) || null
+    );
+  }, [requestTypes, detailsForm.requestTypeId, detailsForm.requestType]);
+
+  const extensionLeadTabs = useMemo(
+    () =>
+      leadTabsForRequestType({
+        key: selectedRequestType?.key,
+        name: selectedRequestType?.name || detailsForm.requestType || lead?.requestType,
+      }),
+    [
+      leadTabsForRequestType,
+      selectedRequestType,
+      detailsForm.requestType,
+      lead?.requestType,
+    ]
+  );
+
+  const detailRequestType = useMemo(
+    () => ({
+      key: selectedRequestType?.key,
+      name: selectedRequestType?.name || detailsForm.requestType || lead?.requestType,
+    }),
+    [selectedRequestType, detailsForm.requestType, lead?.requestType]
+  );
+
+  const extensionFieldGroups = useMemo(
+    () => createFieldsForRequestType(detailRequestType),
+    [createFieldsForRequestType, detailRequestType]
+  );
+
+  const extensionDetailMeta = useMemo(
+    () => ({
+      preparedBy: displayUserLabel(lead?.createdByUsername, lead?.createdBy, ''),
+      primaryTraveller: String(lead?.name || detailsForm.name || '').trim(),
+      defaultCurrency: settingsCurrency,
+    }),
+    [
+      lead?.createdByUsername,
+      lead?.createdBy,
+      lead?.name,
+      detailsForm.name,
+      settingsCurrency,
+    ]
+  );
+
+  // Hydrate native Travel (etc.) fields from Lead.extension — same slot as Create Lead.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!extensionFieldGroups.length) {
+        if (!cancelled) setExtensionFieldValues({});
+        return;
+      }
+      const ext =
+        lead?.extension && typeof lead.extension === 'object' ? lead.extension : {};
+      const hydrated = await hydrateExtensionFieldValuesFromLead(
+        extensionFieldGroups,
+        ext,
+        detailRequestType
+      );
+      if (!cancelled) setExtensionFieldValues(hydrated);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [lead?._id, lead?.extension, extensionFieldGroups, detailRequestType]);
+
+  const leadExtensionRef = useRef(lead?.extension);
+  leadExtensionRef.current = lead?.extension;
+
+  const handleExtensionEmbedSynced = useCallback(
+    async (ext: Record<string, unknown>) => {
+      if (!id || !ext || !Object.keys(ext).length) return;
+      const prev =
+        leadExtensionRef.current && typeof leadExtensionRef.current === 'object'
+          ? leadExtensionRef.current
+          : {};
+      // Skip empty shells so sync cannot wipe filled Lead.extension (server also deep-merges).
+      const hasReal =
+        Object.values(ext).some((bag) => {
+          if (!bag || typeof bag !== 'object') return bag != null && bag !== '';
+          try {
+            return JSON.stringify(bag).replace(/[{}\[\]",:\s]|null|0|""/g, '').length > 0;
+          } catch {
+            return true;
+          }
+        });
+      if (!hasReal) return;
+      try {
+        if (JSON.stringify({ ...prev, ...ext }) === JSON.stringify(prev)) return;
+      } catch {
+        /* continue */
+      }
+      try {
+        if (canWrite) {
+          const res = await crmApi.updateLead(id, { extension: ext });
+          setLead(res.data);
+        } else {
+          setLead((prevLead) =>
+            prevLead
+              ? {
+                  ...prevLead,
+                  extension: {
+                    ...(prevLead.extension && typeof prevLead.extension === 'object'
+                      ? prevLead.extension
+                      : {}),
+                    ...ext,
+                  },
+                }
+              : prevLead
+          );
+        }
+      } catch (err) {
+        console.warn('Failed to persist extension embed sync:', err);
+      }
+    },
+    [id, canWrite]
+  );
+
   // Leave Proposal / Deal / Samples tabs if stage moves before Qualified
   useEffect(() => {
     if (
@@ -561,6 +717,59 @@ export const LeadDetailPage: React.FC = () => {
       setActiveTab('details');
     }
   }, [activeTab, lead, showProposalTab]);
+
+  useEffect(() => {
+    if (
+      String(activeTab).startsWith('ext__') &&
+      !extensionLeadTabs.some((tab) => tab.tabId === activeTab)
+    ) {
+      setActiveTab('details');
+    }
+  }, [activeTab, extensionLeadTabs]);
+
+  /**
+   * Host bridge for extension detail TABS (separate tab iframes only).
+   * Details tab uses native ExtensionFieldsSlot (same as Create Lead) — no iframe.
+   */
+  useEffect(() => {
+    if (!id) return;
+
+    const onMessage = async (event: MessageEvent) => {
+      const data = event.data;
+      if (isExtensionLeadGetMessage(data)) {
+        const wantId = String(data.leadId || '').trim();
+        if (wantId && wantId !== id) return;
+        const bag =
+          leadExtensionRef.current && typeof leadExtensionRef.current === 'object'
+            ? leadExtensionRef.current
+            : {};
+        const target = event.source as Window | null;
+        target?.postMessage(
+          {
+            source: 'crm-host',
+            type: 'extension-lead-get-result',
+            requestId: data.requestId,
+            leadId: id,
+            extension: bag,
+          },
+          '*'
+        );
+        return;
+      }
+
+      if (!isExtensionLeadSyncMessage(data)) return;
+      // Details tab is native (no iframe) — ignore sync messages while on Details.
+      if (activeTab === 'details') return;
+      const wantId = String(data.leadId || '').trim();
+      if (wantId && wantId !== id) return;
+      const ext = asExtensionBag(data.extension);
+      if (!ext || !Object.keys(ext).length) return;
+      await handleExtensionEmbedSynced(ext);
+    };
+
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [id, activeTab, handleExtensionEmbedSynced]);
 
   // Quick Stage Change
   const handleQuickStageChange = async (newStage: string) => {
@@ -672,8 +881,29 @@ export const LeadDetailPage: React.FC = () => {
       }
     }
 
+    if (extensionFieldGroups.length) {
+      const extErr = await validateExtensionFields(
+        extensionFieldGroups,
+        extensionFieldValues,
+        detailRequestType
+      );
+      if (extErr) {
+        showToast(extErr, 'error');
+        return;
+      }
+    }
+
     setSavingDetails(true);
     try {
+      const extensionPayload = extensionFieldGroups.length
+        ? await buildExtensionPayloadFromFields(
+            extensionFieldGroups,
+            extensionFieldValues,
+            detailRequestType,
+            extensionDetailMeta
+          )
+        : undefined;
+
       const payload: Partial<LeadItem> = {
         title: detailsForm.title.trim(),
         priority: detailsForm.priority,
@@ -709,6 +939,9 @@ export const LeadDetailPage: React.FC = () => {
         longitude: detailsForm.longitude === '' ? null : Number(detailsForm.longitude),
         photoUrl: detailsForm.photoUrl.trim(),
         tags: detailsForm.tags,
+        ...(extensionPayload && Object.keys(extensionPayload).length
+          ? { extension: extensionPayload }
+          : {}),
       };
 
       const res = await crmApi.updateLead(id, payload);
@@ -1300,6 +1533,21 @@ export const LeadDetailPage: React.FC = () => {
           >
             Follow-ups
           </button>
+          {extensionLeadTabs.map((tab) => (
+            <button
+              key={tab.tabId}
+              type="button"
+              data-tour={`leads-tab-${tab.id}`}
+              onClick={() => setActiveTab(tab.tabId)}
+              className={`pb-3 px-3 text-xs font-semibold border-0 border-b-2 cursor-pointer transition-colors bg-transparent ${
+                activeTab === tab.tabId
+                  ? 'border-zinc-950 text-zinc-950'
+                  : 'border-transparent text-zinc-500 hover:text-zinc-800'
+              }`}
+            >
+              {tab.label || tab.title}
+            </button>
+          ))}
           {showProposalTab && (
             <button
               type="button"
@@ -1795,6 +2043,33 @@ export const LeadDetailPage: React.FC = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Same native extension fields as Create Lead — no Details-tab iframe */}
+              {extensionFieldGroups.length ? (
+                <ExtensionFieldsSlot
+                  groups={
+                    canWrite
+                      ? extensionFieldGroups
+                      : extensionFieldGroups.map((g) => ({
+                          ...g,
+                          fields: (g.fields || []).map((f) => ({ ...f, readOnly: true })),
+                        }))
+                  }
+                  requestType={detailRequestType}
+                  meta={extensionDetailMeta}
+                  valuesByExtension={extensionFieldValues}
+                  onChange={(extensionId, values) => {
+                    if (!canWrite) return;
+                    setExtensionFieldValues((prev) => ({
+                      ...prev,
+                      [extensionId]: values,
+                    }));
+                  }}
+                  sectionClassName="bg-white border border-zinc-300 rounded-lg p-6"
+                  titleClassName="text-sm font-bold text-zinc-950 mb-1"
+                  inputClassName="w-full px-3 py-2 text-xs border border-zinc-200 rounded focus:border-zinc-950 focus:outline-none bg-white text-zinc-900 disabled:bg-zinc-50 disabled:text-zinc-500"
+                />
+              ) : null}
 
               {/* Tags & Segmentation */}
               <div className="bg-white border border-zinc-300 rounded-lg p-6">
@@ -2682,6 +2957,23 @@ export const LeadDetailPage: React.FC = () => {
         )}
 
         {/* ================= TAB: PROPOSAL (Qualified and later stages) ================= */}
+        {extensionLeadTabs.map((tab) =>
+          id ? (
+            <ExtensionTab
+              key={tab.tabId}
+              active={activeTab === tab.tabId}
+              leadId={id}
+              extension={
+                lead?.extension && typeof lead.extension === 'object' ? lead.extension : {}
+              }
+              tab={tab}
+              extensionPageUrl={extensionPageUrl}
+              onExtensionSynced={handleExtensionEmbedSynced}
+              minHeight="42rem"
+            />
+          ) : null
+        )}
+
         {activeTab === 'proposal' && showProposalTab && (
           <div className="flex flex-col gap-5">
             <div className="bg-white border border-zinc-300 rounded-lg p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">

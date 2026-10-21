@@ -45,9 +45,20 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   }, [theme]);
 
   // Client: hide Dashboard. Employee: hide Expenses.
+  // Travel extension pages: hide internal/legacy sub-pages from sidebar; keep "Travel requirement" visible for Admin/Managers.
   useEffect(() => {
     const hideIds: string[] = [];
-    if (isClient) hideIds.push('dashboard');
+    const hideLabels = [
+      'Travel',
+      'Travel Lead Form',
+      'Travel Lead View',
+      'Travel Settings',
+      'Host Slots',
+    ];
+    if (isClient) {
+      hideIds.push('dashboard');
+      hideLabels.push('Travel Requirement', 'Travel requirement');
+    }
     const role = String(activeRole || '')
       .trim()
       .toLowerCase()
@@ -55,9 +66,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     if (role === 'crm-employee' || role === 'employee' || role === 'freelancer' || role === '104') {
       hideIds.push('expenses');
     }
-    if (!hideIds.length) return;
-    hideParentSidebarRoutes(hideIds);
-    const timer = window.setInterval(() => hideParentSidebarRoutes(hideIds), 500);
+    const apply = () => hideParentSidebarRoutes(hideIds, undefined, hideLabels);
+    apply();
+    const timer = window.setInterval(apply, 500);
     return () => window.clearInterval(timer);
   }, [isClient, activeRole]);
 

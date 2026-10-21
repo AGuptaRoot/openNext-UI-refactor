@@ -44,6 +44,12 @@ import { displayLabel } from '../../utils/displayLabels';
 import { reverseGeocode } from '../../utils/reverseGeocode';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 import { getCurrencySymbol } from '../../utils/currency';
+import {
+  ExtensionFieldsSlot,
+  buildExtensionPayloadFromFields,
+  validateExtensionFields,
+} from '../../components/extensions/ExtensionFieldsSlot';
+import { useExtensions } from '../../hooks/useExtensions';
 
 const CONTACT_SEARCH_LIMIT = 8;
 
@@ -74,10 +80,21 @@ export const LeadCreatePage: React.FC = () => {
   const navigate = useNavigate();
   const { hasPermission, user, isClient, activeRole } = useAuth();
   const { confirm } = useDialog();
+  const {
+    createFieldsForRequestType,
+    leadTabsForRequestType,
+    summary: extensionSummary,
+  } = useExtensions();
   const canWrite = hasPermission('crm.leads.write');
   const canAssignOthers = canAssignToOtherUsers(user, { isClient, activeRole });
   const currentUserId = String(user?.userId || '').trim();
   const settingsCurrency = useDefaultCurrency();
+  const preparedByLabel =
+    String(user?.username || user?.email || user?.userId || '').trim() || 'current-user';
+  /** Flat field values per extensionId — logic lives in extension ui/fields/calc.js */
+  const [extensionFieldValues, setExtensionFieldValues] = useState<
+    Record<string, Record<string, unknown>>
+  >({});
 
   // Metadata
   const [pipelineStages, setPipelineStages] = useState<string[]>([]);
@@ -300,6 +317,81 @@ export const LeadCreatePage: React.FC = () => {
     void loadMetadata();
   }, []);
 
+  /**
+   * Generic: merge request types contributed by enabled extensions (host-slots).
+   * Best-effort create missing types in CRM so they persist for all users.
+   */
+  useEffect(() => {
+    const contrib = extensionSummary?.requestTypes || [];
+    if (!contrib.length) return;
+
+    setRequestTypes((prev) => {
+      const next = [...prev];
+      for (const c of contrib) {
+        const key = String(c.key || '')
+          .trim()
+          .toLowerCase();
+        if (!key) continue;
+        const name = String(c.name || key).trim() || key;
+        const exists = next.some(
+          (rt) =>
+            String(rt.key || '')
+              .trim()
+              .toLowerCase() === key ||
+            String(rt.name || '')
+              .trim()
+              .toLowerCase() === name.toLowerCase()
+        );
+        if (exists) continue;
+        next.push({
+          _id: `ext_${c.extensionId}_${key}`,
+          key,
+          name,
+          description: c.description || '',
+          isEnabled: true,
+          fields: [],
+        });
+      }
+      return next;
+    });
+
+    let cancelled = false;
+    void (async () => {
+      let created = false;
+      for (const c of contrib) {
+        const key = String(c.key || '')
+          .trim()
+          .toLowerCase();
+        if (!key) continue;
+        const name = String(c.name || key).trim() || key;
+        try {
+          await crmApi.createRequestType({
+            key,
+            name,
+            description: c.description || `Contributed by extension ${c.extensionId}`,
+            isEnabled: true,
+            fields: [],
+          });
+          created = true;
+        } catch {
+          /* may already exist or lack permission */
+        }
+      }
+      if (cancelled || !created) return;
+      try {
+        const refreshed = await crmApi.listRequestTypes({ enabledOnly: true });
+        if (cancelled || !Array.isArray(refreshed.data)) return;
+        setRequestTypes(refreshed.data);
+      } catch {
+        /* ignore */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [extensionSummary]);
+
   /** Workspace fields (Settings) + this-create-only session fields, no duplicate keys. */
   const activeCustomFieldDefs = useMemo(() => {
     const map = new Map<string, LeadCustomFieldDef>();
@@ -401,6 +493,34 @@ export const LeadCreatePage: React.FC = () => {
   ) => {
     if (!contact?._id) throw new Error('Contact is required to create the lead.');
     const allowExactDuplicate = options.allowExactDuplicate !== false;
+    const selectedRt = requestTypes.find((rt) => rt._id === requestTypeId);
+    const fieldGroups = createFieldsForRequestType({
+      key: selectedRt?.key,
+      name: selectedRt?.name || requestType,
+    });
+    const primaryTravellerName = selectedContact
+      ? formatContactName(selectedContact)
+      : showCreateContact
+        ? newContact.name
+        : '';
+    const fieldError = await validateExtensionFields(
+      fieldGroups,
+      extensionFieldValues,
+      { key: selectedRt?.key, name: selectedRt?.name || requestType }
+    );
+    if (fieldError) throw new Error(fieldError);
+
+    const extensionPayload = await buildExtensionPayloadFromFields(
+      fieldGroups,
+      extensionFieldValues,
+      { key: selectedRt?.key, name: selectedRt?.name || requestType },
+      {
+        preparedBy: preparedByLabel,
+        primaryTraveller: primaryTravellerName,
+        defaultCurrency: settingsCurrency,
+      }
+    );
+
     const created = await crmApi.createLead({
       title: title.trim(),
       contactId: contact._id,
@@ -423,7 +543,10 @@ export const LeadCreatePage: React.FC = () => {
         ? assignedTo || ''
         : currentUserId || assignedTo || '',
       requestType: requestType.trim(),
-      requestTypeId: requestTypeId.startsWith('legacy_') ? null : requestTypeId,
+      requestTypeId:
+        requestTypeId.startsWith('legacy_') || requestTypeId.startsWith('ext_')
+          ? null
+          : requestTypeId,
       value: value !== '' ? Number(value) : 0,
       currency: settingsCurrency,
       tags: selectedTags,
@@ -434,12 +557,22 @@ export const LeadCreatePage: React.FC = () => {
       longitude: longitude !== '' ? Number(longitude) : null,
       notes: notes.trim() || undefined,
       customFields,
+      extension: extensionPayload,
       // Existing contact (or intentional duplicate) may already have other leads.
       allowExactDuplicate,
       allowSimilarCompany: allowExactDuplicate,
       confirmDifferentCompany: options.confirmDifferentCompany,
     });
-    navigate(`/leads/${created.data._id}`);
+    const detailTabs = leadTabsForRequestType({
+      key: selectedRt?.key,
+      name: selectedRt?.name || requestType,
+    });
+    const openTab = detailTabs[0]?.tabId;
+    navigate(
+      openTab
+        ? `/leads/${created.data._id}?tab=${encodeURIComponent(openTab)}`
+        : `/leads/${created.data._id}`
+    );
   };
 
   const confirmDuplicateLeadsIfNeeded = async (): Promise<boolean> => {
@@ -833,6 +966,7 @@ export const LeadCreatePage: React.FC = () => {
         }
       }
     }
+
     return null;
   };
 
@@ -1296,6 +1430,19 @@ export const LeadCreatePage: React.FC = () => {
                   </option>
                 ))}
               </select>
+              {(() => {
+                const selectedRt = requestTypes.find((rt) => rt._id === requestTypeId);
+                const groups = createFieldsForRequestType({
+                  key: selectedRt?.key,
+                  name: selectedRt?.name || requestType,
+                });
+                if (!groups.length) return null;
+                return (
+                  <p className="mt-2 mb-0 text-[11px] text-zinc-500">
+                    Extension fields for this request type render below in the CRM form (no iframe).
+                  </p>
+                );
+              })()}
             </div>
           </div>
         </section>
@@ -1777,6 +1924,38 @@ export const LeadCreatePage: React.FC = () => {
             className="w-full text-xs border border-zinc-300 rounded-lg p-3 bg-white text-zinc-900 outline-none focus:border-zinc-950 leading-relaxed"
           />
         </section>
+
+        {/* Generic extension fields slot — no nested iframe (docs: fields.register) */}
+        {canWrite && !isClient ? (
+          <ExtensionFieldsSlot
+            groups={createFieldsForRequestType({
+              key: requestTypes.find((rt) => rt._id === requestTypeId)?.key,
+              name:
+                requestTypes.find((rt) => rt._id === requestTypeId)?.name || requestType,
+            })}
+            requestType={{
+              key: requestTypes.find((rt) => rt._id === requestTypeId)?.key,
+              name:
+                requestTypes.find((rt) => rt._id === requestTypeId)?.name || requestType,
+            }}
+            meta={{
+              preparedBy: preparedByLabel,
+              primaryTraveller: selectedContact
+                ? formatContactName(selectedContact)
+                : showCreateContact
+                  ? newContact.name
+                  : '',
+              defaultCurrency: settingsCurrency,
+            }}
+            valuesByExtension={extensionFieldValues}
+            onChange={(extensionId, values) => {
+              setExtensionFieldValues((prev) => ({ ...prev, [extensionId]: values }));
+            }}
+            sectionClassName={sectionCls}
+            titleClassName={sectionTitleCls}
+            inputClassName={`${inputCls} text-xs`}
+          />
+        ) : null}
 
         {/* Form Actions Footer */}
         <div className="flex items-center justify-end gap-3 pt-2">

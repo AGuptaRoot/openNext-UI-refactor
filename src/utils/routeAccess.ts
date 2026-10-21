@@ -121,6 +121,22 @@ const PREFIX_RULES: Array<{ prefix: string; rule: RouteAccessRule }> = [
     rule: { anyOf: ['crm.orders.read'], label: 'Sales Orders' },
   },
   { prefix: '/samples', rule: { anyOf: ['crm.samples.read'], label: 'Samples' } },
+  {
+    prefix: '/travel',
+    rule: {
+      anyOf: ['crm.leads.read', 'crm.dashboard.view'],
+      denyClient: true,
+      label: 'Travel',
+    },
+  },
+  {
+    prefix: '/add-ons',
+    rule: {
+      anyOf: ['crm.leads.read', 'crm.dashboard.view'],
+      denyClient: true,
+      label: 'Travel',
+    },
+  },
   { prefix: '/tickets', rule: { anyOf: ['crm.tickets.read'], label: 'Tickets' } },
 ];
 

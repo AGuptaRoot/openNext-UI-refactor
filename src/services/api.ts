@@ -3723,6 +3723,26 @@ export const crmApi = {
     return request('/health', { method: 'GET' });
   },
 
+  /** Registered extensions + generic UI host slots for any extension. */
+  getExtensionsUi: async (): Promise<ApiResponse<Record<string, unknown>>> => {
+    return request('/extensions/ui', { method: 'GET' });
+  },
+
+  listExtensions: async (): Promise<ApiResponse<Array<{ extensionId: string; version?: string }>>> => {
+    return request('/extensions', { method: 'GET' });
+  },
+
+  /** Cache ui/host-slots.json for an enabled extension (request-type seeding + server summary). */
+  syncExtensionHostSlots: async (
+    extensionId: string,
+    slots: Record<string, unknown>
+  ): Promise<ApiResponse<{ extensionId: string }>> => {
+    return request(`/extensions/${encodeURIComponent(extensionId)}/host-slots`, {
+      method: 'POST',
+      body: JSON.stringify(slots || {}),
+    });
+  },
+
   // ─── LEADS MODULE APIS ────────────────────────────────────────────────────
   getLeads: async (params: LeadQueryParams = {}): Promise<ApiResponse<LeadItem[]>> => {
     const query = new URLSearchParams();
@@ -3846,6 +3866,7 @@ export const crmApi = {
         value: input.value || 0,
         currency: input.currency || getRuntimeDefaultCurrency(),
         customFields: input.customFields || {},
+        extension: input.extension && typeof input.extension === 'object' ? input.extension : {},
         assignedUsername: user?.username || 'admin',
         assignedToName: user?.displayName || user?.name || 'Unassigned',
         tags: input.tags || [],
@@ -3894,6 +3915,12 @@ export const crmApi = {
         ...updates,
         updatedAt: new Date().toISOString(),
       };
+      if (updates.extension && typeof updates.extension === 'object') {
+        updated.extension = {
+          ...(existing.extension && typeof existing.extension === 'object' ? existing.extension : {}),
+          ...updates.extension,
+        };
+      }
       if (updates.assignedTo) {
         const user = INITIAL_MOCK_USERS.find((u) => u.id === updates.assignedTo);
         if (user) {

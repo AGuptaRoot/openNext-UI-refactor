@@ -73,6 +73,12 @@ export interface LeadItem {
   };
   attachments?: LeadAttachment[];
   customFields?: Record<string, unknown>;
+  /**
+   * Plugin-extension JSON on the lead document (Mongo `plugin_openext_crm_suite_leads`).
+   * Section-wise by extension id, e.g.
+   * { "crm-travel": { "Travel-General-Information": { "Enquiry-Date": "…" }, "Travel-Information": { From, To, Destination } } }
+   */
+  extension?: Record<string, unknown>;
   createdAt: string;
   updatedAt?: string;
 }
@@ -275,6 +281,8 @@ export interface LeadCreateInput {
   longitude?: number | null;
   photoUrl?: string;
   customFields?: Record<string, string | number | boolean>;
+  /** Plugin-extension JSON stored with the lead (e.g. Travel from/to/destination). */
+  extension?: Record<string, unknown>;
   /** Allow another lead with the same email / mobile / PAN (e.g. reuse existing contact). */
   allowExactDuplicate?: boolean;
   /** Allow similar company name when intentionally creating another lead. */

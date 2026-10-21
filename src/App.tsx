@@ -43,6 +43,7 @@ import {
 import { PaymentsPage, PaymentCreatePage, PaymentDetailPage } from './pages/payments';
 import { SalesOrdersPage, SalesOrderCreatePage, SalesOrderDetailPage } from './pages/sales-orders';
 import { SamplesPage, SampleCreatePage, SampleRequestDetailPage } from './pages/samples';
+import { AddOnsPage } from './pages/add-ons';
 import { TicketsPage, TicketCreatePage, TicketDetailPage } from './pages/tickets';
 import { CustomerSuccessPage } from './pages/customer-success';
 import { MarketingPage } from './pages/marketing';
@@ -206,6 +207,9 @@ export const App: React.FC = () => {
               <Route path="/samples/create" element={<Guarded><SampleCreatePage /></Guarded>} />
               <Route path="/samples/:id" element={<Guarded><SampleRequestDetailPage /></Guarded>} />
 
+              <Route path="/travel" element={<Guarded><AddOnsPage /></Guarded>} />
+              <Route path="/travel-requirement" element={<Guarded><AddOnsPage /></Guarded>} />
+              <Route path="/add-ons" element={<Guarded><AddOnsPage /></Guarded>} />
               <Route path="/tickets" element={<Guarded><TicketsPage /></Guarded>} />
               <Route path="/tickets/create" element={<Guarded><TicketCreatePage /></Guarded>} />
               <Route path="/tickets/:id" element={<Guarded><TicketDetailPage /></Guarded>} />

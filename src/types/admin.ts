@@ -93,7 +93,8 @@ export type SettingsTabId =
   | 'qualification-match'
   | 'opportunities'
   | 'clients'
-  | 'users';
+  | 'users'
+  | (string & {});
 
 export interface SettingsEmailStatus {
   configured: boolean;

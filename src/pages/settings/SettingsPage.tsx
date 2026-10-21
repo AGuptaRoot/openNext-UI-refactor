@@ -49,6 +49,8 @@ import { GroqIntegrationPanel } from '../../components/settings/GroqIntegrationP
 import { GoogleMapsIntegrationPanel } from '../../components/settings/GoogleMapsIntegrationPanel';
 import { INDIAN_STATES } from '../../types/opportunities';
 import { SettingsTabIcon } from '../../components/icons/SettingsTabIcon';
+import { ExtensionIframe } from '../../components/extensions/ExtensionIframe';
+import { useExtensions } from '../../hooks/useExtensions';
 import {
   Compass,
   FolderKanban,
@@ -947,11 +949,13 @@ const SETTINGS_TAB_GROUPS: SettingsTabGroup[] = [
 export const SettingsPage: React.FC = () => {
   const { hasPermission, loading: authLoading } = useAuth();
   const canManageSettings = hasPermission('crm.settings.manage');
+  const { settingsTabs } = useExtensions();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab') as SettingsTabId | null;
-  const activeTab: SettingsTabId = SETTINGS_TABS.some((tab) => tab.id === tabParam)
-    ? (tabParam as SettingsTabId)
-    : 'general';
+  const knownCoreTabs = SETTINGS_TABS.some((tab) => tab.id === tabParam);
+  const knownExtTab = settingsTabs.some((tab) => tab.tabId === tabParam);
+  const activeTab: SettingsTabId =
+    tabParam && (knownCoreTabs || knownExtTab) ? (tabParam as SettingsTabId) : 'general';
 
   const [tabFilter, setTabFilter] = useState('');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -971,17 +975,37 @@ export const SettingsPage: React.FC = () => {
 
   const filteredTabGroups = useMemo(() => {
     const query = tabFilter.trim().toLowerCase();
-    if (!query) return SETTINGS_TAB_GROUPS;
-    return SETTINGS_TAB_GROUPS.map((group) => ({
-      ...group,
-      tabs: group.tabs.filter(
-        (t) =>
-          t.label.toLowerCase().includes(query) ||
-          t.subtitle.toLowerCase().includes(query) ||
-          t.keywords.toLowerCase().includes(query)
-      ),
-    })).filter((group) => group.tabs.length > 0);
-  }, [tabFilter]);
+    const extensionGroup =
+      settingsTabs.length > 0
+        ? {
+            groupId: 'extensions',
+            title: 'Extensions',
+            tabs: settingsTabs.map((tab) => ({
+              id: tab.tabId as SettingsTabId,
+              label: tab.label,
+              subtitle: `From ${tab.extensionId}`,
+              keywords: `extension add-on ${tab.extensionId} ${tab.label} ${tab.key}`,
+            })),
+          }
+        : null;
+
+    const base = extensionGroup
+      ? [...SETTINGS_TAB_GROUPS, extensionGroup]
+      : SETTINGS_TAB_GROUPS;
+
+    if (!query) return base;
+    return base
+      .map((group) => ({
+        ...group,
+        tabs: group.tabs.filter(
+          (t) =>
+            t.label.toLowerCase().includes(query) ||
+            t.subtitle.toLowerCase().includes(query) ||
+            t.keywords.toLowerCase().includes(query)
+        ),
+      }))
+      .filter((group) => group.tabs.length > 0);
+  }, [tabFilter, settingsTabs]);
 
   const filteredTabsCount = useMemo(() => {
     return filteredTabGroups.reduce((acc, g) => acc + g.tabs.length, 0);
@@ -1004,11 +1028,12 @@ export const SettingsPage: React.FC = () => {
   }, [activeTab]);
 
   const currentGroupTitle = useMemo(() => {
-    for (const group of SETTINGS_TAB_GROUPS) {
+    for (const group of filteredTabGroups) {
       if (group.tabs.some((t) => t.id === activeTab)) return group.title;
     }
+    if (String(activeTab).startsWith('ext__')) return 'Extensions';
     return 'Configuration';
-  }, [activeTab]);
+  }, [activeTab, filteredTabGroups]);
 
   const setTab = useCallback(
     (tab: SettingsTabId) => {
@@ -2245,6 +2270,20 @@ export const SettingsPage: React.FC = () => {
             saves apply immediately and do not require the main Settings Save button.
           </div>
         </div>
+      )}
+
+      {settingsTabs.map(
+        (tab) =>
+          activeTab === tab.tabId && (
+            <div key={tab.tabId} className="space-y-4" data-tour={`settings-ext-${tab.key}`}>
+              <div className={`${cardClass} text-xs text-zinc-500`}>
+                Settings owned by extension{' '}
+                <strong className="text-zinc-800">{tab.extensionId}</strong>. CRM only hosts this
+                slot while the extension is enabled.
+              </div>
+              <ExtensionIframe title={tab.label} src={tab.url} minHeight="44rem" />
+            </div>
+          )
       )}
 
       {activeTab === 'opportunities' && (
