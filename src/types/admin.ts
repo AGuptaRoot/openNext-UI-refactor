@@ -79,10 +79,17 @@ export interface CrmSettings {
     productSpecifications: string[];
     productCertifications: string[];
   };
+  travel_locations?: {
+    from: string[];
+    to: string[];
+    destination: string[];
+  };
+  travel_services?: string[];
 }
 
 export type SettingsTabId =
   | 'general'
+  | 'travel'
   | 'shipping'
   | 'finance'
   | 'email'

@@ -31,7 +31,11 @@ export interface SidebarSyncResult {
  */
 export function extractRouteIdFromPath(path: string, defaultRoute = 'dashboard'): string {
   const clean = path.replace(/^#\/?/, '').replace(/^\/+/, '').trim();
-  const segment = clean.split('/')[0]?.split('?')[0]?.trim();
+  const parts = clean.split('?')[0].split('/').filter(Boolean);
+  if (parts[0] === 'ext') {
+    return parts[2] || parts[1] || 'travel-requirement';
+  }
+  const segment = parts[0]?.trim();
   return segment && segment !== '' ? segment : defaultRoute;
 }
 
@@ -44,8 +48,11 @@ export function extractRouteIdFromHref(href: string, pluginId = PLUGIN_ID): stri
     const runtimePath = `/dashboard/plugins/runtime/${pluginId}`;
     if (href.includes(runtimePath)) {
       const suffix = href.slice(href.indexOf(runtimePath) + runtimePath.length).replace(/^\/+/, '');
-      const segment = suffix.split('/')[0]?.split('?')[0]?.trim();
-      if (segment) return decodeURIComponent(segment);
+      const parts = suffix.split('?')[0].split('/').filter(Boolean);
+      if (parts[0] === 'ext') {
+        return parts[2] || parts[1] || 'travel-requirement';
+      }
+      if (parts[0]) return decodeURIComponent(parts[0]);
     }
     const url = new URL(href, 'http://localhost');
     const viewParam = url.searchParams.get('view');
@@ -91,10 +98,24 @@ export function hideParentSidebarRoutes(
         anchor.closest<HTMLElement>('li') ||
         anchor;
 
+      // Never hide the Travel requirement extension module for Admin/Managers
+      const isTravelRequirement =
+        label === 'travel requirement' ||
+        anchorRoute === 'travel-requirement' ||
+        href.includes('/ext/crm-travel/travel-requirement') ||
+        href.includes('travel-requirement');
+
+      if (isTravelRequirement && !hideSet.has('travel-requirement') && !labelSet.has('travel requirement')) {
+        row.style.display = '';
+        row.removeAttribute('data-crm-nav-hidden');
+        row.removeAttribute('aria-hidden');
+        return;
+      }
+
       const hideByRoute = hideSet.has(anchorRoute);
       const hideByLabel =
         labelSet.has(label) ||
-        [...labelSet].some((want) => label === want || label.startsWith(want + ' '));
+        [...labelSet].some((want) => label === want);
 
       if (hideByRoute || hideByLabel) {
         row.style.display = 'none';
@@ -217,7 +238,11 @@ export const useSidebarSync = (
         // Only synchronize if parent is in the plugin runtime path
         if (!parentUrl.pathname.startsWith(runtimePath)) return;
 
-        const targetPath = `${runtimePath}/${encodeURIComponent(targetRouteId)}`;
+        const currentSuffix = parentUrl.pathname.slice(runtimePath.length).replace(/^\/+/, '');
+        let targetPath = `${runtimePath}/${encodeURIComponent(targetRouteId)}`;
+        if (targetRouteId === 'travel-requirement' && currentSuffix.startsWith('ext/')) {
+          targetPath = `${runtimePath}/${currentSuffix.split('?')[0]}`;
+        }
         if (parentUrl.pathname !== targetPath || parentUrl.searchParams.has('view')) {
           parentUrl.pathname = targetPath;
           parentUrl.searchParams.delete('view');
@@ -262,7 +287,11 @@ export const useSidebarSync = (
       if (!parentUrl.pathname.startsWith(runtimePath)) return '';
 
       const suffix = parentUrl.pathname.slice(runtimePath.length).replace(/^\/+/, '');
-      const navId = suffix.split('/').filter(Boolean)[0];
+      const parts = suffix.split('?')[0].split('/').filter(Boolean);
+      if (parts[0] === 'ext') {
+        return parts[2] || parts[1] || 'travel-requirement';
+      }
+      const navId = parts[0];
       if (navId) return decodeURIComponent(navId);
       return parentUrl.searchParams.get('view') || '';
     } catch {

@@ -42,6 +42,7 @@ import {
   validateExtensionFields,
 } from '../../components/extensions/ExtensionFieldsSlot';
 import { ExtensionTab } from '../../components/extensions/ExtensionTab';
+import { LeadTravelRequirementTab } from '../../components/leads/LeadTravelRequirementTab';
 import { useExtensions } from '../../hooks/useExtensions';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 import {
@@ -591,19 +592,46 @@ export const LeadDetailPage: React.FC = () => {
     );
   }, [requestTypes, detailsForm.requestTypeId, detailsForm.requestType]);
 
-  const extensionLeadTabs = useMemo(
-    () =>
-      leadTabsForRequestType({
-        key: selectedRequestType?.key,
-        name: selectedRequestType?.name || detailsForm.requestType || lead?.requestType,
-      }),
-    [
-      leadTabsForRequestType,
-      selectedRequestType,
-      detailsForm.requestType,
-      lead?.requestType,
-    ]
-  );
+  const isTravelLead = useMemo(() => {
+    const key = String(selectedRequestType?.key || '').trim().toLowerCase();
+    const name = String(selectedRequestType?.name || detailsForm.requestType || lead?.requestType || '').trim().toLowerCase();
+    return key === 'travel' || name === 'travel' || /travel/i.test(name) || /travel/i.test(key);
+  }, [selectedRequestType, detailsForm.requestType, lead?.requestType]);
+
+  const extensionLeadTabs = useMemo(() => {
+    const tabs = leadTabsForRequestType({
+      key: selectedRequestType?.key,
+      name: selectedRequestType?.name || detailsForm.requestType || lead?.requestType,
+    });
+    const isTravel =
+      isTravelLead ||
+      Boolean(lead?.extension && (lead.extension as Record<string, unknown>)['crm-travel']);
+    if (isTravel && !tabs.some((t) => t.id === 'travel-requirement')) {
+      tabs.push({
+        extensionId: 'crm-travel',
+        id: 'travel-requirement',
+        tabId: 'ext__crm-travel__travel-requirement',
+        title: 'Travel Requirement',
+        label: 'Travel Requirement',
+        entry: 'ui/pages/travel-requirement.html',
+        url: '/extensions/crm-travel/ui/pages/travel-requirement.html',
+        slot: 'lead.detail.tab',
+        whenRequestTypeKey: 'travel',
+        whenRequestTypeName: 'travel',
+        appendLeadId: true,
+        openOnCreate: false,
+        order: 20,
+        hintMessage: 'Travel Requirement',
+      });
+    }
+    return tabs;
+  }, [
+    leadTabsForRequestType,
+    selectedRequestType,
+    detailsForm.requestType,
+    lead?.requestType,
+    lead?.extension,
+  ]);
 
   const detailRequestType = useMemo(
     () => ({
@@ -726,6 +754,13 @@ export const LeadDetailPage: React.FC = () => {
       setActiveTab('details');
     }
   }, [activeTab, extensionLeadTabs]);
+
+  // If request type is travel, hide commercial requirement and switch to details
+  useEffect(() => {
+    if (activeTab === 'qualification' && isTravelLead) {
+      setActiveTab('details');
+    }
+  }, [activeTab, isTravelLead]);
 
   /**
    * Host bridge for extension detail TABS (separate tab iframes only).
@@ -1485,18 +1520,20 @@ export const LeadDetailPage: React.FC = () => {
           >
             Details
           </button>
-          <button
-            type="button"
-            data-tour="leads-tab-qualification"
-            onClick={() => setActiveTab('qualification')}
-            className={`pb-3 px-3 text-xs font-semibold border-0 border-b-2 cursor-pointer transition-colors bg-transparent ${
-              activeTab === 'qualification'
-                ? 'border-zinc-950 text-zinc-950'
-                : 'border-transparent text-zinc-500 hover:text-zinc-800'
-            }`}
-          >
-            Commercial Requirement
-          </button>
+          {!isTravelLead && (
+            <button
+              type="button"
+              data-tour="leads-tab-qualification"
+              onClick={() => setActiveTab('qualification')}
+              className={`pb-3 px-3 text-xs font-semibold border-0 border-b-2 cursor-pointer transition-colors bg-transparent ${
+                activeTab === 'qualification'
+                  ? 'border-zinc-950 text-zinc-950'
+                  : 'border-transparent text-zinc-500 hover:text-zinc-800'
+              }`}
+            >
+              Commercial Requirement
+            </button>
+          )}
           <button
             type="button"
             data-tour="leads-tab-activities"
@@ -2587,7 +2624,7 @@ export const LeadDetailPage: React.FC = () => {
         )}
 
         {/* ================= TAB 2: COMMERCIAL REQUIREMENT ================= */}
-        {activeTab === 'qualification' && id && lead && (
+        {!isTravelLead && activeTab === 'qualification' && id && lead && (
           <CommercialRequirementTab
             leadId={id}
             lead={lead}
@@ -2957,8 +2994,20 @@ export const LeadDetailPage: React.FC = () => {
         )}
 
         {/* ================= TAB: PROPOSAL (Qualified and later stages) ================= */}
-        {extensionLeadTabs.map((tab) =>
-          id ? (
+        {extensionLeadTabs.map((tab) => {
+          if (!id) return null;
+          if (tab.id === 'travel-requirement' || tab.tabId.includes('travel-requirement')) {
+            if (activeTab !== tab.tabId) return null;
+            return (
+              <LeadTravelRequirementTab
+                key={tab.tabId}
+                leadId={id}
+                lead={lead}
+                onUpdated={() => void loadLeadData()}
+              />
+            );
+          }
+          return (
             <ExtensionTab
               key={tab.tabId}
               active={activeTab === tab.tabId}
@@ -2971,8 +3020,8 @@ export const LeadDetailPage: React.FC = () => {
               onExtensionSynced={handleExtensionEmbedSynced}
               minHeight="42rem"
             />
-          ) : null
-        )}
+          );
+        })}
 
         {activeTab === 'proposal' && showProposalTab && (
           <div className="flex flex-col gap-5">

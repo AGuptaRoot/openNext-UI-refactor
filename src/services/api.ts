@@ -1079,6 +1079,59 @@ const SETTINGS_USER_DESIGNATIONS_KEY = 'opennext_mock_settings_user_designations
 const SETTINGS_EMAIL_STATUS_KEY = 'opennext_mock_settings_email_status_v1';
 const DATA_QUALITY_RULES_KEY = 'opennext_mock_data_quality_rules_v1';
 
+export const DEFAULT_TRAVEL_LOCATIONS = {
+  from: [
+    'Mumbai',
+    'Delhi',
+    'Bengaluru',
+    'Hyderabad',
+    'Ahmedabad',
+    'Chennai',
+    'Kolkata',
+    'Pune',
+    'Jaipur',
+    'Kochi',
+    'Chandigarh',
+    'Lucknow',
+  ],
+  to: [
+    'Goa',
+    'Dubai',
+    'Bangkok',
+    'Singapore',
+    'Manali',
+    'Shimla',
+    'Kashmir',
+    'Kerala',
+    'Jaipur',
+    'Maldives',
+    'Bali',
+    'London',
+  ],
+  destination: [
+    'Goa Beach Holiday',
+    'Dubai City & Desert',
+    'Himachal Tour',
+    'Kerala Backwaters',
+    'Golden Triangle (Delhi-Agra-Jaipur)',
+    'Kashmir Paradise',
+    'Thailand Experience',
+    'Singapore Discovery',
+    'Maldives Resort Stay',
+    'Bali Tropical Gateway',
+  ],
+};
+
+export const DEFAULT_TRAVEL_SERVICES: string[] = [
+  'Hotel',
+  'Air Ticket / Flight',
+  'Bus Ticket',
+  'Cab / Transport',
+  'Tour Package',
+  'Visa Assistance',
+  'Cruise',
+];
+
 const DEFAULT_ADMIN_SETTINGS: CrmSettings = {
   company_name: 'Root CRM',
   company_state: 'Maharashtra',
@@ -1153,6 +1206,8 @@ const DEFAULT_ADMIN_SETTINGS: CrmSettings = {
   })),
   project_custom_fields: [],
   qualification_match: { ...DEFAULT_QUALIFICATION_MATCH_CATALOG },
+  travel_locations: { ...DEFAULT_TRAVEL_LOCATIONS },
+  travel_services: [...DEFAULT_TRAVEL_SERVICES],
 };
 
 function normalizeCrmSettings(raw?: Partial<CrmSettings> | null): CrmSettings {
@@ -1293,6 +1348,20 @@ function normalizeCrmSettings(raw?: Partial<CrmSettings> | null): CrmSettings {
           ? raw.qualification_match.productCertifications
           : DEFAULT_ADMIN_SETTINGS.qualification_match.productCertifications,
     },
+    travel_locations: {
+      from: Array.isArray(raw?.travel_locations?.from)
+        ? raw.travel_locations.from
+        : DEFAULT_TRAVEL_LOCATIONS.from,
+      to: Array.isArray(raw?.travel_locations?.to)
+        ? raw.travel_locations.to
+        : DEFAULT_TRAVEL_LOCATIONS.to,
+      destination: Array.isArray(raw?.travel_locations?.destination)
+        ? raw.travel_locations.destination
+        : DEFAULT_TRAVEL_LOCATIONS.destination,
+    },
+    travel_services: Array.isArray(raw?.travel_services)
+      ? raw.travel_services
+      : DEFAULT_TRAVEL_SERVICES,
   };
   return merged;
 }
@@ -15878,6 +15947,315 @@ export const crmApi = {
         message: `Test email queued for ${body.to}`,
       };
     }
+  },
+
+  getTravelLocations: async (): Promise<
+    ApiResponse<{ from: string[]; to: string[]; destination: string[] }>
+  > => {
+    const normalizeLocationList = (items: unknown, fallback: string[]): string[] => {
+      if (!Array.isArray(items)) return fallback;
+      const res = items
+        .map((item) => {
+          if (typeof item === 'string') return item.trim();
+          if (item && typeof item === 'object') {
+            const row = item as { label?: string; optionKey?: string; name?: string; value?: string };
+            return String(row.label || row.name || row.value || row.optionKey || '').trim();
+          }
+          return '';
+        })
+        .filter(Boolean);
+      return res.length ? res : fallback;
+    };
+
+    try {
+      const res = await request<{ from?: unknown; to?: unknown; destination?: unknown }>(
+        '/travel/settings/locations',
+        { method: 'GET' }
+      );
+      if (res.data) {
+        return {
+          success: true,
+          data: {
+            from: normalizeLocationList(res.data.from, DEFAULT_TRAVEL_LOCATIONS.from),
+            to: normalizeLocationList(res.data.to, DEFAULT_TRAVEL_LOCATIONS.to),
+            destination: normalizeLocationList(res.data.destination, DEFAULT_TRAVEL_LOCATIONS.destination),
+          },
+        };
+      }
+    } catch {
+      // fallback
+    }
+    const saved = readLocalAdminValue<{ from: unknown; to: unknown; destination: unknown }>(
+      'opennext_travel_locations_v1',
+      DEFAULT_TRAVEL_LOCATIONS
+    );
+    return {
+      success: true,
+      data: {
+        from: normalizeLocationList(saved.from, DEFAULT_TRAVEL_LOCATIONS.from),
+        to: normalizeLocationList(saved.to, DEFAULT_TRAVEL_LOCATIONS.to),
+        destination: normalizeLocationList(saved.destination, DEFAULT_TRAVEL_LOCATIONS.destination),
+      },
+    };
+  },
+
+  saveTravelLocations: async (body: {
+    from: string[];
+    to: string[];
+    destination: string[];
+  }): Promise<ApiResponse<{ from: string[]; to: string[]; destination: string[] }>> => {
+    const normalizeLocationList = (items: unknown): string[] => {
+      if (!Array.isArray(items)) return [];
+      return items
+        .map((item) => {
+          if (typeof item === 'string') return item.trim();
+          if (item && typeof item === 'object') {
+            const row = item as { label?: string; optionKey?: string; name?: string; value?: string };
+            return String(row.label || row.name || row.value || row.optionKey || '').trim();
+          }
+          return '';
+        })
+        .filter(Boolean);
+    };
+
+    const cleanBody = {
+      from: normalizeLocationList(body.from),
+      to: normalizeLocationList(body.to),
+      destination: normalizeLocationList(body.destination),
+    };
+    saveLocalAdminValue('opennext_travel_locations_v1', cleanBody);
+    try {
+      const res = await request<{ from?: unknown; to?: unknown; destination?: unknown }>(
+        '/travel/settings/locations',
+        {
+          method: 'PUT',
+          body: JSON.stringify(cleanBody),
+        }
+      );
+      if (res.data) {
+        return {
+          success: true,
+          data: {
+            from: normalizeLocationList(res.data.from),
+            to: normalizeLocationList(res.data.to),
+            destination: normalizeLocationList(res.data.destination),
+          },
+        };
+      }
+    } catch {
+      // fallback
+    }
+    return { success: true, data: cleanBody, message: 'Travel locations saved' };
+  },
+
+  getTravelServices: async (): Promise<ApiResponse<string[]>> => {
+    const normalizeServiceList = (items: unknown, fallback: string[]): string[] => {
+      if (!Array.isArray(items)) return fallback;
+      const res = items
+        .map((item) => {
+          if (typeof item === 'string') return item.trim();
+          if (item && typeof item === 'object') {
+            const row = item as { label?: string; name?: string; serviceKey?: string; serviceId?: string; id?: string };
+            return String(row.label || row.name || row.serviceKey || row.serviceId || row.id || '').trim();
+          }
+          return '';
+        })
+        .filter(Boolean);
+      return res.length ? res : fallback;
+    };
+
+    try {
+      const res = await request<unknown>('/travel/settings/services', { method: 'GET' });
+      if (res.data) {
+        return {
+          success: true,
+          data: normalizeServiceList(res.data, DEFAULT_TRAVEL_SERVICES),
+        };
+      }
+    } catch {
+      // fallback
+    }
+    const saved = readLocalAdminValue<unknown>('opennext_travel_services_v1', DEFAULT_TRAVEL_SERVICES);
+    return {
+      success: true,
+      data: normalizeServiceList(saved, DEFAULT_TRAVEL_SERVICES),
+    };
+  },
+
+  saveTravelServices: async (services: string[]): Promise<ApiResponse<string[]>> => {
+    const normalizeServiceList = (items: unknown): string[] => {
+      if (!Array.isArray(items)) return [];
+      return items
+        .map((item) => {
+          if (typeof item === 'string') return item.trim();
+          if (item && typeof item === 'object') {
+            const row = item as { label?: string; name?: string; serviceKey?: string; serviceId?: string; id?: string };
+            return String(row.label || row.name || row.serviceKey || row.serviceId || row.id || '').trim();
+          }
+          return '';
+        })
+        .filter(Boolean);
+    };
+
+    const cleanList = normalizeServiceList(services);
+    saveLocalAdminValue('opennext_travel_services_v1', cleanList);
+    try {
+      const res = await request<unknown>('/travel/settings/services', {
+        method: 'PUT',
+        body: JSON.stringify({ services: cleanList }),
+      });
+      if (res.data) {
+        return {
+          success: true,
+          data: normalizeServiceList(res.data),
+          message: 'Travel service requirements saved',
+        };
+      }
+    } catch {
+      // fallback
+    }
+    return { success: true, data: cleanList, message: 'Travel service requirements saved' };
+  },
+
+  getTravelRequirementFields: async (options?: { all?: boolean }): Promise<
+    ApiResponse<
+      Array<{
+        fieldId: string;
+        fieldKey: string;
+        name: string;
+        type: string;
+        serviceIds: string[];
+        options: string[];
+        required?: boolean;
+        placeholder?: string;
+        helpText?: string;
+        displayOrder?: number;
+        enabled?: boolean;
+      }>
+    >
+  > => {
+    try {
+      const q = options?.all ? '?all=1' : '';
+      const res = await request<any>(`/travel/requirement-fields${q}`, { method: 'GET' });
+      if (res && res.data) {
+        return { success: true, data: Array.isArray(res.data) ? res.data : [] };
+      }
+    } catch {
+      // fallback
+    }
+    const local = readLocalAdminValue<any[]>('opennext_travel_req_fields_v1', []);
+    return { success: true, data: Array.isArray(local) ? local : [] };
+  },
+
+  createTravelRequirementField: async (body: {
+    name: string;
+    type: string;
+    serviceIds: string[];
+    options?: string[];
+    required?: boolean;
+    placeholder?: string;
+    helpText?: string;
+  }): Promise<ApiResponse<any>> => {
+    try {
+      const res = await request<any>('/travel/requirement-fields', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      if (res && res.data) return res;
+    } catch {
+      // fallback
+    }
+    const current = readLocalAdminValue<any[]>('opennext_travel_req_fields_v1', []);
+    const newField = {
+      fieldId: `trf_${Date.now()}`,
+      fieldKey: body.name.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+      ...body,
+      enabled: true,
+      displayOrder: current.length * 10,
+    };
+    current.push(newField);
+    saveLocalAdminValue('opennext_travel_req_fields_v1', current);
+    return { success: true, data: newField, message: 'Field created successfully' };
+  },
+
+  updateTravelRequirementField: async (
+    fieldId: string,
+    body: {
+      name?: string;
+      type?: string;
+      serviceIds?: string[];
+      options?: string[];
+      required?: boolean;
+      placeholder?: string;
+      helpText?: string;
+      displayOrder?: number;
+      enabled?: boolean;
+    }
+  ): Promise<ApiResponse<any>> => {
+    try {
+      const res = await request<any>(`/travel/requirement-fields/${encodeURIComponent(fieldId)}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
+      if (res && res.data) {
+        const current = readLocalAdminValue<any[]>('opennext_travel_req_fields_v1', []);
+        const idx = current.findIndex((f: any) => f.fieldId === fieldId);
+        if (idx >= 0) {
+          current[idx] = { ...current[idx], ...res.data };
+          saveLocalAdminValue('opennext_travel_req_fields_v1', current);
+        }
+        return res;
+      }
+    } catch {
+      // fallback
+    }
+    const current = readLocalAdminValue<any[]>('opennext_travel_req_fields_v1', []);
+    const idx = current.findIndex((f: any) => f.fieldId === fieldId);
+    let updatedItem = { fieldId, ...body };
+    if (idx >= 0) {
+      current[idx] = { ...current[idx], ...body };
+      updatedItem = current[idx];
+      saveLocalAdminValue('opennext_travel_req_fields_v1', current);
+    }
+    return { success: true, data: updatedItem, message: 'Field updated successfully' };
+  },
+
+  deleteTravelRequirementField: async (fieldId: string): Promise<ApiResponse<any>> => {
+    try {
+      const res = await request<any>(`/travel/requirement-fields/${encodeURIComponent(fieldId)}`, {
+        method: 'DELETE',
+      });
+      if (res && res.data) return res;
+    } catch {
+      // fallback
+    }
+    const current = readLocalAdminValue<any[]>('opennext_travel_req_fields_v1', []);
+    const filtered = current.filter((f: any) => f.fieldId !== fieldId);
+    saveLocalAdminValue('opennext_travel_req_fields_v1', filtered);
+    return { success: true, data: { deleted: true } };
+  },
+
+  getLeadTravelRequirements: async (leadId: string): Promise<ApiResponse<{ lead?: any; sections?: any[] }>> => {
+    try {
+      const res = await request<any>(`/travel/leads/${encodeURIComponent(leadId)}/requirements`, { method: 'GET' });
+      if (res && res.data) return res;
+    } catch {
+      // fallback
+    }
+    return { success: true, data: { lead: null, sections: [] } };
+  },
+
+  saveLeadTravelServiceRequirement: async (leadId: string, serviceId: string, values: Record<string, unknown>): Promise<ApiResponse<any>> => {
+    try {
+      const res = await request<any>(`/travel/leads/${encodeURIComponent(leadId)}/requirements/${encodeURIComponent(serviceId)}`, {
+        method: 'POST',
+        body: JSON.stringify({ values }),
+      });
+      if (res && res.data) return res;
+    } catch {
+      // fallback
+    }
+    return { success: true, data: { leadId, serviceId, values } };
   },
 
   listSettingsWorkspaceUsers: async (): Promise<ApiResponse<SettingsWorkspaceUser[]>> => {

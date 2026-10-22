@@ -110,6 +110,9 @@ const InitialRouteRedirect: React.FC = () => {
 const UnmigratedRouteFallback: React.FC = () => {
   const location = useLocation();
   const rawSegment = location.pathname.replace(/^\/+/, '').split('/')[0] || '';
+  if (rawSegment.toLowerCase() === 'ext') {
+    return <Navigate to="/travel-requirement" replace />;
+  }
   const formattedModule = rawSegment
     ? rawSegment
         .split('-')
@@ -210,6 +213,9 @@ export const App: React.FC = () => {
               <Route path="/travel" element={<Guarded><AddOnsPage /></Guarded>} />
               <Route path="/travel-requirement" element={<Guarded><AddOnsPage /></Guarded>} />
               <Route path="/add-ons" element={<Guarded><AddOnsPage /></Guarded>} />
+              <Route path="/ext/:extensionId/:pageId" element={<Guarded><AddOnsPage /></Guarded>} />
+              <Route path="/ext/*" element={<Guarded><AddOnsPage /></Guarded>} />
+              <Route path="/ext" element={<Guarded><AddOnsPage /></Guarded>} />
               <Route path="/tickets" element={<Guarded><TicketsPage /></Guarded>} />
               <Route path="/tickets/create" element={<Guarded><TicketCreatePage /></Guarded>} />
               <Route path="/tickets/:id" element={<Guarded><TicketDetailPage /></Guarded>} />

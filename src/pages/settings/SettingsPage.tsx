@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -67,6 +67,12 @@ import {
   Truck,
   Zap,
   Pencil,
+  Check,
+  ExternalLink,
+  MapPin,
+  Navigation,
+  Plane,
+  Luggage,
 } from 'lucide-react';
 
 const inputClass =
@@ -100,6 +106,15 @@ function formatWorkspaceRoleLabel(role?: string): string {
   return raw;
 }
 
+function toItemString(item: unknown): string {
+  if (typeof item === 'string') return item.trim();
+  if (item && typeof item === 'object') {
+    const obj = item as { label?: string; optionKey?: string; name?: string; value?: string };
+    return String(obj.label || obj.name || obj.value || obj.optionKey || '').trim();
+  }
+  return String(item ?? '').trim();
+}
+
 function ChipListEditor({
   title,
   description,
@@ -120,19 +135,23 @@ function ChipListEditor({
   const [draft, setDraft] = useState('');
   const [showBulk, setShowBulk] = useState(false);
 
+  const stringValues = useMemo(() => {
+    return (Array.isArray(value) ? value : []).map(toItemString).filter(Boolean);
+  }, [value]);
+
   const addItem = () => {
     const next = draft.trim();
     if (!next) return;
-    if (value.some((item) => item.toLowerCase() === next.toLowerCase())) {
+    if (stringValues.some((item) => item.toLowerCase() === next.toLowerCase())) {
       setDraft('');
       return;
     }
-    onChange([...value, next]);
+    onChange([...stringValues, next]);
     setDraft('');
   };
 
   const removeItem = (index: number) => {
-    onChange(value.filter((_, i) => i !== index));
+    onChange(stringValues.filter((_, i) => i !== index));
   };
 
   return (
@@ -150,16 +169,16 @@ function ChipListEditor({
           </div>
         </div>
         <span className="shrink-0 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] font-semibold text-zinc-600">
-          {value.length}
+          {stringValues.length}
         </span>
       </div>
 
       <div className="min-h-[72px] rounded-xl border border-zinc-100 bg-zinc-50/80 p-3">
-        {value.length === 0 ? (
+        {stringValues.length === 0 ? (
           <p className="m-0 text-center text-xs text-zinc-400 py-4">No values yet — add the first one below.</p>
         ) : (
           <div className="flex flex-wrap gap-2">
-            {value.map((item, index) => (
+            {stringValues.map((item, index) => (
               <span
                 key={`${item}-${index}`}
                 className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-zinc-200 bg-white py-1 pl-3 pr-1.5 text-xs font-semibold text-zinc-800"
@@ -196,7 +215,7 @@ function ChipListEditor({
           <button
             type="button"
             onClick={addItem}
-            className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border-0 bg-zinc-950 px-3 text-xs font-semibold text-white"
+            className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border-0 bg-zinc-950 px-3 text-xs font-semibold text-white cursor-pointer"
           >
             <AddIcon sx={{ fontSize: 16 }} /> Add
           </button>
@@ -204,14 +223,14 @@ function ChipListEditor({
         <button
           type="button"
           onClick={() => setShowBulk((open) => !open)}
-          className="self-start border-0 bg-transparent p-0 text-[11px] font-semibold text-zinc-500 hover:text-zinc-900"
+          className="self-start border-0 bg-transparent p-0 text-[11px] font-semibold text-zinc-500 hover:text-zinc-900 cursor-pointer"
         >
           {showBulk ? 'Hide bulk edit' : 'Bulk edit (one per line)'}
         </button>
         {showBulk ? (
           <textarea
             className={`${inputClass} h-24 resize-y py-2`}
-            value={listToLines(value)}
+            value={listToLines(stringValues)}
             onChange={(event) => onChange(linesToList(event.target.value))}
             placeholder="One value per line"
           />
@@ -953,9 +972,17 @@ export const SettingsPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab') as SettingsTabId | null;
   const knownCoreTabs = SETTINGS_TABS.some((tab) => tab.id === tabParam);
-  const knownExtTab = settingsTabs.some((tab) => tab.tabId === tabParam);
+  const knownExtTab = settingsTabs.some(
+    (tab) => tab.tabId === tabParam || (tab.key === 'travel' && tabParam === 'travel')
+  );
   const activeTab: SettingsTabId =
-    tabParam && (knownCoreTabs || knownExtTab) ? (tabParam as SettingsTabId) : 'general';
+    tabParam && (knownCoreTabs || knownExtTab || tabParam === 'travel' || String(tabParam).includes('travel'))
+      ? (tabParam as SettingsTabId)
+      : 'general';
+
+  const isTravelTab =
+    activeTab === 'travel' ||
+    (typeof activeTab === 'string' && (activeTab.includes('crm-travel') || activeTab.includes('travel')));
 
   const [tabFilter, setTabFilter] = useState('');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -973,6 +1000,91 @@ export const SettingsPage: React.FC = () => {
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
 
+  // Travel Tab: Locations (From / To / Destination)
+  const [travelLocations, setTravelLocations] = useState<{
+    from: string[];
+    to: string[];
+    destination: string[];
+  }>({
+    from: [],
+    to: [],
+    destination: [],
+  });
+  const [savingTravelLocations, setSavingTravelLocations] = useState(false);
+  const [travelLocationsDirty, setTravelLocationsDirty] = useState(false);
+
+  // Travel Tab: Service Requirements
+  const [travelServices, setTravelServices] = useState<string[]>([]);
+  const [savingTravelServices, setSavingTravelServices] = useState(false);
+  const [travelServicesDirty, setTravelServicesDirty] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    crmApi.getTravelLocations().then((res) => {
+      if (cancelled) return;
+      if (res.data) {
+        setTravelLocations({
+          from: Array.isArray(res.data.from) ? res.data.from.map(toItemString).filter(Boolean) : [],
+          to: Array.isArray(res.data.to) ? res.data.to.map(toItemString).filter(Boolean) : [],
+          destination: Array.isArray(res.data.destination) ? res.data.destination.map(toItemString).filter(Boolean) : [],
+        });
+      }
+    });
+    crmApi.getTravelServices().then((res) => {
+      if (cancelled) return;
+      if (res.data && Array.isArray(res.data)) {
+        setTravelServices(res.data.map(toItemString).filter(Boolean));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const updateTravelLocations = (key: 'from' | 'to' | 'destination', values: string[]) => {
+    setTravelLocations((prev) => ({ ...prev, [key]: values }));
+    setTravelLocationsDirty(true);
+    setDirty(true);
+  };
+
+  const handleSaveTravelLocations = async () => {
+    setSavingTravelLocations(true);
+    try {
+      await crmApi.saveTravelLocations(travelLocations);
+      setTravelLocationsDirty(false);
+      setMessage({ kind: 'success', text: 'Travel locations saved successfully' });
+    } catch (err) {
+      setMessage({
+        kind: 'error',
+        text: err instanceof Error ? err.message : 'Failed to save travel locations',
+      });
+    } finally {
+      setSavingTravelLocations(false);
+    }
+  };
+
+  const updateTravelServices = (values: string[]) => {
+    setTravelServices(values);
+    setTravelServicesDirty(true);
+    setDirty(true);
+  };
+
+  const handleSaveTravelServices = async () => {
+    setSavingTravelServices(true);
+    try {
+      await crmApi.saveTravelServices(travelServices);
+      setTravelServicesDirty(false);
+      setMessage({ kind: 'success', text: 'Travel service requirements saved successfully' });
+    } catch (err) {
+      setMessage({
+        kind: 'error',
+        text: err instanceof Error ? err.message : 'Failed to save travel service requirements',
+      });
+    } finally {
+      setSavingTravelServices(false);
+    }
+  };
+
   const filteredTabGroups = useMemo(() => {
     const query = tabFilter.trim().toLowerCase();
     const extensionGroup =
@@ -980,12 +1092,19 @@ export const SettingsPage: React.FC = () => {
         ? {
             groupId: 'extensions',
             title: 'Extensions',
-            tabs: settingsTabs.map((tab) => ({
-              id: tab.tabId as SettingsTabId,
-              label: tab.label,
-              subtitle: `From ${tab.extensionId}`,
-              keywords: `extension add-on ${tab.extensionId} ${tab.label} ${tab.key}`,
-            })),
+            tabs: settingsTabs.map((tab) => {
+              const isThisTravel =
+                tab.key === 'travel' ||
+                tab.extensionId === 'crm-travel' ||
+                /travel/i.test(tab.tabId);
+              const label = isThisTravel ? 'Travel' : tab.label.replace(/^ext__[^_]+__/, '');
+              return {
+                id: tab.tabId as SettingsTabId,
+                label,
+                subtitle: isThisTravel ? 'Locations (To/From/Destination) & options' : `From ${tab.extensionId}`,
+                keywords: `extension add-on ${tab.extensionId} ${tab.label} ${tab.key} travel locations to from destination`,
+              };
+            }),
           }
         : null;
 
@@ -1016,6 +1135,21 @@ export const SettingsPage: React.FC = () => {
       const found = group.tabs.find((t) => t.id === activeTab);
       if (found) return found;
     }
+    const extTab = settingsTabs.find(
+      (t) =>
+        t.tabId === activeTab ||
+        (activeTab === 'travel' && (t.key === 'travel' || t.extensionId === 'crm-travel'))
+    );
+    if (extTab || isTravelTab) {
+      return {
+        id: (extTab?.tabId || activeTab) as SettingsTabId,
+        label: isTravelTab ? 'Travel' : (extTab?.label || String(activeTab)).replace(/^ext__[^_]+__/, ''),
+        subtitle: isTravelTab
+          ? 'Configure Travel locations (From, To, Destination) and booking options'
+          : `Settings owned by extension ${extTab?.extensionId || 'extension'}`,
+        keywords: '',
+      };
+    }
     const fallback = SETTINGS_TABS.find((t) => t.id === activeTab);
     return fallback
       ? {
@@ -1025,13 +1159,13 @@ export const SettingsPage: React.FC = () => {
           keywords: '',
         }
       : null;
-  }, [activeTab]);
+  }, [activeTab, settingsTabs, isTravelTab]);
 
   const currentGroupTitle = useMemo(() => {
     for (const group of filteredTabGroups) {
       if (group.tabs.some((t) => t.id === activeTab)) return group.title;
     }
-    if (String(activeTab).startsWith('ext__')) return 'Extensions';
+    if (String(activeTab).startsWith('ext__') || activeTab === 'travel') return 'Extensions';
     return 'Configuration';
   }, [activeTab, filteredTabGroups]);
 
@@ -1209,6 +1343,9 @@ export const SettingsPage: React.FC = () => {
       payload.lead_custom_fields = settings.lead_custom_fields;
     } else if (activeTab === 'clients') {
       payload.client_categories = settings.client_categories;
+    } else if (isTravelTab) {
+      await Promise.all([handleSaveTravelLocations(), handleSaveTravelServices()]);
+      return;
     } else {
       payload.company_name = settings.company_name;
       payload.company_state = settings.company_state;
@@ -2272,8 +2409,150 @@ export const SettingsPage: React.FC = () => {
         </div>
       )}
 
-      {settingsTabs.map(
-        (tab) =>
+      {isTravelTab && (
+        <div className="space-y-6" data-tour="settings-travel-tab">
+          <section className={cardClass}>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                  <Plane className="h-5 w-5" aria-hidden />
+                </div>
+                <div>
+                  <h2 className="m-0 text-base font-bold text-zinc-950">Travel Locations & Routing</h2>
+                  <p className="mb-0 mt-1 text-xs text-zinc-500">
+                    Configure origin ('From'), arrival ('To'), and holiday tour ('Destination') options.
+                    These options populate dropdown selectors on Lead Travel forms and Travel requirement modules.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  to="/travel-requirement"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900 no-underline transition-colors shadow-none"
+                >
+                  <span>Travel requirement module</span>
+                  <ExternalLink className="h-3.5 w-3.5 text-zinc-400" />
+                </Link>
+                <button
+                  type="button"
+                  onClick={handleSaveTravelLocations}
+                  disabled={savingTravelLocations}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-50 transition-colors shadow-none cursor-pointer"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  <span>
+                    {savingTravelLocations
+                      ? 'Saving…'
+                      : travelLocationsDirty
+                        ? 'Save Locations *'
+                        : 'Save Locations'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section
+            data-tour="settings-travel-locations-chips"
+            className="grid grid-cols-1 gap-5 xl:grid-cols-3"
+          >
+            <ChipListEditor
+              title="From Locations"
+              description="Departure cities & pickup points (e.g. Mumbai, Delhi, Bengaluru, Chennai…)"
+              icon={<Compass className="h-[18px] w-[18px] shrink-0" aria-hidden />}
+              accent="bg-blue-50 text-blue-600"
+              value={travelLocations.from}
+              placeholder="e.g. Mumbai"
+              onChange={(value) => updateTravelLocations('from', value)}
+            />
+            <ChipListEditor
+              title="To Locations"
+              description="Arrival cities & transit hubs (e.g. Goa, Dubai, Bangkok, London…)"
+              icon={<Navigation className="h-[18px] w-[18px] shrink-0" aria-hidden />}
+              accent="bg-emerald-50 text-emerald-600"
+              value={travelLocations.to}
+              placeholder="e.g. Goa"
+              onChange={(value) => updateTravelLocations('to', value)}
+            />
+            <ChipListEditor
+              title="Destination Options"
+              description="Tour circuits & popular travel destinations (e.g. Kerala, Kashmir, Maldives…)"
+              icon={<MapPin className="h-[18px] w-[18px] shrink-0" aria-hidden />}
+              accent="bg-purple-50 text-purple-600"
+              value={travelLocations.destination}
+              placeholder="e.g. Kerala"
+              onChange={(value) => updateTravelLocations('destination', value)}
+            />
+          </section>
+
+          {/* Travel Service Requirements Section */}
+          <section className={cardClass}>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-50 text-purple-600">
+                  <Luggage className="h-5 w-5" aria-hidden />
+                </div>
+                <div>
+                  <h2 className="m-0 text-base font-bold text-zinc-950">Travel Service Requirements</h2>
+                  <p className="mb-0 mt-1 text-xs text-zinc-500">
+                    Configure available travel services (e.g. Hotel, Air Ticket / Flight, Bus Ticket, Cab / Transport, Tour Package, Visa Assistance, Cruise).
+                    These service options display as checkboxes in the Travel Requirement module page and on lead detail forms.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSaveTravelServices}
+                  disabled={savingTravelServices}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-50 transition-colors shadow-none cursor-pointer"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  <span>
+                    {savingTravelServices
+                      ? 'Saving…'
+                      : travelServicesDirty
+                        ? 'Save Services *'
+                        : 'Save Services'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section
+            data-tour="settings-travel-services-chips"
+            className="grid grid-cols-1 gap-5"
+          >
+            <ChipListEditor
+              title="Service Requirements"
+              description="Services that clients or leads can request (e.g. Hotel, Air Ticket / Flight, Bus Ticket, Cab / Transport, Tour Package, Visa Assistance, Cruise…)"
+              icon={<Luggage className="h-[18px] w-[18px] shrink-0" aria-hidden />}
+              accent="bg-purple-50 text-purple-600"
+              value={travelServices}
+              placeholder="e.g. Travel Insurance"
+              onChange={(value) => updateTravelServices(value)}
+            />
+          </section>
+
+          <div className={`${cardClass} text-xs text-zinc-500`}>
+            Tip: Locations and Service Requirements configured here directly sync to{' '}
+            <code className="text-zinc-800 font-mono">/travel/settings/locations</code> and{' '}
+            <code className="text-zinc-800 font-mono">/travel/settings/services</code> and populate dropdown selectors
+            and service checkboxes across the CRM and the{' '}
+            <Link to="/travel-requirement" className="font-semibold text-zinc-900 underline">
+              Travel requirement
+            </Link>{' '}
+            module.
+          </div>
+        </div>
+      )}
+
+      {settingsTabs.map((tab) => {
+        const isThisTravel =
+          tab.key === 'travel' || tab.extensionId === 'crm-travel' || /travel/i.test(tab.tabId);
+        if (isThisTravel) return null;
+        return (
           activeTab === tab.tabId && (
             <div key={tab.tabId} className="space-y-4" data-tour={`settings-ext-${tab.key}`}>
               <div className={`${cardClass} text-xs text-zinc-500`}>
@@ -2284,7 +2563,8 @@ export const SettingsPage: React.FC = () => {
               <ExtensionIframe title={tab.label} src={tab.url} minHeight="44rem" />
             </div>
           )
-      )}
+        );
+      })}
 
       {activeTab === 'opportunities' && (
         <div className="space-y-5" data-tour="settings-opportunities-tab">
