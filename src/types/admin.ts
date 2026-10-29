@@ -57,6 +57,8 @@ export interface CrmSettings {
   lead_types: string[];
   lead_priorities: string[];
   lead_tags: string[];
+  /** Lead activity types offered on the Activities tab. */
+  activity_types: string[];
   pipeline_stages: string[];
   opportunity_stages: string[];
   opportunity_stage_probabilities: Record<string, number>;
@@ -70,6 +72,20 @@ export interface CrmSettings {
   client_custom_fields: AdminCustomField[];
   project_custom_fields: AdminCustomField[];
   /** Admin catalogs used to score Commercial Requirement on leads. */
+  /** Ask to move the lead to Qualified after a commercial requirement save. */
+  qualification_prompt_on_requirement_save: boolean;
+  /**
+   * Proforma invoices and advance payments on quotations. Off by default: a
+   * proforma is an extra document with its own numbering and its own tax
+   * treatment, so a tenant opts in.
+   */
+  proforma_advance_enabled: boolean;
+  /** Only meaningful while proforma_advance_enabled is on. */
+  quotation_auto_accept_on_payment: boolean;
+  auto_convert_proforma_on_delivery: boolean;
+  proforma_prefix: string;
+  /** Default advance on a quotation, as a percentage of the total. */
+  default_advance_percent: number;
   qualification_match: {
     projectSoftwareTypes: string[];
     projectTechnologies: string[];

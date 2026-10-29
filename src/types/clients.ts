@@ -60,9 +60,97 @@ export interface ClientEvent {
 
 export interface ClientSourceLead {
   _id: string;
+  /** Same value as `_id` — the API returns both. */
+  id?: string;
   name?: string;
   email?: string;
   company?: string;
+  stage?: string | null;
+  /** Request Type display name on the source lead (e.g. "Travel"). */
+  requestType?: string;
+  requestTypeId?: string | null;
+}
+
+/** Resolved request type of a client's source lead. */
+export interface ClientRequestType {
+  key: string;
+  name: string;
+  id: string;
+}
+
+/**
+ * Read-through view of a client's extension context.
+ * `extension` is the source lead's bag (never copied onto the client);
+ * `clientExtension` holds client-owned records such as passports.
+ */
+export interface ClientExtensionData {
+  clientId: string;
+  leadId: string | null;
+  leadName: string;
+  requestType: ClientRequestType;
+  extension: Record<string, unknown>;
+  clientExtension: Record<string, unknown>;
+}
+
+/** One passport stored on a client. */
+export interface ClientPassport {
+  id: string;
+  /** Proxied CRM media URL — works with a private S3 bucket. */
+  url: string;
+  provider?: string;
+  fileName?: string;
+  mimeType?: string;
+  fileSize?: number;
+  fullname: string;
+  passport_number: string;
+  Date_of_issue: string;
+  Date_of_expiry: string;
+  ocr?: {
+    model?: string;
+    extractionMode?: string;
+    mrzParsed?: boolean;
+    error?: string;
+  } | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  createdByName?: string;
+}
+
+/** Uploaded-vs-required summary driving the "{n} missing" banner. */
+export interface ClientRecordSummary {
+  uploaded: number;
+  /** null when the extension declares no cap. */
+  allowed: number | null;
+  missing: number;
+  overLimit: number;
+  canUploadMore: boolean;
+  countLabel: string;
+  message: string;
+}
+
+export interface ClientPassportList {
+  clientId: string;
+  extensionId: string;
+  tabId: string;
+  leadId: string | null;
+  requestType: ClientRequestType;
+  storeKey: string;
+  countBy: string;
+  records: ClientPassport[];
+  summary: ClientRecordSummary;
+}
+
+export interface ClientPassportMutation {
+  record?: ClientPassport;
+  records: ClientPassport[];
+  summary: ClientRecordSummary;
+  ocrApplied?: boolean;
+  ocrError?: string;
+  deleted?: boolean;
+  extracted?: Pick<
+    ClientPassport,
+    'fullname' | 'passport_number' | 'Date_of_issue' | 'Date_of_expiry'
+  >;
 }
 
 export interface ClientCustomFieldDef {
@@ -92,7 +180,7 @@ export interface ClientDocument {
   createdAt?: string;
 }
 
-export type ClientPortalStatus = 'Invited' | 'Active' | 'Suspended' | 'Revoked' | string;
+export type ClientPortalStatus = 'Pending_Approval' | 'Invited' | 'Active' | 'Rejected' | 'Suspended' | 'Revoked' | string;
 
 export interface ClientPortalAccess {
   _id: string;
@@ -103,10 +191,25 @@ export interface ClientPortalAccess {
   permissions?: string[];
   status: ClientPortalStatus;
   contactId?: string;
+  phone?: string;
   invitedAt?: string;
   activatedAt?: string;
   lastLoginAt?: string;
   suspendReason?: string;
+  requestedBy?: string;
+  requestedByName?: string;
+  requestedAt?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  rejectedBy?: string;
+  rejectedAt?: string;
+  rejectionReason?: string;
+  accountName?: string;
+  isLead?: boolean;
+  clientId?: string;
+  leadId?: string;
+  emailSent?: boolean;
+  emailError?: string;
   loginCredentials?: {
     username?: string;
     email?: string;

@@ -33,6 +33,8 @@ import {
   IMAGE_ACCEPT,
 } from '../../components/common/DocumentUploadControl';
 import { DEFAULT_CLIENT_AVATAR_COLOR, resolveClientAvatarColor, resolveClientMediaUrl } from '../../utils/clientAvatar';
+import { PhoneNumberField } from '../../components/common/PhoneNumberField';
+import { splitPhoneNumber, validateNationalNumber } from '../../utils/phoneCountryCodes';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^[+]?[\d\s().-]{7,20}$/;
@@ -238,8 +240,16 @@ export const ClientCreatePage: React.FC = () => {
   const validate = (): string | null => {
     if (!name.trim()) return 'Company name is required';
     if (email.trim() && !EMAIL_RE.test(email.trim())) return 'Enter a valid company email address';
-    if (phone.trim() && !PHONE_RE.test(phone.trim())) {
-      return 'Enter a valid company mobile number (7–15 digits; country code allowed)';
+    if (phone.trim()) {
+      const split = splitPhoneNumber(phone);
+      if (split.dial && split.national) {
+        const check = validateNationalNumber(split.dial, split.national);
+        if (check.state === 'invalid' || check.state === 'incomplete') {
+          return `Company mobile: ${check.message}`;
+        }
+      } else if (!PHONE_RE.test(phone.trim())) {
+        return 'Enter a valid company mobile number (7–15 digits; country code allowed)';
+      }
     }
     const site = normalizeWebsite(website);
     if (site && !URL_RE.test(site)) {
@@ -260,7 +270,13 @@ export const ClientCreatePage: React.FC = () => {
     if (!contactPhone.trim()) {
       return 'Primary contact mobile is required';
     }
-    if (!PHONE_RE.test(contactPhone.trim())) {
+    const cSplit = splitPhoneNumber(contactPhone);
+    if (cSplit.dial && cSplit.national) {
+      const check = validateNationalNumber(cSplit.dial, cSplit.national);
+      if (check.state === 'invalid' || check.state === 'incomplete') {
+        return `Primary contact mobile: ${check.message}`;
+      }
+    } else if (!PHONE_RE.test(contactPhone.trim())) {
       return 'Enter a valid primary contact mobile (7–20 digits)';
     }
     if (contactPan.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(contactPan.trim())) {
@@ -631,21 +647,20 @@ export const ClientCreatePage: React.FC = () => {
                   placeholder="contact@company.com"
                 />
               </label>
-              <label className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1">
                 <span className="text-[11px] font-semibold text-zinc-500 uppercase">
                   Mobile number
                 </span>
-                <input
-                  className={fieldClass}
+                <PhoneNumberField
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  maxLength={24}
-                  placeholder="+91 98765 43210"
+                  onChange={setPhone}
+                  inputClassName={fieldClass}
+                  placeholder="98765 43210"
                 />
                 <span className="text-[10px] text-zinc-400">
-                  Optional. 7 to 15 digits; country code is allowed.
+                  Optional. Country dial code with mobile number.
                 </span>
-              </label>
+              </div>
               <label className="flex flex-col gap-1 sm:col-span-2">
                 <span className="text-[11px] font-semibold text-zinc-500 uppercase">Website</span>
                 <input
@@ -1157,20 +1172,17 @@ export const ClientCreatePage: React.FC = () => {
                 />
               </label>
 
-              <label className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1">
                 <span className="text-[11px] font-semibold text-zinc-500 uppercase">
                   Mobile <span className="text-red-500">*</span>
                 </span>
-                <input
-                  className={fieldClass}
-                  type="tel"
+                <PhoneNumberField
                   value={contactPhone}
-                  onChange={(e) => setContactPhone(e.target.value)}
-                  maxLength={24}
-                  placeholder="+91 98765 43210"
-                  required
+                  onChange={setContactPhone}
+                  inputClassName={fieldClass}
+                  placeholder="98765 43210"
                 />
-              </label>
+              </div>
 
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-semibold text-zinc-500 uppercase">

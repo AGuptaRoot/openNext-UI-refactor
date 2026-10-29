@@ -35,6 +35,7 @@ export const LEAD_IMPORT_ALIASES = {
   company: ['company', 'company name', 'organization', 'organisation', 'account', 'account name'],
   email: ['email', 'email address', 'e-mail', 'mail'],
   phone: ['phone', 'mobile', 'phone number', 'mobile number', 'contact', 'contact number', 'cell'],
+  requestType: ['request type', 'required type', 'request_type', 'required_type', 'requesttype', 'requiredtype', 'requirement type', 'lead type'],
   stage: ['stage', 'pipeline stage', 'lead stage', 'status stage'],
   source: ['source', 'lead source', 'origin'],
   status: ['status', 'lead status'],

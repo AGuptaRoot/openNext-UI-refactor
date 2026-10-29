@@ -42,6 +42,8 @@ interface LeadListViewProps {
   currentSortAsc: boolean;
   onSort: (field: string) => void;
   canWrite?: boolean;
+  /** Moving a lead's stage is a manager action; the bulk control follows it. */
+  canChangeStage?: boolean;
   canDelete?: boolean;
   canConvert?: boolean;
   /** When false (sales representative), bulk assign only offers self via assignableUsers. */
@@ -68,6 +70,7 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
   currentSortAsc,
   onSort,
   canWrite = false,
+  canChangeStage = true,
   canDelete = false,
   canConvert = false,
   canAssignOthers = true,
@@ -174,6 +177,27 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
         title={`Qualification match: ${score}% (${label})`}
       >
         {score}%
+      </span>
+    );
+  };
+
+  /** Scheduled activities that passed their due time without being completed. */
+  const getMissedActivityBadge = (lead: LeadItem) => {
+    const missed = lead.missedActivities;
+    if (!missed?.hasMissed || !missed.count) return null;
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10.5px] font-bold text-red-700"
+        title={
+          missed.oldestTitle
+            ? `${missed.label} — oldest: ${missed.oldestTitle}`
+            : missed.label || 'Missed scheduled activity'
+        }
+      >
+        <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+        <span>
+          {missed.count} missed
+        </span>
       </span>
     );
   };
@@ -286,7 +310,7 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
             )}
 
             {/* Bulk Stage */}
-            {canWrite && (
+            {canWrite && canChangeStage && (
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] font-semibold text-zinc-600">Move Stage:</span>
               <select
@@ -529,6 +553,7 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
                                 {lead.source}
                               </span>
                             )}
+                            {getMissedActivityBadge(lead)}
                             {getFollowUpBadge(lead)}
                           </div>
                         </div>

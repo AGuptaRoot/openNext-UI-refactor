@@ -175,6 +175,36 @@ export function canCreateTasks(options: {
 }
 
 /** True for Sales Representative persona (aliases included). */
+/**
+ * Who may move a lead along the pipeline by hand.
+ *
+ * A sales representative works the lead; deciding that it has advanced is a
+ * manager's call, so the stage reflects a reviewed position rather than one
+ * rep's optimism. Mirrors `canChangeLeadStage` in
+ * openext-crm-suite/api/utils/sales-access.util.js — the server refuses it
+ * either way, this only keeps the controls honest.
+ *
+ * Automatic moves (an accepted quotation, conversion to a client) are not by
+ * hand and are unaffected.
+ */
+export function canChangeLeadStage(options: {
+  isAdmin?: boolean;
+  isClient?: boolean;
+  activeRole?: CrmRole | string | null;
+}): boolean {
+  if (options.isClient) return false;
+  if (options.isAdmin) return true;
+  const role = String(options.activeRole || '').trim().toLowerCase();
+  return role === 'crm-manager' || role === 'sales-manager';
+}
+
+/**
+ * Moving a deal along the board follows the same rule as a lead's stage: the
+ * representative works it, a manager decides it has advanced. Mirrors
+ * `canChangeOpportunityStage` in the plugin's sales-access util.
+ */
+export const canChangeOpportunityStage = canChangeLeadStage;
+
 export function isSalesRepresentativeRole(activeRole?: CrmRole | string | null): boolean {
   const role = normalizeRoleToken(activeRole);
   return (

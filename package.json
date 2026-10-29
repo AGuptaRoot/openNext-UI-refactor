@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:mount": "vite build --config vite.mount.config.ts",
+    "build:plugin": "npm run build && npm run build:mount",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },

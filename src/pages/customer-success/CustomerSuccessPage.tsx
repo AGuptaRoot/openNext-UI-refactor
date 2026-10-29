@@ -55,7 +55,7 @@ function categoryChipClass(active: boolean): string {
 }
 
 export const CustomerSuccessPage: React.FC = () => {
-  const { isClient, user } = useAuth();
+  const { isClient, isLeadPortal, user } = useAuth();
   const myClientId = String(user?.clientId || '').trim();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
@@ -390,15 +390,19 @@ export const CustomerSuccessPage: React.FC = () => {
               </div>
             )}
           </div>
-          <button
-            type="button"
-            data-tour="cs-submit-btn"
-            onClick={openModal}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border-0 bg-slate-950 px-3 text-sm font-semibold text-white"
-          >
-            <AddIcon sx={{ fontSize: 18 }} />
-            Submit CSAT Review
-          </button>
+          {/* A satisfaction review is about delivered work, so a prospect
+              portal has nothing to review yet. The server refuses it too. */}
+          {!isLeadPortal && (
+            <button
+              type="button"
+              data-tour="cs-submit-btn"
+              onClick={openModal}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border-0 bg-zinc-950 px-3 text-sm font-semibold text-white hover:bg-zinc-800"
+            >
+              <AddIcon sx={{ fontSize: 18 }} />
+              Submit CSAT Review
+            </button>
+          )}
           <TourButton moduleId="customer-success" />
         </div>
       </header>

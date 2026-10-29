@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useDialog } from '../../context/DialogContext';
@@ -73,6 +73,8 @@ function linesFromSource(
 
 export const QuotationCreatePage: React.FC = () => {
   const navigate = useNavigate();
+  const { id: editId } = useParams();
+  const isEdit = Boolean(editId);
   const [searchParams] = useSearchParams();
   const returnTo = safeReturnPath(searchParams.get('returnTo'));
   const presetLeadId = String(searchParams.get('leadId') || '').trim();
@@ -83,6 +85,10 @@ export const QuotationCreatePage: React.FC = () => {
   const canWriteFinance = hasAnyPermission('crm.quotes.write', 'crm.finance.write') && !isClient;
   const settingsCurrency = useDefaultCurrency();
   const currencyLockedRef = useRef(false);
+
+  const [loadingEdit, setLoadingEdit] = useState(isEdit);
+  const [editQuotationNo, setEditQuotationNo] = useState('');
+  const [editStatus, setEditStatus] = useState<string | null>(null);
 
   const [recipientType, setRecipientType] = useState<'lead' | 'client'>(presetLeadId ? 'lead' : 'lead');
   const [leadId, setLeadId] = useState(presetLeadId);
@@ -114,6 +120,71 @@ export const QuotationCreatePage: React.FC = () => {
   const [catalogReady, setCatalogReady] = useState(false);
   const scanAppliedRef = useRef(false);
   const scanClientNameRef = useRef('');
+
+  useEffect(() => {
+    if (!editId) return;
+    let cancelled = false;
+    setLoadingEdit(true);
+    crmApi
+      .getQuotation(editId)
+      .then((res) => {
+        if (cancelled) return;
+        const quote = res.data;
+        if (!quote) {
+          setError('Quotation not found.');
+          return;
+        }
+        setEditStatus(quote.status);
+        const qNo = String(quote.quotationNo || quote.quotationNumber || quote.number || '');
+        setEditQuotationNo(qNo);
+
+        if (quote.status !== 'Draft') {
+          setError(`Only quotations in Draft status can be edited. Current status is "${quote.status}". Please create a revision instead.`);
+          return;
+        }
+
+        currencyLockedRef.current = true;
+        const rawQuote = quote as unknown as Record<string, unknown>;
+        const isClientType = Boolean(quote.clientId);
+        setRecipientType(isClientType ? 'client' : 'lead');
+        if (quote.clientId) setClientId(String(quote.clientId));
+        if (quote.leadId) setLeadId(String(quote.leadId));
+        const resolvedOppId = String(quote.opportunityId || rawQuote.dealId || '');
+        if (resolvedOppId) {
+          setOpportunityId(resolvedOppId);
+        }
+        if (quote.shippingState) setShippingState(quote.shippingState);
+        if (quote.issueDate) setIssueDate(String(quote.issueDate).slice(0, 10));
+        if (quote.validTill || quote.expiryDate) {
+          setValidTill(String(quote.validTill || quote.expiryDate).slice(0, 10));
+        }
+        if (quote.currency) setCurrency(quote.currency.toUpperCase());
+        if (quote.taxCalculation) setTaxCalculation(quote.taxCalculation);
+        if (quote.title) setTitle(quote.title);
+        if (quote.description) setDescription(quote.description);
+        const resolvedNotes = String(quote.recipientNotes || rawQuote.notes || '');
+        if (resolvedNotes) {
+          setRecipientNotes(resolvedNotes);
+        }
+        setDiscountType((quote.discountType as DiscountType) || 'percent');
+        setDiscountValue(Number(quote.discountValue ?? quote.discountPercent) || 0);
+        setShippingCharge(Number(quote.shippingCharge) || 0);
+        if (Array.isArray(quote.lineItems) && quote.lineItems.length > 0) {
+          setLines(linesFromSource(quote.lineItems));
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load quotation');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingEdit(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editId]);
 
   useEffect(() => {
     if (!presetLeadId) return;
@@ -368,7 +439,7 @@ export const QuotationCreatePage: React.FC = () => {
     }
     setSaving(true);
     try {
-      const created = await crmApi.createQuotation({
+      const payload = {
         recipientType,
         clientId: recipientType === 'client' ? clientId : undefined,
         leadId: recipientType === 'lead' ? leadId : undefined,
@@ -392,18 +463,57 @@ export const QuotationCreatePage: React.FC = () => {
         discountValue: clampDiscountValue(discountType, discountValue),
         shippingCharge,
         recipientNotes: recipientNotes.trim(),
-      });
-      void asDraft;
-      if (returnTo.startsWith('/leads/')) {
-        navigate(returnTo);
+      };
+
+      if (isEdit && editId) {
+        await crmApi.updateQuotation(editId, payload);
+        navigate(`/quotations/${editId}`);
       } else {
-        navigate(`/quotations/${created.data._id}`);
+        const created = await crmApi.createQuotation(payload);
+        void asDraft;
+        if (returnTo.startsWith('/leads/')) {
+          navigate(returnTo);
+        } else {
+          navigate(`/quotations/${created.data._id}`);
+        }
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to create quotation');
+      setError(
+        err instanceof Error
+          ? err.message
+          : isEdit
+            ? 'Failed to update quotation'
+            : 'Failed to create quotation'
+      );
       setSaving(false);
     }
   };
+
+  if (loadingEdit) {
+    return <div className="p-12 text-center text-sm text-zinc-500">Loading quotation for edit…</div>;
+  }
+
+  if (isEdit && editStatus && editStatus !== 'Draft') {
+    return (
+      <div className="py-16 text-center text-sm text-zinc-700 max-w-lg mx-auto">
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-6">
+          <h2 className="text-lg font-bold text-zinc-950 mb-2">Quotation Locked</h2>
+          <p className="text-sm text-zinc-600 mb-4">
+            Only quotations in <strong>Draft</strong> status can be edited. Quotation{' '}
+            <strong>{editQuotationNo || editId}</strong> is currently in <strong>{editStatus}</strong> status and is read-only.
+          </p>
+          <div className="flex justify-center gap-3">
+            <Link
+              to={`/quotations/${editId}`}
+              className="inline-flex items-center px-4 py-2 rounded-lg bg-zinc-950 text-white text-xs font-semibold no-underline"
+            >
+              View Quotation
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!canWriteFinance) {
     return (
@@ -422,16 +532,27 @@ export const QuotationCreatePage: React.FC = () => {
     <div data-tour="quotations-create-form" className="flex w-full flex-col gap-5 pb-14">
       <header className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 pb-4 border-b border-zinc-200">
         <div>
-          <Link to={returnTo} className="text-xs font-semibold text-zinc-500 no-underline hover:text-zinc-950">
-            {returnTo.startsWith('/leads/') ? '← Back to lead' : '← Quotations'}
+          <Link
+            to={isEdit ? `/quotations/${editId}` : returnTo}
+            className="text-xs font-semibold text-zinc-500 no-underline hover:text-zinc-950"
+          >
+            {isEdit
+              ? '← Back to quotation'
+              : returnTo.startsWith('/leads/')
+                ? '← Back to lead'
+                : '← Quotations'}
           </Link>
-          <h1 className="text-2xl font-bold text-zinc-950 m-0 mt-2">New Quotation</h1>
+          <h1 className="text-2xl font-bold text-zinc-950 m-0 mt-2">
+            {isEdit ? `Edit Quotation ${editQuotationNo ? `(${editQuotationNo})` : ''}` : 'New Quotation'}
+          </h1>
           <p className="text-sm text-zinc-500 m-0 mt-1">
-            {fromScan
-              ? 'Filled from scanned PDF. Number assigned automatically on save.'
-              : presetLeadId
-                ? 'Pre-filled for this lead. Number assigned automatically on save.'
-                : 'Number assigned automatically on save.'}
+            {isEdit
+              ? 'Update draft quotation pricing, client details, and terms before sending.'
+              : fromScan
+                ? 'Filled from scanned PDF. Number assigned automatically on save.'
+                : presetLeadId
+                  ? 'Pre-filled for this lead. Number assigned automatically on save.'
+                  : 'Number assigned automatically on save.'}
           </p>
         </div>
         <div data-tour="quotations-create-template-tools" className="flex flex-wrap gap-2">
@@ -797,26 +918,28 @@ export const QuotationCreatePage: React.FC = () => {
         >
           <button
             type="button"
-            onClick={() => navigate(returnTo)}
+            onClick={() => navigate(isEdit ? `/quotations/${editId}` : returnTo)}
             className="h-9 px-3 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer"
           >
-            {returnTo.startsWith('/leads/') ? 'Back to lead' : 'Cancel'}
+            {isEdit ? 'Cancel' : returnTo.startsWith('/leads/') ? 'Back to lead' : 'Cancel'}
           </button>
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => submit(true)}
-              className="h-9 px-3 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer disabled:opacity-50"
-            >
-              {saving ? 'Saving…' : 'Save Draft'}
-            </button>
+            {!isEdit && (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => submit(true)}
+                className="h-9 px-3 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer disabled:opacity-50"
+              >
+                {saving ? 'Saving…' : 'Save Draft'}
+              </button>
+            )}
             <button
               type="submit"
               disabled={saving}
               className="h-9 px-3.5 text-xs font-semibold rounded-lg border border-zinc-950 bg-zinc-950 text-white cursor-pointer disabled:opacity-50"
             >
-              {saving ? 'Creating…' : 'Create Quotation'}
+              {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Quotation'}
             </button>
           </div>
         </div>

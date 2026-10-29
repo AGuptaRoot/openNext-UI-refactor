@@ -69,9 +69,14 @@ function SlaBadge({ ticket }: { ticket: TicketItem }) {
 export const TicketsPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { hasPermission, isClient } = useAuth();
+  const { hasPermission, isClient, isLeadPortal } = useAuth();
   // Clients may create tickets (crm.tickets.write) but cannot run staff status/kanban controls.
-  const canCreateTicket = hasPermission('crm.tickets.write');
+  /*
+   * Support is an after-sales service: a prospect portal (a lead whose deal was
+   * opened to the portal) has no account, no SLA and no account manager, so it
+   * does not raise tickets. The server refuses it too.
+   */
+  const canCreateTicket = hasPermission('crm.tickets.write') && !isLeadPortal;
   const canManageStatus = hasPermission('crm.tickets.write') && !isClient;
   const canResolve = hasPermission('crm.tickets.resolve') && !isClient;
   const [items, setItems] = useState<TicketItem[]>([]);

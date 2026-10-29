@@ -11,7 +11,25 @@ export type CrmRole =
 
 export type DashboardPeriod = 'today' | 'week' | 'month' | 'quarter' | 'year' | 'all';
 
+/**
+ * Tenant feature switches the UI needs for every role.
+ *
+ * Settings is admin-only, so these ride along on `/me`: without them a sales
+ * rep or a portal user would see no sign of a feature the tenant turned on.
+ */
+export interface CrmFeatureFlags {
+  /** Settings → General → Enable Proforma & Advance Payment. */
+  proformaAdvance: boolean;
+  /** Only ever true while `proformaAdvance` is on. */
+  quotationAutoAcceptOnPayment: boolean;
+  defaultAdvancePercent: number;
+}
+
 export interface UserContext {
+  /** Portal shape for a client-role login: a real account, a prospect, or neither. */
+  portalKind?: 'client' | 'lead' | null;
+  /** The lead behind a prospect portal login. */
+  portalLeadId?: string | null;
   userId: string | null;
   username: string | null;
   email: string | null;
@@ -27,6 +45,7 @@ export interface UserContext {
   isClient: boolean;
   clientId: string | null;
   unlinkedClient: boolean;
+  features?: CrmFeatureFlags;
 }
 
 export interface TaskItem {
@@ -221,6 +240,7 @@ export interface DashboardData {
   paidInvoices?: number;
   totalPaymentsThisMonth?: number;
   pendingExpenseApprovals?: number;
+  pendingPortalApprovals?: number;
   approvedExpensesThisMonth?: number;
   defaultCurrency: string;
   recentAudit: AuditItem[];

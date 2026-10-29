@@ -4,6 +4,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { crmApi } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 import { ClientItem } from '../../types/clients';
 import { LeadItem } from '../../types/leads';
 import { OpportunityItem } from '../../types/opportunities';
@@ -17,14 +18,11 @@ import {
   XCircle,
 } from 'lucide-react';
 import {
-  SAMPLE_PRODUCT_PRESETS,
   SAMPLE_UNITS,
   SAMPLE_URGENCIES,
-  sampleUrgencyTone,
   type SampleCreateInput,
   type SampleLinkType,
   type SampleProductItem,
-  type SampleProductPreset,
   type SampleUrgency,
 } from '../../types/samples';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
@@ -32,7 +30,7 @@ import { getCurrencySymbol, normalizeCurrencyCode } from '../../utils/currency';
 import { CURRENCY_OPTIONS } from '../../components/finance/FinanceFormElements';
 
 const fieldClass =
-  'h-10 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-zinc-500';
+  'h-10 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-950 focus:ring-1 focus:ring-zinc-950 transition-colors';
 const labelClass = 'mb-1.5 block text-xs font-semibold text-zinc-700';
 
 const LINK_OPTIONS: { type: SampleLinkType; label: string }[] = [
@@ -67,6 +65,12 @@ function isOpportunitySelectableForSample(stage?: string | null): boolean {
 
 export const SampleCreatePage: React.FC = () => {
   const navigate = useNavigate();
+  /**
+   * A client portal user asks for a sample against one of their own deals.
+   * Everything that is ours to decide — who to bill, how urgently to ship —
+   * is left off their form, and the server ignores it even if sent.
+   */
+  const { isClient } = useAuth();
   const [searchParams] = useSearchParams();
   const settingsCurrency = useDefaultCurrency();
   const [clients, setClients] = useState<ClientItem[]>([]);
@@ -132,10 +136,53 @@ export const SampleCreatePage: React.FC = () => {
       .finally(() => setLoading(false));
   }, []);
 
+  /**
+   * Item names already used on sample requests. Typed names beat a fixed preset
+   * list: the picker reflects what this tenant actually samples, and stops the
+   * same product being spelled three different ways.
+   */
+  const [itemSuggestions, setItemSuggestions] = useState<Array<{ name: string; unit?: string }>>([]);
+  const [openSuggestFor, setOpenSuggestFor] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void crmApi
+      .getSampleItemSuggestions()
+      .then((res) => {
+        if (!cancelled) setItemSuggestions(res.data || []);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Suggestions matching what has been typed into this row so far. */
+  const matchesForItem = (index: number) => {
+    const typed = String(items[index]?.productName || '').trim().toLowerCase();
+    const pool = typed
+      ? itemSuggestions.filter((entry) => entry.name.toLowerCase().includes(typed))
+      : itemSuggestions;
+    return pool
+      .filter((entry) => entry.name.toLowerCase() !== typed)
+      .slice(0, 8);
+  };
+
   const sampleEligibleOpportunities = useMemo(
     () => opportunities.filter((item) => isOpportunitySelectableForSample(item.stage)),
     [opportunities]
   );
+
+  // The list the server already scopes to their own account; the form simply
+  // has no other recipient to offer.
+  useEffect(() => {
+    if (!isClient) return;
+    setForm((current) =>
+      current.linkType === 'opportunity' && !current.leadId && !current.clientId
+        ? current
+        : { ...current, linkType: 'opportunity', leadId: '', clientId: '' }
+    );
+  }, [isClient]);
 
   // Drop preselected / stale opportunity if it is in an excluded late stage.
   useEffect(() => {
@@ -253,18 +300,6 @@ export const SampleCreatePage: React.FC = () => {
 
   const removeItem = (index: number) => {
     setItems((curr) => (curr.length > 1 ? curr.filter((_, i) => i !== index) : curr));
-  };
-
-  const applyPreset = (preset: SampleProductPreset) => {
-    setItems((curr) => {
-      if (curr.length === 1 && !curr[0].productName.trim()) {
-        return [{ productName: preset.productName, quantity: preset.quantity, unit: preset.unit }];
-      }
-      return [
-        ...curr,
-        { productName: preset.productName, quantity: preset.quantity, unit: preset.unit },
-      ];
-    });
   };
 
   const handleOpportunityChange = (opportunityId: string) => {
@@ -395,13 +430,13 @@ export const SampleCreatePage: React.FC = () => {
       </div>
 
       {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="mb-4 rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm font-medium text-zinc-900">
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="rounded-xl border border-zinc-300 bg-white p-10 text-center text-sm text-zinc-500">
+        <div className="rounded-xl border border-zinc-200 bg-white p-10 text-center text-sm text-zinc-500">
           Loading form…
         </div>
       ) : (
@@ -409,19 +444,26 @@ export const SampleCreatePage: React.FC = () => {
           <div className="space-y-5">
             <section
               data-tour="samples-create-recipient"
-              className="rounded-xl border border-zinc-300 bg-white p-5"
+              className="rounded-xl border border-zinc-200 bg-white p-5"
             >
-              <h2 className="mt-0 text-base font-bold text-zinc-950">1. Target Recipient & Account</h2>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <h2 className="mt-0 text-base font-bold text-zinc-950">
+                {isClient ? '1. Your opportunity' : '1. Target Recipient & Account'}
+              </h2>
+              {isClient ? (
+                <p className="mt-1 mb-0 text-xs text-zinc-500">
+                  Samples are requested against one of your open deals.
+                </p>
+              ) : null}
+              <div className={`mt-3 flex flex-wrap gap-2 ${isClient ? 'hidden' : ''}`}>
                 {LINK_OPTIONS.map(({ type, label }) => (
                   <button
                     key={type}
                     type="button"
                     onClick={() => setLinkType(type)}
-                    className={`rounded-lg border px-3 py-2 text-sm font-semibold ${
+                    className={`rounded-lg border px-3 py-2 text-sm font-semibold cursor-pointer transition-colors ${
                       form.linkType === type
-                        ? 'border-sky-300 bg-sky-50 text-sky-900'
-                        : 'border-zinc-200 bg-white text-zinc-600'
+                        ? 'border-zinc-950 bg-zinc-950 text-white shadow-xs'
+                        : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50'
                     }`}
                   >
                     {label}
@@ -433,7 +475,9 @@ export const SampleCreatePage: React.FC = () => {
                   {form.linkType === 'lead'
                     ? 'Select Lead Prospect *'
                     : form.linkType === 'opportunity'
-                      ? 'Select Opportunity Deal *'
+                      ? isClient
+                        ? 'Choose one of your opportunities *'
+                        : 'Select Opportunity Deal *'
                       : 'Select Client Account *'}
                 </span>
                 {form.linkType === 'lead' ? (
@@ -477,6 +521,13 @@ export const SampleCreatePage: React.FC = () => {
                   />
                 )}
               </label>
+              {form.linkType === 'opportunity' && !sampleEligibleOpportunities.length ? (
+                <p className="mt-2 mb-0 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
+                  {isClient
+                    ? 'No open opportunity is linked to your account yet, so there is nothing to request a sample against. Your account manager can set one up.'
+                    : 'No opportunity is at a stage that accepts a sample request. Deals that are Won, in Negotiation, at Quotation Sent, in Commercial Discussion or already Sample Approved are excluded.'}
+                </p>
+              ) : null}
               {(selectedLead || selectedClient || selectedOpportunity) && (
                 <div className="mt-3 rounded-xl border border-zinc-100 bg-zinc-50 p-3 text-sm text-zinc-700">
                   <div className="font-semibold text-zinc-900">{recipientName}</div>
@@ -512,7 +563,7 @@ export const SampleCreatePage: React.FC = () => {
 
             <section
               data-tour="samples-create-product"
-              className="rounded-xl border border-zinc-300 bg-white p-5 space-y-4"
+              className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4"
             >
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-100 pb-3">
                 <div>
@@ -526,23 +577,6 @@ export const SampleCreatePage: React.FC = () => {
                 <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-600">
                   {items.length} {items.length === 1 ? 'Item' : 'Items'}
                 </span>
-              </div>
-
-              {/* Quick Presets */}
-              <div>
-                <span className="mb-1.5 block text-xs font-semibold text-zinc-500">Quick Presets</span>
-                <div className="flex flex-wrap gap-2">
-                  {SAMPLE_PRODUCT_PRESETS.map((preset) => (
-                    <button
-                      key={preset.label}
-                      type="button"
-                      onClick={() => applyPreset(preset)}
-                      className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 cursor-pointer"
-                    >
-                      + {preset.label}
-                    </button>
-                  ))}
-                </div>
               </div>
 
               {/* Items List */}
@@ -563,7 +597,7 @@ export const SampleCreatePage: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => removeItem(idx)}
-                          className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-100 transition cursor-pointer"
+                          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:border-zinc-950 hover:bg-zinc-100 transition cursor-pointer"
                           title="Remove item"
                         >
                           <DeleteOutlineIcon sx={{ fontSize: 15 }} /> Remove
@@ -572,16 +606,48 @@ export const SampleCreatePage: React.FC = () => {
                     </div>
 
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
-                      <div className="sm:col-span-6">
+                      <div className="relative sm:col-span-6">
                         <span className={labelClass}>Product / Item Name *</span>
                         <input
                           required
                           maxLength={200}
+                          autoComplete="off"
                           className={fieldClass}
                           placeholder="e.g. Cotton fabric sample, Grade A polymer…"
                           value={item.productName}
                           onChange={(e) => updateItem(idx, { productName: e.target.value })}
+                          onFocus={() => setOpenSuggestFor(idx)}
+                          onBlur={() => window.setTimeout(() => setOpenSuggestFor((current) => (current === idx ? null : current)), 150)}
                         />
+                        {openSuggestFor === idx && matchesForItem(idx).length > 0 ? (
+                          <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-56 overflow-y-auto rounded-xl border border-zinc-200 bg-white shadow-xl">
+                            <div className="border-b border-zinc-100 bg-zinc-50 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                              Used on other sample requests
+                            </div>
+                            {matchesForItem(idx).map((match) => (
+                              <button
+                                key={match.name}
+                                type="button"
+                                onMouseDown={(event) => {
+                                  event.preventDefault();
+                                  updateItem(idx, {
+                                    productName: match.name,
+                                    ...(match.unit && availableUnits.includes(match.unit)
+                                      ? { unit: match.unit }
+                                      : {}),
+                                  });
+                                  setOpenSuggestFor(null);
+                                }}
+                                className="flex w-full items-center justify-between gap-2 border-0 bg-transparent px-3 py-2 text-left text-xs text-zinc-800 cursor-pointer hover:bg-zinc-50"
+                              >
+                                <span className="truncate font-medium">{match.name}</span>
+                                {match.unit ? (
+                                  <span className="shrink-0 text-[11px] text-zinc-500">{match.unit}</span>
+                                ) : null}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
 
                       <div className="sm:col-span-3">
@@ -649,14 +715,16 @@ export const SampleCreatePage: React.FC = () => {
               </div>
             </section>
 
+            {!isClient && (
             <section
               data-tour="samples-create-billing"
-              className="rounded-xl border border-zinc-300 bg-white p-5"
+              className="rounded-xl border border-zinc-200 bg-white p-5"
             >
               <h2 className="mt-0 text-base font-bold text-zinc-950">3. Billing (optional)</h2>
-              <label className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-zinc-800">
+              <label className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-zinc-800 cursor-pointer">
                 <input
                   type="checkbox"
+                  className="rounded border-zinc-300 text-zinc-950 focus:ring-zinc-950 cursor-pointer"
                   checked={Boolean(form.isChargeable)}
                   onChange={(event) => {
                     const checked = event.target.checked;
@@ -743,28 +811,29 @@ export const SampleCreatePage: React.FC = () => {
                 this sample only.
               </p>
             </section>
+            )}
 
             <section
               data-tour="samples-create-urgency"
-              className="rounded-xl border border-zinc-300 bg-white p-5"
+              className="rounded-xl border border-zinc-200 bg-white p-5"
             >
               <h2 className="mt-0 text-base font-bold text-zinc-950">
-                4. Dispatch Urgency & Priority SLA
+                {isClient ? '3. Delivery Address' : '4. Dispatch Urgency & Priority SLA'}
               </h2>
-              <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+              <div className={`mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4 ${isClient ? 'hidden' : ''}`}>
                 {SAMPLE_URGENCIES.map((urgency) => (
                   <button
                     key={urgency}
                     type="button"
                     onClick={() => update('urgency', urgency as SampleUrgency)}
-                    className={`rounded-xl border px-3 py-3 text-left text-sm font-semibold ${
+                    className={`rounded-xl border px-3 py-3 text-left text-sm font-semibold cursor-pointer transition-all ${
                       form.urgency === urgency
-                        ? sampleUrgencyTone(urgency)
-                        : 'border-zinc-200 bg-white text-zinc-700'
+                        ? 'border-zinc-950 bg-zinc-950 text-white shadow-xs'
+                        : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50'
                     }`}
                   >
-                    <div>
-                      <SampleUrgencyDot urgency={urgency} />
+                    <div className="flex items-center gap-2">
+                      <SampleUrgencyDot urgency={urgency} className={form.urgency === urgency ? 'ring-1 ring-white' : ''} />
                       {urgency}
                     </div>
                   </button>
@@ -781,7 +850,9 @@ export const SampleCreatePage: React.FC = () => {
                 />
               </label>
               <label className="mt-4 block">
-                <span className={labelClass}>Internal Notes</span>
+                <span className={labelClass}>
+                  {isClient ? 'Delivery Instructions' : 'Internal Notes'}
+                </span>
                 <textarea
                   rows={3}
                   className={`${fieldClass} h-auto py-2`}
@@ -796,14 +867,14 @@ export const SampleCreatePage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => navigate('/samples')}
-                className="h-10 rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-700"
+                className="h-10 rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={saving}
-                className="h-10 rounded-lg border border-zinc-950 bg-zinc-950 px-4 text-sm font-semibold text-white disabled:opacity-50"
+                className="h-10 rounded-lg border border-zinc-950 bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed shadow-xs"
               >
                 {saving ? 'Saving…' : 'Create Sample Request'}
               </button>
@@ -811,18 +882,18 @@ export const SampleCreatePage: React.FC = () => {
           </div>
 
           <aside className="space-y-4 xl:sticky xl:top-20 xl:self-start">
-            <div className="rounded-xl border border-zinc-300 bg-white p-5">
+            <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-xs">
               <h3 className="m-0 text-sm font-bold text-zinc-950">Checklist</h3>
               <ul className="mt-3 list-none space-y-2 p-0 text-xs">
                 {checklist.map((item) => (
                   <li
                     key={item.empty}
-                    className={`flex items-start gap-2 ${item.ok ? 'text-emerald-700' : 'text-red-600'}`}
+                    className={`flex items-start gap-2 ${item.ok ? 'text-zinc-950 font-medium' : 'text-zinc-400'}`}
                   >
                     {item.ok ? (
-                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-zinc-950" aria-hidden />
                     ) : (
-                      <XCircle className="h-4 w-4 shrink-0 text-red-600" aria-hidden />
+                      <XCircle className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />
                     )}
                     <span>{item.ok ? item.label : item.empty}</span>
                   </li>

@@ -25,6 +25,8 @@ type GoogleMapsWindow = Window & {
     };
   };
   __opennextCrmGoogleMapsReady?: Promise<void>;
+  /** The key the cached loader promise was created with. */
+  __opennextCrmGoogleMapsKey?: string;
   __opennextCrmGoogleMapsResolve?: () => void;
   __opennextCrmGoogleMapsReject?: (err: Error) => void;
 };
@@ -143,15 +145,27 @@ export async function resolveGoogleMapsApiKey(explicit?: string): Promise<string
 /**
  * Load Google Maps JavaScript API (core + places) once per page.
  */
-export function loadGoogleMaps(apiKey?: string): Promise<void> {
+export function loadGoogleMaps(apiKey?: string, allowKeyless = false): Promise<void> {
   const key = String(apiKey || getGoogleMapsApiKey()).trim();
-  if (!key) {
+  if (!key && !allowKeyless) {
     return Promise.reject(new Error('Google Maps API key is not configured'));
   }
 
   const w = window as GoogleMapsWindow;
-  if (mapsPlacesReady(w)) {
+  if (mapsPlacesReady(w) || (allowKeyless && mapsCoreReady(w))) {
     return Promise.resolve();
+  }
+
+  /*
+   * Without an iframe the dashboard never reloads, so this cache lives for the
+   * whole session. A first attempt that failed — no key configured yet, a
+   * transient network error — would otherwise reject every later attempt
+   * instantly, and the map would stay blank until the browser was refreshed
+   * even after the key was saved in Settings. So a failed attempt is forgotten,
+   * and a different key starts over.
+   */
+  if (w.__opennextCrmGoogleMapsKey && w.__opennextCrmGoogleMapsKey !== (key || '__demo__')) {
+    forgetGoogleMapsLoad();
   }
 
   if (w.__opennextCrmGoogleMapsReady) {
@@ -162,7 +176,8 @@ export function loadGoogleMaps(apiKey?: string): Promise<void> {
     });
   }
 
-  w.__opennextCrmGoogleMapsReady = new Promise<void>((resolve, reject) => {
+  w.__opennextCrmGoogleMapsKey = key || '__demo__';
+  const attempt = new Promise<void>((resolve, reject) => {
     w.__opennextCrmGoogleMapsResolve = resolve;
     w.__opennextCrmGoogleMapsReject = reject;
 
@@ -186,18 +201,47 @@ export function loadGoogleMaps(apiKey?: string): Promise<void> {
     script.id = GOOGLE_MAPS_SCRIPT_ID;
     script.async = true;
     script.defer = true;
-    script.src =
-      `https://maps.googleapis.com/maps/api/js` +
-      `?key=${encodeURIComponent(key)}` +
-      `&libraries=places` +
-      `&callback=__opennextCrmGoogleMapsCallback`;
+    const query = [
+      key ? `key=${encodeURIComponent(key)}` : null,
+      'libraries=places',
+      'callback=__opennextCrmGoogleMapsCallback',
+      'v=weekly'
+    ].filter(Boolean).join('&');
+    script.src = `https://maps.googleapis.com/maps/api/js?${query}`;
     script.onerror = () => {
       w.__opennextCrmGoogleMapsReject?.(new Error('Failed to load Google Maps script'));
     };
     document.head.appendChild(script);
   });
 
+  // Cache the success, forget the failure, so the next mount can try again.
+  w.__opennextCrmGoogleMapsReady = attempt.catch((error) => {
+    forgetGoogleMapsLoad();
+    throw error;
+  });
+
   return w.__opennextCrmGoogleMapsReady;
+}
+
+/**
+ * Drop the cached loader state and the script tag.
+ *
+ * Called after a failed load so a later attempt starts clean, and when the key
+ * changes. Safe to call at any time: Google re-creates everything it needs.
+ */
+export function forgetGoogleMapsLoad(): void {
+  if (typeof window === 'undefined') return;
+  const w = window as GoogleMapsWindow;
+  w.__opennextCrmGoogleMapsReady = undefined;
+  w.__opennextCrmGoogleMapsResolve = undefined;
+  w.__opennextCrmGoogleMapsReject = undefined;
+  w.__opennextCrmGoogleMapsKey = undefined;
+  globalThis.__opennextCrmGoogleMapsCallback = undefined;
+  try {
+    document.getElementById(GOOGLE_MAPS_SCRIPT_ID)?.remove();
+  } catch {
+    // ignore
+  }
 }
 
 /** @deprecated Use loadGoogleMaps — same loader (includes Places). */

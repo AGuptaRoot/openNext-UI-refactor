@@ -1486,7 +1486,6 @@ export const TimeLogsPage: React.FC = () => {
           <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl text-center">
             <div
               className="mx-auto mb-4 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-6 font-mono text-[42px] font-bold leading-none text-emerald-800"
-              style={{ color: '#065f46', background: '#ecfdf5' }}
             >
               {formatElapsedHHMMSS(checkInIso(running), tick)}
             </div>

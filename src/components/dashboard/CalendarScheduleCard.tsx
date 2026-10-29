@@ -7,7 +7,12 @@ import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
 import CloseIcon from '@mui/icons-material/Close';
 import EventNoteOutlinedIcon from '@mui/icons-material/EventNoteOutlined';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-import { CalendarEventItem, DashboardData } from '../../types/dashboard';
+import { DashboardData } from '../../types/dashboard';
+import {
+  type CalendarEventRow,
+  collectCalendarEvents,
+  parseCalendarEventDate,
+} from '../../utils/activityReminders';
 
 interface CalendarScheduleCardProps {
   data: DashboardData;
@@ -24,17 +29,22 @@ type DayCell = {
   evCount?: number;
 };
 
-type CalendarEventRow = CalendarEventItem & Record<string, unknown>;
-
 function toYmd(value: Date): string {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
 }
 
-function parseEventDate(event: CalendarEventRow): Date | null {
-  const raw = event.date || event.dueDate || (event as { timestamp?: string }).timestamp;
-  if (!raw) return null;
-  const parsed = new Date(String(raw));
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+/**
+ * Creation time, used to order the Upcoming Agenda newest-first. Falls back to
+ * the event date when a source collection has no timestamps.
+ */
+function eventCreatedTime(event: CalendarEventRow): number {
+  const raw = (event as { createdAt?: string }).createdAt;
+  if (raw) {
+    const parsed = new Date(String(raw));
+    if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+  }
+  const fallback = parseCalendarEventDate(event);
+  return fallback ? fallback.getTime() : 0;
 }
 
 function formatShortDate(ymd: string): string {
@@ -49,21 +59,13 @@ function formatShortDate(ymd: string): string {
 
 function eventTimeLabel(event: CalendarEventRow): string {
   if (event.time) return String(event.time);
-  const parsed = parseEventDate(event);
+  const parsed = parseCalendarEventDate(event);
   if (!parsed) return 'All Day';
   return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function collectEvents(data: DashboardData): CalendarEventRow[] {
-  const summary = data.calendarSummary;
-  if (Array.isArray(summary?.allCalendarEvents) && summary.allCalendarEvents.length > 0) {
-    return summary.allCalendarEvents as CalendarEventRow[];
-  }
-  const legacy = (data as DashboardData & { calendarEvents?: CalendarEventItem[] }).calendarEvents;
-  if (Array.isArray(legacy) && legacy.length > 0) {
-    return legacy as CalendarEventRow[];
-  }
-  return (summary?.upcomingCalendarEvents || []) as CalendarEventRow[];
+  return collectCalendarEvents(data);
 }
 
 function resolveEntityLink(event: CalendarEventRow): {
@@ -82,8 +84,9 @@ function resolveEntityLink(event: CalendarEventRow): {
     (entityType === 'lead' ? 'Lead' : entityType === 'client' ? 'Client' : 'Record');
 
   if (entityType === 'lead' || category === 'followup' || type === 'follow-up') {
-    const tab =
-      category === 'followup' || type === 'follow-up' ? 'follow-ups' : 'activities';
+    // The lead page no longer has a Follow-ups tab, so every lead-side event
+    // opens on Activities rather than a tab that would fall back to Details.
+    const tab = 'activities';
     return {
       path: `/leads/${entityId}?tab=${tab}`,
       label: 'Open Lead',
@@ -134,7 +137,7 @@ export const CalendarScheduleCard: React.FC<CalendarScheduleCardProps> = ({ data
   const eventsByDate = useMemo(() => {
     const map = new Map<string, CalendarEventRow[]>();
     allEvents.forEach((event) => {
-      const parsed = parseEventDate(event);
+      const parsed = parseCalendarEventDate(event);
       if (!parsed) return;
       const ymd = toYmd(parsed);
       const list = map.get(ymd) || [];
@@ -183,9 +186,17 @@ export const CalendarScheduleCard: React.FC<CalendarScheduleCardProps> = ({ data
     return cells;
   }, [viewMonth, eventsByDate, selectedDate, todayYmd]);
 
-  const displayEvents = selectedDate
-    ? eventsByDate.get(selectedDate) || []
-    : allEvents.slice(0, 4);
+  /**
+   * A chosen day reads best in chronological order, but the default agenda
+   * shows the most recently created activities first so new work surfaces at
+   * the top instead of being buried behind old overdue rows.
+   */
+  const displayEvents = useMemo(() => {
+    if (selectedDate) return eventsByDate.get(selectedDate) || [];
+    return [...allEvents]
+      .sort((a, b) => eventCreatedTime(b) - eventCreatedTime(a))
+      .slice(0, 4);
+  }, [selectedDate, eventsByDate, allEvents]);
 
   const agendaTitle = selectedDate
     ? `Schedule for ${formatShortDate(selectedDate)}`
@@ -391,8 +402,18 @@ export const CalendarScheduleCard: React.FC<CalendarScheduleCardProps> = ({ data
                         </div>
                       ) : null}
                     </div>
-                    <span className="shrink-0 rounded-full border border-zinc-200 bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-800">
-                      {String(event.relativeDate || event.type || 'Meeting')}
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {event.isMissed ? (
+                        <span
+                          className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700"
+                          title="Scheduled activity was not completed by its due time"
+                        >
+                          Missed
+                        </span>
+                      ) : null}
+                      <span className="rounded-full border border-zinc-200 bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-800">
+                        {String(event.relativeDate || event.type || 'Meeting')}
+                      </span>
                     </span>
                   </button>
                 );
@@ -470,7 +491,7 @@ export const CalendarScheduleCard: React.FC<CalendarScheduleCardProps> = ({ data
                         <span className="text-xs text-zinc-500">
                           {entityDisplayName(event)} • {eventTimeLabel(event)}
                           {(() => {
-                            const parsed = parseEventDate(event);
+                            const parsed = parseCalendarEventDate(event);
                             return parsed ? ` • ${formatShortDate(toYmd(parsed))}` : '';
                           })()}
                           {event.assignedToName || event.assignedToLabel

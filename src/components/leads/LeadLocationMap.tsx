@@ -16,6 +16,7 @@ import {
   ensureGooglePacStyles,
   getGoogleMaps,
   hideGooglePacContainers,
+  forgetGoogleMapsLoad,
   loadGoogleMaps,
   removeGooglePacContainers,
   resolveGoogleMapsApiKey,
@@ -160,6 +161,8 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
   const readOnlyRef = useRef(readOnly);
 
   const [loadError, setLoadError] = useState<string | null>(null);
+  /** Bumped by Retry so the bootstrap effect runs again after a failure. */
+  const [reloadToken, setReloadToken] = useState(0);
   const [ready, setReady] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState(address || '');
@@ -373,6 +376,13 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
     }
   };
 
+  /** Undo a previous hide so Google can show the next suggestion list. */
+  const revealGooglePacContainers = () => {
+    document.querySelectorAll<HTMLElement>('.pac-container').forEach((el) => {
+      el.style.removeProperty('display');
+    });
+  };
+
   const handleClearSearch = () => {
     setSearchQuery('');
     setSearchError(null);
@@ -534,7 +544,7 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
       removeGooglePacContainers();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap once per apiKey/showSearch/readOnly
-  }, [apiKey, showSearch, readOnly, resolvePoint]);
+  }, [apiKey, showSearch, readOnly, resolvePoint, reloadToken]);
 
   // Sync marker when lat/lng change (Places search, GPS, click, clear)
   useEffect(() => {
@@ -663,14 +673,14 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
               onChange={(e) => {
                 setSearchQuery(e.target.value);
                 setCandidates([]);
+                // Typing must bring the dropdown back. Google reuses the same
+                // .pac-container and only repositions it, so a `display: none`
+                // left behind by an earlier blur keeps every later suggestion
+                // list invisible until the field is re-focused.
+                revealGooglePacContainers();
               }}
               onKeyDown={handleKeyDown}
-              onFocus={() => {
-                // Let Google re-show suggestions after a prior hide (display:none only).
-                document.querySelectorAll<HTMLElement>('.pac-container').forEach((el) => {
-                  el.style.removeProperty('display');
-                });
-              }}
+              onFocus={revealGooglePacContainers}
               onBlur={() => {
                 // Hide only — never remove .pac-container on blur (breaks suggestion clicks).
                 window.setTimeout(() => hideGooglePacContainers(), 280);
@@ -815,7 +825,21 @@ export const LeadLocationMap: React.FC<LeadLocationMapProps> = ({
 
       {/* Status / Errors / Hint */}
       {loadError ? (
-        <span className="text-[11px] text-red-700 font-medium">{loadError}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-medium text-red-700">{loadError}</span>
+          <button
+            type="button"
+            onClick={() => {
+              // Clears the session-wide loader cache, then re-runs the effect.
+              forgetGoogleMapsLoad();
+              setLoadError(null);
+              setReloadToken((token) => token + 1);
+            }}
+            className="h-6 rounded border border-zinc-300 bg-white px-2 text-[11px] font-semibold text-zinc-700 cursor-pointer hover:bg-zinc-50"
+          >
+            Retry
+          </button>
+        </div>
       ) : !ready ? (
         <span className="text-[11px] text-zinc-400 font-medium">Loading Google Map…</span>
       ) : hint && !hasCoords ? (

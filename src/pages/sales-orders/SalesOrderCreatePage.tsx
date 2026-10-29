@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import { crmApi } from '../../services/api';
@@ -42,6 +42,8 @@ function formatAddress(addr?: ClientAddress | string | null): string {
 
 export const SalesOrderCreatePage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnTo = searchParams.get('returnTo');
   const { clients, projects } = useFinanceOptions();
   const settingsCurrency = useDefaultCurrency();
 
@@ -304,7 +306,7 @@ export const SalesOrderCreatePage: React.FC = () => {
       <CreatePageHeader
         title="New Sales Order"
         backLabel="Sales Orders"
-        backPath="/sales-orders"
+        backPath={returnTo || "/sales-orders"}
         saving={saving}
         formId="sales-order-form"
       />
@@ -613,8 +615,8 @@ export const SalesOrderCreatePage: React.FC = () => {
           <div className="mt-4 flex flex-wrap gap-2 justify-end">
             <button
               type="button"
-              onClick={() => navigate('/sales-orders')}
-              className="px-4 py-2 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer"
+              onClick={() => (returnTo ? navigate(returnTo) : navigate('/sales-orders'))}
+              className="px-4 py-2 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer hover:bg-zinc-50"
             >
               Cancel
             </button>

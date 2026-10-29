@@ -275,10 +275,19 @@ export interface SalesOrderQueryParams {
 
 export interface SalesOrderShipmentInput {
   courierName: string;
-  trackingNumber: string;
+  /** Optional: couriers often issue the AWB after pickup, and hand deliveries have none. */
+  trackingNumber?: string;
   weightKg?: number;
   notes?: string;
   items: Array<{ lineItemIndex: number; qty: number }>;
+}
+
+/** Fields that can be changed on a shipment after it has gone out. */
+export interface SalesOrderShipmentUpdateInput {
+  trackingNumber?: string;
+  deliveryStatus?: SalesOrderShipment['deliveryStatus'];
+  proofOfDelivery?: string;
+  notes?: string;
 }
 
 export interface SalesOrderReturnInput {

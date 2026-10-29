@@ -1,12 +1,9 @@
 import React, { useEffect } from 'react';
-import { LayoutDashboard } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { useTheme } from '@/context/ThemeContext';
+import { applyDocumentTheme, useTheme } from '@/context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useDashboardSidebarSync, hideParentSidebarRoutes } from '../hooks/useDashboardSidebarSync';
-import { GlobalSearchBar } from './common/GlobalSearchBar';
-import { NavbarTimer } from './common/NavbarTimer';
 import { CheckoutNoteModal } from './common/CheckoutNoteModal';
+import { ActivityReminderPopup } from './common/ActivityReminderPopup';
 import { ModuleTour } from '../tours/ModuleTour';
 import { LeadsTour } from '../tours/LeadsTour';
 import { ClientsTour } from '../tours/ClientsTour';
@@ -32,16 +29,18 @@ import { TourControlBar } from '../tours/TourControlBar';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { theme } = useTheme();
-  const { user, activeRole, isClient, canUseTours } = useAuth();
+  const { activeRole, isClient, canUseTours } = useAuth();
   useDashboardSidebarSync();
 
-  // Keep Tailwind `dark:` utilities in sync with OpenNext CMS theme (light | dark).
+  /*
+   * Keep Tailwind `dark:` utilities in sync with the OpenNext CMS theme.
+   *
+   * `applyDocumentTheme` writes to whichever elements the CRM owns: the mount
+   * roots when hosted in the dashboard (its stylesheet is scoped to them, and
+   * <html> is the CMS's to control), or the document when standalone.
+   */
   useEffect(() => {
-    const isDark = theme === 'dark';
-    document.documentElement.classList.toggle('dark', isDark);
-    document.documentElement.dataset.theme = theme;
-    document.body.classList.toggle('dark', isDark);
-    document.body.dataset.theme = theme;
+    applyDocumentTheme(theme);
   }, [theme]);
 
   // Client: hide Dashboard. Employee: hide Expenses.
@@ -72,12 +71,15 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     return () => window.clearInterval(timer);
   }, [isClient, activeRole]);
 
-  const displayName = user?.username || user?.email?.split('@')[0] || 'Admin';
-  const tenantName = (user?.tenant as { name?: string })?.name || 'Root Workspace';
-  const homePath = isClient ? '/projects' : '/dashboard';
+
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50 flex flex-col font-sans transition-colors">
+    <div
+      className={`min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50 flex flex-col font-sans transition-colors ${
+        theme === 'dark' ? 'dark' : ''
+      }`}
+      data-theme={theme}
+    >
       {canUseTours && (
         <>
           <ModuleTour />
@@ -108,12 +110,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         {canUseTours && <TourControlBar />}
 
         {/* Top Navbar */}
-        <header
+        {/* <header
           data-tour="crm-header"
           className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between gap-4"
-        >
+        > */}
         {/* Left: Brand & Home Link */}
-        <div className="flex items-center gap-3 shrink-0">
+        {/* <div className="flex items-center gap-3 shrink-0">
           <Link to={homePath} className="flex items-center gap-3 no-underline">
             <div className="w-8 h-8 rounded-lg bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 flex items-center justify-center font-bold text-sm select-none">
               <LayoutDashboard className="h-4 w-4 shrink-0" aria-hidden />
@@ -127,21 +129,21 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               </p>
             </div>
           </Link>
-        </div>
+        </div> */}
 
         {/* Center: Global Search Bar (RBAC-Based) */}
-        <div data-tour="crm-search" className="flex-1 min-w-0 max-w-xl mx-auto">
+        {/* <div data-tour="crm-search" className="flex-1 min-w-0 max-w-xl mx-auto">
           <GlobalSearchBar />
-        </div>
+        </div> */}
 
         {/* Right Area: Active Task Timer & User Profile */}
-        <div className="flex items-center gap-3 shrink-0">
+        {/* <div className="flex items-center gap-3 shrink-0">
           <div data-tour="crm-timer">
             <NavbarTimer />
-          </div>
+          </div> */}
 
           {/* User Profile & Role Info */}
-          <div className="flex items-center gap-2 pl-1 sm:pl-2 sm:border-l sm:border-zinc-200 dark:sm:border-zinc-800">
+          {/* <div className="flex items-center gap-2 pl-1 sm:pl-2 sm:border-l sm:border-zinc-200 dark:sm:border-zinc-800">
             <div className="w-8 h-8 rounded-full bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 flex items-center justify-center text-xs font-semibold select-none">
               {displayName.charAt(0).toUpperCase()}
             </div>
@@ -153,9 +155,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 {activeRole}
               </span>
             </div>
-          </div>
-        </div>
-      </header>
+          </div> */}
+        {/* </div> */}
+      {/* </header> */}
       </div>
 
       {/* Main Content Area */}
@@ -168,6 +170,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
       {/* Global Check-Out Work Note Modal */}
       <CheckoutNoteModal />
+
+      {/* Hourly reminder for the activities assigned to this user */}
+      <ActivityReminderPopup />
     </div>
   );
 };

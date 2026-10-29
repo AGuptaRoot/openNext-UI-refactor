@@ -19,7 +19,10 @@
    Semantic design tokens (OpenNext CMS–aligned)
    Use: color: var(--foreground); background: var(--card);
    ═══════════════════════════════════════════════════════════════════════════ */
-:root {
+:root,
+:scope,
+.crm-mount-root,
+[data-crm-mount-root] {
   color-scheme: light;
 
   --background: #fafafa;
@@ -73,7 +76,14 @@
   --chart-cursor: #f4f4f5;
 }
 
-html.dark {
+html.dark,
+:scope.dark,
+.dark,
+[data-theme='dark'],
+.crm-mount-root.dark,
+[data-crm-mount-root].dark,
+.crm-mount-root[data-theme='dark'],
+[data-crm-mount-root][data-theme='dark'] {
   color-scheme: dark;
 
   --background: #09090b;
@@ -125,13 +135,21 @@ html.dark {
   --chart-cursor: #27272a;
 }
 
-html {
+html,
+:scope,
+.crm-mount-root,
+[data-crm-mount-root] {
   color-scheme: light;
   background-color: var(--background);
   color: var(--foreground);
 }
 
-html.dark {
+html.dark,
+:scope.dark,
+.dark,
+[data-theme='dark'],
+.crm-mount-root.dark,
+[data-crm-mount-root].dark {
   color-scheme: dark;
 }
 
@@ -207,72 +225,72 @@ body {
 */
 
 /* Canvas / surfaces */
-html.dark .bg-white,
-html.dark .bg-zinc-50,
-html.dark .bg-zinc-100,
-html.dark .bg-neutral-50,
-html.dark .bg-neutral-100,
-html.dark .bg-stone-50,
-html.dark .bg-gray-50,
-html.dark .bg-slate-50 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-white,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-zinc-50,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-zinc-100,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-neutral-50,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-neutral-100,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-stone-50,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-gray-50,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-slate-50 {
   background-color: var(--card) !important;
   color: var(--card-foreground);
 }
 
-html.dark .bg-zinc-200,
-html.dark .bg-neutral-200,
-html.dark .bg-gray-200 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-zinc-200,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-neutral-200,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-gray-200 {
   background-color: var(--muted) !important;
 }
 
 /* Primary solid fills invert in dark (CTA buttons) */
-html.dark .bg-zinc-950,
-html.dark .bg-black,
-html.dark .bg-neutral-950,
-html.dark .bg-slate-950 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-zinc-950,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-black,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-neutral-950,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-slate-950 {
   background-color: var(--primary) !important;
   color: var(--primary-foreground) !important;
 }
 
 /* Mid-solid chips / avatars (bg-zinc-900) stay dark enough for --on-solid ink */
-html.dark .bg-zinc-900,
-html.dark .bg-zinc-800 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-zinc-900,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-zinc-800 {
   background-color: #3f3f46 !important;
 }
 
-html.dark .min-h-screen.bg-zinc-50,
-html.dark .bg-zinc-50\/80,
-html.dark .bg-zinc-50\/70 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .min-h-screen.bg-zinc-50,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-zinc-50\/80,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-zinc-50\/70 {
   background-color: var(--background) !important;
 }
 
 /* Text */
-html.dark .text-zinc-950,
-html.dark .text-zinc-900,
-html.dark .text-zinc-800,
-html.dark .text-neutral-950,
-html.dark .text-neutral-900,
-html.dark .text-black,
-html.dark .text-slate-900,
-html.dark .text-gray-900,
-html.dark .text-gray-800 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-zinc-950,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-zinc-900,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-zinc-800,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-neutral-950,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-neutral-900,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-black,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-slate-900,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-gray-900,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-gray-800 {
   color: var(--foreground) !important;
 }
 
-html.dark .text-zinc-700,
-html.dark .text-zinc-600,
-html.dark .text-neutral-700,
-html.dark .text-gray-700,
-html.dark .text-gray-600 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-zinc-700,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-zinc-600,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-neutral-700,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-gray-700,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-gray-600 {
   color: #d4d4d8 !important;
 }
 
-html.dark .text-zinc-500,
-html.dark .text-zinc-400,
-html.dark .text-neutral-500,
-html.dark .text-gray-500,
-html.dark .text-gray-400,
-html.dark .text-muted-foreground {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-zinc-500,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-zinc-400,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-neutral-500,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-gray-500,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-gray-400,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-muted-foreground {
   color: var(--muted-foreground) !important;
 }
 
@@ -280,180 +298,196 @@ html.dark .text-muted-foreground {
   DO NOT blanket-remap `.text-white` — that broke avatars & solid badges.
   Only invert white text when the solid primary fill itself was inverted.
 */
-html.dark .bg-zinc-950.text-white,
-html.dark .bg-black.text-white,
-html.dark .bg-slate-950.text-white,
-html.dark .bg-neutral-950.text-white,
-html.dark .bg-zinc-950 .text-white:not(.crm-on-solid):not(.text-on-solid),
-html.dark .bg-black .text-white:not(.crm-on-solid):not(.text-on-solid) {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-zinc-950.text-white,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-black.text-white,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-slate-950.text-white,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-neutral-950.text-white,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-zinc-950 .text-white:not(.crm-on-solid):not(.text-on-solid),
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-black .text-white:not(.crm-on-solid):not(.text-on-solid) {
   color: var(--primary-foreground) !important;
 }
 
 /* Borders */
-html.dark .border-zinc-100,
-html.dark .border-zinc-200,
-html.dark .border-zinc-300,
-html.dark .border-neutral-200,
-html.dark .border-gray-200,
-html.dark .border-slate-200 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-zinc-100,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-zinc-200,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-zinc-300,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-neutral-200,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-gray-200,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-slate-200 {
   border-color: var(--border) !important;
 }
 
-html.dark .border-zinc-950,
-html.dark .border-black,
-html.dark .border-slate-950 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-zinc-950,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-black,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-slate-950 {
   border-color: var(--primary) !important;
 }
 
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .divide-zinc-100 > :not([hidden]) ~ :not([hidden]),
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .divide-zinc-200 > :not([hidden]) ~ :not([hidden]),
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .divide-zinc-300 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--border) !important;
+}
+
 /* Hover / muted fills */
-html.dark .hover\:bg-zinc-50:hover,
-html.dark .hover\:bg-zinc-100:hover,
-html.dark .hover\:bg-white:hover {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .hover\:bg-zinc-50:hover,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .hover\:bg-zinc-50\/70:hover,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .hover\:bg-zinc-50\/80:hover,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .hover\:bg-zinc-50\/50:hover,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .hover\:bg-zinc-50\/60:hover,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .hover\:bg-zinc-100:hover,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .hover\:bg-white:hover {
   background-color: var(--muted) !important;
 }
 
-html.dark .hover\:bg-zinc-800:hover,
-html.dark .hover\:bg-zinc-950:hover {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .hover\:bg-zinc-800:hover,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .hover\:bg-zinc-950:hover {
   background-color: #e4e4e7 !important;
   color: #09090b !important;
 }
 
 /* Soft tinted panels → semantic badge surfaces */
-html.dark .bg-emerald-50,
-html.dark .bg-green-50 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-emerald-50,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-green-50 {
   background-color: var(--success-bg) !important;
 }
-html.dark .bg-amber-50,
-html.dark .bg-yellow-50,
-html.dark .bg-orange-50 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-amber-50,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-yellow-50,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-orange-50 {
   background-color: var(--warning-bg) !important;
 }
-html.dark .bg-red-50,
-html.dark .bg-rose-50 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-red-50,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-rose-50 {
   background-color: var(--danger-bg) !important;
 }
-html.dark .bg-blue-50,
-html.dark .bg-sky-50,
-html.dark .bg-violet-50,
-html.dark .bg-indigo-50 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-blue-50,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-sky-50,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-violet-50,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-indigo-50 {
   background-color: var(--info-bg) !important;
 }
 
-html.dark .bg-blue-50\/50,
-html.dark .bg-blue-50\/40 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-blue-50\/50,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .bg-blue-50\/40 {
   background-color: var(--info-bg) !important;
 }
 
-html.dark .text-emerald-600,
-html.dark .text-emerald-700,
-html.dark .text-emerald-800,
-html.dark .text-emerald-900,
-html.dark .text-green-700,
-html.dark .text-green-800 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-emerald-600,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-emerald-700,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-emerald-800,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-emerald-900,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-green-700,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-green-800 {
   color: var(--success-foreground) !important;
 }
 
-html.dark .text-amber-600,
-html.dark .text-amber-700,
-html.dark .text-amber-800,
-html.dark .text-amber-900,
-html.dark .text-amber-950,
-html.dark .text-yellow-700,
-html.dark .text-orange-600,
-html.dark .text-orange-700 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-amber-600,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-amber-700,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-amber-800,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-amber-900,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-amber-950,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-yellow-700,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-orange-600,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-orange-700 {
   color: var(--warning-foreground) !important;
 }
 
-html.dark .text-red-500,
-html.dark .text-red-600,
-html.dark .text-red-700,
-html.dark .text-red-800,
-html.dark .text-rose-600,
-html.dark .text-rose-700 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-red-500,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-red-600,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-red-700,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-red-800,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-rose-600,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-rose-700 {
   color: var(--danger-foreground) !important;
 }
 
-html.dark .text-blue-500,
-html.dark .text-blue-600,
-html.dark .text-blue-700,
-html.dark .text-blue-800,
-html.dark .text-blue-900,
-html.dark .text-sky-700,
-html.dark .text-sky-800,
-html.dark .text-indigo-600,
-html.dark .text-indigo-700 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-blue-500,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-blue-600,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-blue-700,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-blue-800,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-blue-900,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-sky-700,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-sky-800,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-indigo-600,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .text-indigo-700 {
   color: var(--info-foreground) !important;
 }
 
-html.dark .border-emerald-200,
-html.dark .border-green-200 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-emerald-200,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-green-200 {
   border-color: var(--success-border) !important;
 }
-html.dark .border-amber-200,
-html.dark .border-yellow-200,
-html.dark .border-orange-200 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-amber-200,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-yellow-200,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-orange-200 {
   border-color: var(--warning-border) !important;
 }
-html.dark .border-red-200,
-html.dark .border-rose-200 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-red-200,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-rose-200 {
   border-color: var(--danger-border) !important;
 }
-html.dark .border-blue-200,
-html.dark .border-sky-200,
-html.dark .border-blue-500 {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-blue-200,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-sky-200,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .border-blue-500 {
   border-color: var(--info-border) !important;
 }
 
 /* Form controls */
-html.dark input,
-html.dark select,
-html.dark textarea {
-  background-color: var(--input);
-  color: var(--foreground);
-  border-color: var(--border);
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) input,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) select,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) textarea {
+  background-color: var(--input) !important;
+  color: var(--foreground) !important;
+  border-color: var(--border) !important;
 }
 
-html.dark input::placeholder,
-html.dark textarea::placeholder {
-  color: var(--muted-foreground);
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) input::placeholder,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) textarea::placeholder {
+  color: var(--muted-foreground) !important;
   opacity: 0.85;
 }
 
-html.dark option {
-  background-color: var(--card);
-  color: var(--foreground);
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) option {
+  background-color: var(--card) !important;
+  color: var(--foreground) !important;
 }
 
-html.dark input[type='range'] {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) input[type='range'] {
   accent-color: var(--info-foreground);
 }
 
-/* Tables / sticky headers */
-html.dark thead,
-html.dark th {
-  background-color: var(--card);
-  color: var(--foreground);
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) input[type='checkbox'] {
+  accent-color: var(--primary);
 }
 
-html.dark tr:hover td {
-  background-color: var(--muted);
+/* Tables / sticky headers */
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) thead,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) th,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) thead tr,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) tr.bg-zinc-50 {
+  background-color: var(--card) !important;
+  color: var(--foreground) !important;
+}
+
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) tr:hover td {
+  background-color: var(--muted) !important;
 }
 
 /* Lucide / SVG icons inherit currentColor by default — ensure parents have readable color */
-html.dark svg.lucide {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) svg.lucide {
   color: inherit;
 }
 
 /* Scrollbars (Chromium) */
-html.dark *::-webkit-scrollbar {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
-html.dark *::-webkit-scrollbar-thumb {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) *::-webkit-scrollbar-thumb {
   background: #3f3f46;
   border-radius: 8px;
 }
-html.dark *::-webkit-scrollbar-track {
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) *::-webkit-scrollbar-track {
   background: var(--card);
 }
 
@@ -469,22 +503,30 @@ html.dark *::-webkit-scrollbar-track {
   pointer-events: none !important;
 }
 
-html.dark .pac-container {
-  background-color: var(--card);
-  color: var(--foreground);
-  border-color: var(--border);
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .pac-container {
+  background-color: var(--card) !important;
+  color: var(--foreground) !important;
+  border-color: var(--border) !important;
 }
-html.dark .pac-item {
-  color: var(--foreground);
-  border-top-color: var(--border);
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .pac-item {
+  color: var(--foreground) !important;
+  border-top-color: var(--border) !important;
 }
-html.dark .pac-item:hover,
-html.dark .pac-item-selected {
-  background-color: var(--muted);
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .pac-item:hover,
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .pac-item-selected {
+  background-color: var(--muted) !important;
 }
-html.dark .pac-item-query {
-  color: var(--foreground);
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .pac-item-query {
+  color: var(--foreground) !important;
 }
-html.dark .pac-matched {
-  color: var(--foreground);
+:is(.dark, html.dark, :scope.dark, [data-theme='dark']) .pac-matched {
+  color: var(--foreground) !important;
+}
+
+/*
+ * Probe used by the CMS Mount API entry (src/mount.tsx) to tell whether the
+ * host's scoped stylesheet actually applied. Never rendered to the user.
+ */
+.opennext-crm-style-probe {
+  display: none;
 }

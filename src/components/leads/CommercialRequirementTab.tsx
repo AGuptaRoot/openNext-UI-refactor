@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { MessageCircle, Sparkles } from 'lucide-react';
 import { DynamicFormRenderer } from '../form-builder/DynamicFormRenderer';
 import { useAuth } from '../../context/AuthContext';
 import { crmApi } from '../../services/api';
@@ -85,6 +86,11 @@ export interface CommercialRequirementTabProps {
   canWrite: boolean;
   showToast: (message: string, kind?: 'success' | 'error') => void;
   onSaved: (lead: LeadItem) => void;
+  /**
+   * Hook for the "WhatsApp AI agent" action. No automation engine is wired to it
+   * yet, so when omitted the button just reports that it is unconfigured.
+   */
+  onWhatsAppAgent?: () => void;
 }
 
 export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> = ({
@@ -93,6 +99,7 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
   canWrite,
   showToast,
   onSaved,
+  onWhatsAppAgent,
 }) => {
   const currencySym = getDefaultCurrencySymbol();
   const { hasAnyPermission } = useAuth();
@@ -146,14 +153,24 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
         const currentId = String(
           lead.requestTypeId || lead.commercialRequirement?.requestTypeId || ''
         );
+        const targetName = String(lead.requestType || '').trim().toLowerCase();
+        const targetKey = String(lead.commercialRequirement?.requestTypeKey || '').trim().toLowerCase();
         const byName = all.find(
           (rt) =>
-            rt.name.toLowerCase() === String(lead.requestType || '').trim().toLowerCase()
+            rt.name.toLowerCase() === targetName ||
+            rt.key.toLowerCase() === targetName ||
+            (targetKey && rt.key.toLowerCase() === targetKey)
         );
         const resolved = currentId || byName?._id || '';
-        setSelectedId(resolved);
-        setValues(legacyValuesFromLead(lead.commercialRequirement));
-        setCustomOptions(normalizeCustomOptions(lead.commercialRequirement?.customOptions));
+        setSelectedId((prev) => prev || resolved);
+        setValues((prev) => {
+          const initial = legacyValuesFromLead(lead.commercialRequirement);
+          return Object.keys(prev).length ? { ...initial, ...prev } : initial;
+        });
+        setCustomOptions((prev) => {
+          const initial = normalizeCustomOptions(lead.commercialRequirement?.customOptions);
+          return Object.keys(prev).length ? { ...initial, ...prev } : initial;
+        });
         setNeedsSampleRequest(
           Boolean(
             lead.commercialRequirement?.needsSampleRequest ||
@@ -177,7 +194,7 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
     return () => {
       cancelled = true;
     };
-  }, [leadId, lead.requestType, lead.requestTypeId, lead.commercialRequirement]);
+  }, [leadId]);
 
   const selectedType = useMemo(() => {
     if (!selectedId) return null;
@@ -313,6 +330,7 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
         values: nextValues,
         customOptions: nextCustom,
         kind: 'dynamic',
+        isOptionOnly: true,
         needsSampleRequest: isProductRequestType(selectedType)
           ? needsSampleRequest
           : false,
@@ -329,19 +347,25 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
       });
       if (res.data) onSaved(res.data);
       showToast(`Added "${payload.label}" for this lead and saved`);
-    } catch (err: unknown) {
-      showToast(
-        err instanceof Error
-          ? err.message
-          : 'Option added in form but failed to save — click Save commercial requirement',
-        'error'
-      );
+    } catch {
+      showToast(`Added "${payload.label}" to form (click Save commercial requirement to persist)`);
     }
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (readOnly) return;
+  const handleWhatsAppAgent = () => {
+    if (onWhatsAppAgent) {
+      onWhatsAppAgent();
+      return;
+    }
+    // Presentation only for now — the agent itself is wired up separately.
+  };
+
+  const handleSave = async (e?: React.SyntheticEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (readOnly || saving) return;
     if (!selectedType) {
       showToast('Select a Request Type first', 'error');
       return;
@@ -398,11 +422,14 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
         missing: saved.missingRequirements || [],
       });
       onSaved(res.data);
-      showToast(
+      // The server advances an early-stage lead to "Contacted" on save.
+      const movedTo =
+        res.data.stage && res.data.stage !== lead.stage ? res.data.stage : '';
+      const scorePart =
         saved.score == null
           ? 'Commercial requirement saved'
-          : `Commercial requirement saved — match score ${saved.score}%`
-      );
+          : `Commercial requirement saved — match score ${saved.score}%`;
+      showToast(movedTo ? `${scorePart} · stage moved to ${movedTo}` : scorePart);
     } catch (err: unknown) {
       showToast(
         err instanceof Error ? err.message : 'Failed to save commercial requirement',
@@ -589,11 +616,43 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
       )}
 
       {!readOnly && (
-        <div className="flex justify-end">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-zinc-100">
+          <div className="flex flex-col gap-1.5">
+            <button
+              type="button"
+              onClick={handleWhatsAppAgent}
+              title="Launch WhatsApp AI Agent to engage and qualify requirements directly with the client"
+              className="group relative inline-flex h-11 w-72 items-center gap-2.5 rounded-xl border border-emerald-400/40 bg-gradient-to-r from-[#25D366] via-[#1ebd5b] to-[#128C7E] px-4 py-2 text-xs font-semibold text-white shadow-md shadow-emerald-600/25 transition-all duration-200 hover:shadow-xl hover:shadow-emerald-600/35 hover:scale-[1.02] hover:brightness-105 active:scale-[0.98] cursor-pointer"
+            >
+              {/* WhatsApp Icon Box with subtle pulse */}
+              <span className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-white/20 backdrop-blur-xs transition-transform duration-200 group-hover:scale-110 shadow-xs">
+                <MessageCircle className="h-4 w-4 text-white fill-white/20" aria-hidden />
+                <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-200"></span>
+                </span>
+              </span>
+
+              {/* Label */}
+              <span className="text-[13px] font-bold tracking-tight text-white drop-shadow-xs">
+                WhatsApp AI Agent
+              </span>
+
+              {/* AI Badge Chip */}
+              <span className="inline-flex items-center gap-1 rounded-full bg-black/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-50 border border-white/25 backdrop-blur-xs">
+                <Sparkles className="h-2.5 w-2.5 text-amber-200 animate-pulse" />
+                AI Smart
+              </span>
+            </button>
+            <p className="text-[11px] text-zinc-500 m-0">
+              Engage client automatically via WhatsApp chat to capture commercial requirements.
+            </p>
+          </div>
           <button
             type="submit"
+            onClick={(e) => void handleSave(e)}
             disabled={saving || !selectedType}
-            className="inline-flex h-10 items-center rounded-lg border-0 bg-zinc-950 px-5 text-xs font-semibold text-white disabled:opacity-50"
+            className="inline-flex h-11 items-center rounded-xl border-0 bg-zinc-950 px-5 text-xs font-semibold text-white disabled:opacity-50 hover:bg-zinc-800 cursor-pointer transition-colors shadow-xs"
           >
             {saving ? 'Saving…' : 'Save commercial requirement'}
           </button>

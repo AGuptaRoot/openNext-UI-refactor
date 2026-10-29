@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -9,6 +9,7 @@ import ShoppingCartOutlinedIcon from '@mui/icons-material/ShoppingCartOutlined';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 
 import { useAuth } from '../../context/AuthContext';
+import { canChangeOpportunityStage } from '../../utils/permissions';
 import { TourButton } from '../../ui/tour';
 import { useDialog } from '../../context/DialogContext';
 import { ApiError, crmApi } from '../../services/api';
@@ -22,8 +23,10 @@ import {
   isOpportunityWonStage,
   isOpportunityLostStage,
   canCreateOpportunityQuotation,
+  describeOpportunityAmountBlock,
   getEstimatedDealValue,
 } from '../../types/opportunities';
+import { OpportunityPipeline, OpportunityPipelineStage } from '../../types/opportunity-pipelines';
 import { useOpportunityStages } from '../../hooks/useOpportunityStages';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 import { formatCrmMoney } from '../../utils/currency';
@@ -36,12 +39,15 @@ function formatMoney(value?: number, currency?: string) {
 export const OpportunitiesPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { hasPermission, isClient } = useAuth();
+  const { hasPermission, isClient, isAdmin, activeRole } = useAuth();
   const { confirm } = useDialog();
   const canWrite =
     hasPermission('crm.opportunities.write') || hasPermission('crm.leads.write');
   const canDelete =
     hasPermission('crm.opportunities.delete') || hasPermission('crm.leads.delete');
+  /** A representative sees the stage but cannot move the deal themselves. */
+  const canChangeStage =
+    canWrite && canChangeOpportunityStage({ isAdmin, isClient, activeRole });
   const canViewSalesOrders = hasPermission('crm.orders.read') && !isClient;
   const canCreateSalesOrders = hasPermission('crm.orders.write') && !isClient;
   const opportunityStages = useOpportunityStages();
@@ -53,6 +59,10 @@ export const OpportunitiesPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [pipelines, setPipelines] = useState<OpportunityPipeline[]>([]);
+  const [selectedPipelineId, setSelectedPipelineId] = useState<string>(
+    () => searchParams.get('pipeline') || 'all'
+  );
   const [filterStage, setFilterStage] = useState(() => searchParams.get('stage') || '');
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -72,6 +82,68 @@ export const OpportunitiesPage: React.FC = () => {
     setToast({ text, type });
     setTimeout(() => setToast(null), 3500);
   };
+
+  useEffect(() => {
+    crmApi
+      .listOpportunityPipelines()
+      .then((res) => {
+        if (Array.isArray(res.data)) {
+          setPipelines(res.data);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const activePipeline = useMemo(() => {
+    if (selectedPipelineId === 'all') return null;
+    return pipelines.find((p) => p._id === selectedPipelineId) || null;
+  }, [pipelines, selectedPipelineId]);
+
+  const displayStages: Array<{ key: string; label: string; probability: number }> = useMemo(() => {
+    if (activePipeline?.stages && activePipeline.stages.length) {
+      return activePipeline.stages.map((s: OpportunityPipelineStage) => ({
+        key: s.label,
+        label: s.label,
+        probability: Number(s.probability) || 50,
+      }));
+    }
+    return opportunityStages;
+  }, [activePipeline, opportunityStages]);
+
+  const getItemStages = useCallback(
+    (item: OpportunityItem) => {
+      const pipe = (item.pipelineId && pipelines.find((p) => p._id === item.pipelineId)) || activePipeline;
+      if (pipe?.stages && pipe.stages.length) {
+        const list = pipe.stages.map((s: OpportunityPipelineStage) => ({
+          key: s.label,
+          label: s.label,
+          probability: Number(s.probability) || 50,
+        }));
+        if (item.stage && !list.some((s) => s.key === item.stage)) {
+          list.push({
+            key: item.stage,
+            label: item.stage,
+            probability: item.probability || 50,
+          });
+        }
+        return list;
+      }
+      const list: Array<{ key: string; label: string; probability: number }> = opportunityStages.map((s) => ({
+        key: s.key,
+        label: s.label,
+        probability: s.probability,
+      }));
+      if (item.stage && !list.some((s) => s.key === item.stage)) {
+        list.push({
+          key: item.stage,
+          label: item.stage,
+          probability: item.probability || 50,
+        });
+      }
+      return list;
+    },
+    [activePipeline, opportunityStages, pipelines]
+  );
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -97,6 +169,7 @@ export const OpportunitiesPage: React.FC = () => {
           limit: 20,
           search: debouncedSearch || undefined,
           stage: filterStage || undefined,
+          pipelineId: selectedPipelineId !== 'all' ? selectedPipelineId : undefined,
         }),
         crmApi.getOpportunitySummary(),
       ]);
@@ -108,7 +181,7 @@ export const OpportunitiesPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, debouncedSearch, filterStage]);
+  }, [page, debouncedSearch, filterStage, selectedPipelineId]);
 
   useEffect(() => {
     load();
@@ -116,7 +189,7 @@ export const OpportunitiesPage: React.FC = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, filterStage]);
+  }, [debouncedSearch, filterStage, selectedPipelineId]);
 
   useEffect(() => {
     const next = searchParams.get('stage') || '';
@@ -124,11 +197,18 @@ export const OpportunitiesPage: React.FC = () => {
   }, [searchParams]);
 
   useEffect(() => {
+    const nextPipe = searchParams.get('pipeline') || 'all';
+    setSelectedPipelineId((prev) => (prev === nextPipe ? prev : nextPipe));
+  }, [searchParams]);
+
+  useEffect(() => {
     const params = new URLSearchParams(searchParams);
     if (filterStage) params.set('stage', filterStage);
     else params.delete('stage');
+    if (selectedPipelineId && selectedPipelineId !== 'all') params.set('pipeline', selectedPipelineId);
+    else params.delete('pipeline');
     setSearchParams(params, { replace: true });
-  }, [filterStage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filterStage, selectedPipelineId]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   useEffect(() => {
@@ -155,10 +235,11 @@ export const OpportunitiesPage: React.FC = () => {
     reason?: string
   ) => {
     try {
+      const rowStages = getItemStages(item);
       await crmApi.changeOpportunityStage(item._id, {
         stage,
-        probability: stageProbability(stage, opportunityStages),
-        lostReason: isOpportunityLostStage(stage) ? reason : undefined,
+        probability: stageProbability(stage, rowStages),
+        lostReason: isOpportunityLostStage(stage, item.stageType) ? reason : undefined,
       });
       showToast(`Moved to ${stage}`);
       load();
@@ -170,7 +251,7 @@ export const OpportunitiesPage: React.FC = () => {
 
   const handleStageChange = (item: OpportunityItem, stage: string) => {
     if (isOpportunityStageLocked(item)) return;
-    if (isOpportunityLostStage(stage)) {
+    if (isOpportunityLostStage(stage, item.stageType)) {
       setLostModal({ id: item._id, title: item.title, stage });
       setLostReason(item.lostReason || '');
       return;
@@ -431,15 +512,17 @@ export const OpportunitiesPage: React.FC = () => {
         data-tour="opportunities-filters"
         className="bg-white border border-zinc-300 rounded-xl p-4 flex flex-col gap-3"
       >
-        <label data-tour="opportunities-search" className="flex flex-col gap-1 min-w-[220px] max-w-md">
-          <span className="text-[11px] font-semibold text-zinc-500 uppercase">Search</span>
-          <input
-            className={fieldClass}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search deal # or client name (e.g. OPP-001, AR)…"
-          />
-        </label>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <label data-tour="opportunities-search" className="flex flex-col gap-1 min-w-[220px] max-w-md flex-1">
+            <span className="text-[11px] font-semibold text-zinc-500 uppercase">Search</span>
+            <input
+              className={fieldClass}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search deal # or client name (e.g. OPP-001, AR)…"
+            />
+          </label>
+        </div>
 
         <div data-tour="opportunities-stage-pills" className="flex flex-wrap gap-1.5">
           <button
@@ -453,7 +536,7 @@ export const OpportunitiesPage: React.FC = () => {
           >
             All
           </button>
-          {opportunityStages.map((s) => (
+          {displayStages.map((s) => (
             <button
               key={s.key}
               type="button"
@@ -465,11 +548,7 @@ export const OpportunitiesPage: React.FC = () => {
               }`}
               title={`${s.label} · ${s.probability}%`}
             >
-              {isOpportunityWonStage(s.key)
-                ? 'Won'
-                : isOpportunityLostStage(s.key)
-                  ? 'Lost'
-                  : s.label}
+              {s.label}
             </button>
           ))}
         </div>
@@ -548,7 +627,7 @@ export const OpportunitiesPage: React.FC = () => {
                         {item.clientName || '—'}
                       </td>
                       <td className="px-4 py-3">
-                        {canWrite && !locked ? (
+                        {canWrite && canChangeStage && !locked ? (
                           <select
                             value={item.stage}
                             onChange={(e) => handleStageChange(item, e.target.value)}
@@ -560,7 +639,7 @@ export const OpportunitiesPage: React.FC = () => {
                                   : 'border-border bg-card text-foreground'
                             }`}
                           >
-                            {opportunityStages.map((s) => (
+                            {getItemStages(item).map((s) => (
                               <option key={s.key} value={s.key}>
                                 {s.label}
                               </option>
@@ -616,9 +695,11 @@ export const OpportunitiesPage: React.FC = () => {
                           {canWrite && canCreateOpportunityQuotation(item) && (
                               <button
                                 type="button"
-                                disabled={busy}
+                                disabled={busy || Boolean(describeOpportunityAmountBlock(item))}
                                 onClick={() => handleConvertQuotation(item)}
-                                title="Create Quotation"
+                                title={
+                                  describeOpportunityAmountBlock(item) || 'Create Quotation'
+                                }
                                 className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-[11px] font-semibold text-zinc-800 cursor-pointer disabled:opacity-50"
                               >
                                 <RequestQuoteOutlinedIcon sx={{ fontSize: 14 }} />

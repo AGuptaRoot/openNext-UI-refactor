@@ -8,6 +8,8 @@ import {
   PersonContactInput,
 } from '../../types/contacts';
 import { DocumentUploadControl, IMAGE_ACCEPT } from '../common/DocumentUploadControl';
+import { PhoneNumberField } from '../common/PhoneNumberField';
+import { splitPhoneNumber, validateNationalNumber } from '../../utils/phoneCountryCodes';
 
 export const CONTACT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const CONTACT_PHONE_RE = /^\+?\d{7,15}$/;
@@ -91,6 +93,14 @@ export function validateContactForm(
   if (email && !CONTACT_EMAIL_RE.test(email)) return 'Enter a valid email address.';
   if (phoneDigits && !CONTACT_PHONE_RE.test(phoneDigits)) {
     return 'Enter a valid mobile number (7–15 digits; country code allowed).';
+  }
+  // Country-aware length check, so submitting cannot pass what the inline hint
+  // flags as wrong. Only applies once a country code is present — a legacy
+  // local number keeps the generic rule above.
+  const split = splitPhoneNumber(values.phone);
+  if (split.dial && split.national) {
+    const check = validateNationalNumber(split.dial, split.national);
+    if (check.state === 'invalid' || check.state === 'incomplete') return check.message;
   }
   if (values.pan.trim() && !CONTACT_PAN_RE.test(values.pan.trim().toUpperCase())) {
     return 'PAN must match format AAAAA9999A.';
@@ -232,17 +242,12 @@ export const ContactFormFields: React.FC<ContactFormFieldsProps> = ({
 
         <div {...tour('phone')} className="sm:col-span-6">
           <label className={labelClass}>Mobile{requireReachability ? ' *' : ''}</label>
-          <input
-            type="tel"
-            maxLength={24}
+          <PhoneNumberField
             value={values.phone}
             disabled={disabled}
-            onChange={(e) => onChange({ phone: e.target.value })}
-            onBlur={(e) =>
-              onFieldBlur?.({ ...values, phone: e.currentTarget.value }, 'phone')
-            }
-            placeholder="+91 98765 43210"
-            className={inputClass}
+            onChange={(phone) => onChange({ phone })}
+            onBlur={(phone) => onFieldBlur?.({ ...values, phone }, 'phone')}
+            inputClassName={inputClass}
           />
         </div>
 

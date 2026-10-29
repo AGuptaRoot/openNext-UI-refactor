@@ -36,6 +36,8 @@ import { PerformanceAnalyticsCard } from '../../components/dashboard/Performance
 import { MyTasksCard } from '../../components/dashboard/MyTasksCard';
 import { MyAssignedActivitiesCard } from '../../components/dashboard/MyAssignedActivitiesCard';
 import { CalendarScheduleCard } from '../../components/dashboard/CalendarScheduleCard';
+import { ActivityReminderStrip } from '../../components/dashboard/ActivityReminderStrip';
+import { MissedActivityAlert } from '../../components/dashboard/MissedActivityAlert';
 import { PriorityWatchlistCard } from '../../components/dashboard/PriorityWatchlistCard';
 import { TimeLogReportCard } from '../../components/dashboard/TimeLogReportCard';
 import { QuickActionsCard } from '../../components/dashboard/QuickActionsCard';
@@ -445,7 +447,11 @@ export const DashboardPage: React.FC = () => {
         isRefreshing={refreshing}
       />
 
-      {/* 2. Attention Radar Banner */}
+      {/* 2. Scheduled activities about to start — time-critical, so it sits first. */}
+      <MissedActivityAlert />
+      <ActivityReminderStrip data={currentData} />
+
+      {/* 3. Attention Radar Banner */}
       {showAttentionRadar && (
         <AttentionRadar
           data={currentData}

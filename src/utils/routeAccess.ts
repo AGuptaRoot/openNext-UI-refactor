@@ -94,7 +94,13 @@ const EXACT_RULES: Record<string, RouteAccessRule> = {
   },
   '/payments/create': { anyOf: ['crm.finance.write'], denyClient: true, label: 'Record Payment' },
   '/sales-orders/create': { anyOf: ['crm.orders.write'], denyClient: true, label: 'Create Sales Order' },
-  '/samples/create': { anyOf: ['crm.samples.write'], denyClient: true, label: 'Create Sample' },
+  // A client portal user reaches this page with crm.samples.request, which is
+  // why denyClient is off here: the form itself drops everything that is not
+  // theirs to decide, and the server scopes the request to their own deal.
+  '/samples/create': {
+    anyOf: ['crm.samples.write', 'crm.samples.request'],
+    label: 'Create Sample',
+  },
   '/tickets/create': { anyOf: ['crm.tickets.write'], label: 'Create Ticket' },
 };
 
@@ -102,6 +108,7 @@ const EXACT_RULES: Record<string, RouteAccessRule> = {
 const PREFIX_RULES: Array<{ prefix: string; rule: RouteAccessRule }> = [
   { prefix: '/projects', rule: { anyOf: ['crm.projects.read'], label: 'Projects' } },
   { prefix: '/tasks', rule: { anyOf: ['crm.tasks.read'], label: 'Tasks' } },
+  { prefix: '/activities', rule: { anyOf: ['crm.leads.read', 'crm.activities.read', 'crm.dashboard.view'], denyClient: true, label: 'Activity Details' } },
   { prefix: '/leads', rule: { anyOf: ['crm.leads.read'], denyClient: true, label: 'Leads' } },
   {
     prefix: '/contacts',

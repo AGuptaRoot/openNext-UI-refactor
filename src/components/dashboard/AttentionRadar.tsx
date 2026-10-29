@@ -39,12 +39,14 @@ export const AttentionRadar: React.FC<AttentionRadarProps> = ({ data }) => {
     (data.urgentTicketsList || []).length ||
     0;
   const blockedTasksCount = data.blockedAwaitingClientTasks?.length || 0;
+  const pendingPortalApprovals = Number(data.pendingPortalApprovals) || 0;
 
   const hasAlerts =
     overdueInvoicesCount > 0 ||
     overdueTasksCount > 0 ||
     urgentTicketsCount > 0 ||
-    blockedTasksCount > 0;
+    blockedTasksCount > 0 ||
+    pendingPortalApprovals > 0;
 
   if (!hasAlerts) {
     return (
@@ -100,6 +102,12 @@ export const AttentionRadar: React.FC<AttentionRadarProps> = ({ data }) => {
                 {blockedTasksCount > 1 ? 's' : ''} waiting on client
               </span>
             )}
+            {pendingPortalApprovals > 0 && (
+              <span>
+                <strong className="text-blue-600 font-bold">{pendingPortalApprovals}</strong> portal
+                request{pendingPortalApprovals > 1 ? 's' : ''} pending approval
+              </span>
+            )}
             {urgentTicketsCount > 0 && (
               <span>
                 <strong className="text-red-600 font-bold">{urgentTicketsCount}</strong> urgent support
@@ -137,6 +145,15 @@ export const AttentionRadar: React.FC<AttentionRadarProps> = ({ data }) => {
             className="h-8 px-3 text-xs font-semibold text-zinc-900 bg-white hover:bg-zinc-50 border border-zinc-200 hover:border-zinc-900 rounded-lg cursor-pointer transition-all duration-150"
           >
             Escalations ({urgentTicketsCount})
+          </button>
+        )}
+        {pendingPortalApprovals > 0 && (
+          <button
+            type="button"
+            onClick={() => navigate('/clients?tab=portal')}
+            className="h-8 px-3 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg border-none cursor-pointer transition-colors duration-150"
+          >
+            Portal Approvals ({pendingPortalApprovals})
           </button>
         )}
       </div>

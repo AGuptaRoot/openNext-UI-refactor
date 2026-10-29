@@ -23,6 +23,8 @@ export interface LeadKanbanViewProps {
   onUpdateStatus?: (leadId: string, newStatus: string) => Promise<void>;
   onConvertLead: (lead: LeadItem) => void;
   canWrite?: boolean;
+  /** Dragging a card is a stage change, so it follows the manager rule. */
+  canChangeStage?: boolean;
   canConvert?: boolean;
 }
 
@@ -317,6 +319,7 @@ export const LeadKanbanView: React.FC<LeadKanbanViewProps> = ({
   onUpdateStatus,
   onConvertLead,
   canWrite = false,
+  canChangeStage = true,
   canConvert = false,
 }) => {
   const [movingLeadId, setMovingLeadId] = useState<string | null>(null);
@@ -357,7 +360,7 @@ export const LeadKanbanView: React.FC<LeadKanbanViewProps> = ({
   }, [leads]);
 
   const handleShift = async (lead: LeadItem, direction: 'prev' | 'next') => {
-    if (!canWrite) return;
+    if (!canWrite || !canChangeStage) return;
     const currentIndex = stages.indexOf(lead.stage);
     if (currentIndex === -1) return;
     const targetIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1;
@@ -373,7 +376,7 @@ export const LeadKanbanView: React.FC<LeadKanbanViewProps> = ({
   };
 
   const handleStageSelect = async (lead: LeadItem, newStage: string) => {
-    if (!canWrite) return;
+    if (!canWrite || !canChangeStage) return;
     if (newStage === lead.stage) return;
     setMovingLeadId(lead._id);
     try {
@@ -384,7 +387,7 @@ export const LeadKanbanView: React.FC<LeadKanbanViewProps> = ({
   };
 
   const handleMoveCard = async (cardId: string, _fromColumnId: string, toColumnId: string) => {
-    if (!canWrite) return;
+    if (!canWrite || !canChangeStage) return;
     const lead = leadsById[cardId];
     if (!lead || lead.convertedClientId) return;
     if (lead.stage === toColumnId) return;
@@ -400,7 +403,7 @@ export const LeadKanbanView: React.FC<LeadKanbanViewProps> = ({
     <KanbanBoard
       columns={columns}
       onMoveCard={handleMoveCard}
-      disabled={!canWrite}
+      disabled={!canWrite || !canChangeStage}
       className="flex gap-4 overflow-x-auto pb-4 pt-1 items-start min-h-[600px] select-none"
       data-tour="leads-kanban-board"
       renderOverlay={(cardId) => {
@@ -470,7 +473,7 @@ export const LeadKanbanView: React.FC<LeadKanbanViewProps> = ({
               ) : (
                 columnLeads.map((lead) => {
                   const isMoving = movingLeadId === lead._id;
-                  const canDrag = canWrite && !lead.convertedClientId && !isMoving;
+                  const canDrag = canWrite && canChangeStage && !lead.convertedClientId && !isMoving;
 
                   return (
                     <KanbanCard

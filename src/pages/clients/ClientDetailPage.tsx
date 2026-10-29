@@ -23,7 +23,11 @@ import {
 } from '../../components/common/DocumentUploadControl';
 import { ClientAvatarColorPicker } from '../../components/clients/ClientAvatarColorPicker';
 import { ContactSelect } from '../../components/contacts/ContactSelect';
-import { CommercialRequirementTab } from '../../components/leads/CommercialRequirementTab';
+import { PhoneNumberField } from '../../components/common/PhoneNumberField';
+import { splitPhoneNumber, validateNationalNumber } from '../../utils/phoneCountryCodes';
+import { ClientExtensionOverviewSection } from '../../components/clients/ClientExtensionOverviewSection';
+import { ClientPassportsTab } from '../../components/clients/ClientPassportsTab';
+import { useExtensions } from '../../hooks/useExtensions';
 import { PersonContact, formatContactName } from '../../types/contacts';
 import {
   ClientAddress,
@@ -43,14 +47,20 @@ import {
   ClientRelatedTask,
   ClientRelatedTimeLog,
   ClientTimelineEntry,
+  ClientExtensionData,
   CLIENT_PORTAL_PERMISSIONS,
 } from '../../types/clients';
 import { TicketItem } from '../../types/tickets';
 
-type TabId =
+/**
+ * Extension-contributed tabs use an `ext:` prefix so they can be deep-linked
+ * (`?tab=ext:passports`) without widening the static union to `string`.
+ */
+type ExtensionTabId = `ext:${string}`;
+
+type StaticTabId =
   | 'overview'
   | 'contacts'
-  | 'commercial'
   | 'addresses'
   | 'notes'
   | 'timeline'
@@ -64,10 +74,11 @@ type TabId =
   | 'health'
   | 'audit';
 
-const CLIENT_TABS: TabId[] = [
+type TabId = StaticTabId | ExtensionTabId;
+
+const CLIENT_TABS: StaticTabId[] = [
   'overview',
   'contacts',
-  'commercial',
   'addresses',
   'notes',
   'timeline',
@@ -82,11 +93,26 @@ const CLIENT_TABS: TabId[] = [
   'audit',
 ];
 
+/**
+ * Extension tab ids are accepted optimistically — the contributions load after
+ * the first render, and an id that never appears falls back to Overview when
+ * the tab list is built.
+ */
 function resolveClientTab(raw: string | null): TabId {
-  const value = String(raw || '').trim().toLowerCase();
-  if (value === 'events') return 'timeline';
-  if ((CLIENT_TABS as string[]).includes(value)) return value as TabId;
+  const value = String(raw || '').trim();
+  const lower = value.toLowerCase();
+  if (lower === 'events') return 'timeline';
+  if ((CLIENT_TABS as string[]).includes(lower)) return lower as TabId;
+  if (/^ext:[A-Za-z0-9_-]+$/.test(value)) return value as ExtensionTabId;
   return 'overview';
+}
+
+function isExtensionTab(tab: TabId): tab is ExtensionTabId {
+  return String(tab).startsWith('ext:');
+}
+
+function extensionTabId(id: string): ExtensionTabId {
+  return `ext:${id}`;
 }
 
 const fieldClass =
@@ -125,8 +151,14 @@ export const ClientDetailPage: React.FC = () => {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { hasPermission } = useAuth();
+  const { hasPermission, isAdmin, activeRole } = useAuth();
+  const canApprovePortal = isAdmin || activeRole === 'crm-manager' || activeRole === 'sales-manager' || hasPermission('crm.users.manage');
   const { confirm } = useDialog();
+  const {
+    clientOverviewSectionsForRequestType,
+    clientTabsForRequestType,
+    clientFieldsForTab,
+  } = useExtensions();
   const canWrite = hasPermission('crm.clients.write');
   const canDelete = hasPermission('crm.clients.delete');
   const canProjects = hasPermission('crm.projects.read');
@@ -140,14 +172,84 @@ export const ClientDetailPage: React.FC = () => {
   const [summary, setSummary] = useState<ClientDetailSummary | null>(null);
   const [contacts, setContacts] = useState<ClientContact[]>([]);
   const [sourceLead, setSourceLead] = useState<LeadItem | null>(null);
-  const [sourceLeadLoading, setSourceLeadLoading] = useState(false);
-  const [sourceLeadError, setSourceLeadError] = useState<string | null>(null);
+  const [extensionData, setExtensionData] = useState<ClientExtensionData | null>(null);
+  const [extensionDataLoading, setExtensionDataLoading] = useState(false);
+  const [extensionDataError, setExtensionDataError] = useState<string | null>(null);
+
+  /**
+   * Read-through extension context (source lead's extension bag + request
+   * type). Loaded once per client — extension tabs are decided from it, so it
+   * cannot wait for a tab to be opened.
+   */
+  const loadExtensionData = useCallback(async (clientId: string) => {
+    setExtensionDataLoading(true);
+    setExtensionDataError(null);
+    try {
+      const res = await crmApi.getClientExtensionData(clientId);
+      setExtensionData(res.data || null);
+    } catch (reason) {
+      setExtensionData(null);
+      setExtensionDataError(
+        reason instanceof Error ? reason.message : 'Failed to load extension data'
+      );
+    } finally {
+      setExtensionDataLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!id) return;
+    void loadExtensionData(id);
+  }, [id, loadExtensionData]);
   const [addresses, setAddresses] = useState<ClientAddress[]>([]);
   const [notes, setNotes] = useState<ClientNote[]>([]);
   const [events, setEvents] = useState<ClientEvent[]>([]);
   const [timeline, setTimeline] = useState<ClientTimelineEntry[]>([]);
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [portalUsers, setPortalUsers] = useState<ClientPortalAccess[]>([]);
+  const [rejectingAccessId, setRejectingAccessId] = useState<string | null>(null);
+  const [clientRejectionReason, setClientRejectionReason] = useState('');
+  const [rejectingSaving, setRejectingSaving] = useState(false);
+  const [resubmittingAccessId, setResubmittingAccessId] = useState<string | null>(null);
+
+  const handleApprovePortalUser = async (accessId: string) => {
+    try {
+      const res = await crmApi.approveClientPortalAccess(id, accessId);
+      const emailed = res.data?.emailSent !== false;
+      showToast(
+        emailed
+          ? 'Portal access approved & login details emailed to client'
+          : 'Portal access approved & user created, but email could not be sent'
+      );
+      const updated = await crmApi.getClientPortalAccess(id);
+      setPortalUsers(updated.data || []);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to approve portal access');
+    }
+  };
+
+  const handleRejectPortalUser = async () => {
+    if (!rejectingAccessId) return;
+    if (!clientRejectionReason.trim()) {
+      showToast('Rejection reason is required');
+      return;
+    }
+    setRejectingSaving(true);
+    try {
+      await crmApi.rejectClientPortalAccess(id, rejectingAccessId, {
+        reason: clientRejectionReason.trim(),
+      });
+      showToast('Portal access request rejected');
+      setRejectingAccessId(null);
+      setClientRejectionReason('');
+      const updated = await crmApi.getClientPortalAccess(id);
+      setPortalUsers(updated.data || []);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to reject portal access');
+    } finally {
+      setRejectingSaving(false);
+    }
+  };
   const [projects, setProjects] = useState<ClientRelatedProject[]>([]);
   const [tasks, setTasks] = useState<ClientRelatedTask[]>([]);
   const [quotations, setQuotations] = useState<ClientRelatedQuotation[]>([]);
@@ -239,13 +341,14 @@ export const ClientDetailPage: React.FC = () => {
   };
 
   const resetPortalInviteForm = () => {
+    setResubmittingAccessId(null);
     setPortalInvite({
       name: '',
       email: '',
       username: '',
       password: '',
       portalRole: 'Standard',
-      permissions: [...CLIENT_PORTAL_PERMISSIONS],
+      permissions: [],
     });
   };
 
@@ -256,22 +359,39 @@ export const ClientDetailPage: React.FC = () => {
     }
     setPortalInviteSaving(true);
     try {
-      const invited = await crmApi.inviteClientPortalContact(id, {
-        name: portalInvite.name.trim(),
-        email: portalInvite.email.trim(),
-        username: portalInvite.username.trim() || undefined,
-        password: portalInvite.password.trim() || undefined,
-        portalRole: portalInvite.portalRole,
-        permissions: portalInvite.permissions,
-      });
-      const rawLoginUrl = invited.data?.loginCredentials?.loginUrl || clientPortalLoginUrl;
-      const loginUrl = String(rawLoginUrl).replace(/\/admin\/login\b/g, '/login');
-      setLastPortalInviteUrl(loginUrl);
+      if (resubmittingAccessId) {
+        await crmApi.resubmitClientPortalAccess(id, resubmittingAccessId, {
+          username: portalInvite.username.trim() || undefined,
+          password: portalInvite.password.trim() || undefined,
+        });
+        showToast('Portal access request resubmitted for manager approval');
+      } else {
+        const invited = await crmApi.inviteClientPortalContact(id, {
+          name: portalInvite.name.trim(),
+          email: portalInvite.email.trim(),
+          username: portalInvite.username.trim() || undefined,
+          password: portalInvite.password.trim() || undefined,
+          portalRole: portalInvite.portalRole,
+        });
+        const rawLoginUrl = invited.data?.loginCredentials?.loginUrl || clientPortalLoginUrl;
+        const loginUrl = String(rawLoginUrl).replace(/\/admin\/login\b/g, '/login');
+        setLastPortalInviteUrl(loginUrl);
+        const isPending = invited.data?.status === 'Pending_Approval';
+        if (isPending) {
+          showToast('Portal access request submitted for manager approval');
+        } else {
+          showToast(
+            invited.data?.emailSent !== false
+              ? `Portal invite sent · ${loginUrl}`
+              : `Portal user created, but email could not be sent`
+          );
+        }
+      }
       resetPortalInviteForm();
+      setResubmittingAccessId(null);
       setShowPortalInvite(false);
       const res = await crmApi.getClientPortalAccess(id);
       setPortalUsers(res.data || []);
-      showToast(`Invitation sent · ${loginUrl}`);
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : 'Failed to send portal invite');
     } finally {
@@ -349,7 +469,6 @@ export const ClientDetailPage: React.FC = () => {
     setLoading(true);
     setError(null);
     setSourceLead(null);
-    setSourceLeadError(null);
     try {
       const [c, s, ct, n, e, cats, tags, cfs] = await Promise.all([
         crmApi.getClient(id),
@@ -362,6 +481,12 @@ export const ClientDetailPage: React.FC = () => {
         crmApi.getClientCustomFields(),
       ]);
       setClient(c.data);
+      const sLeadId = c.data?.leadId || c.data?.sourceLead?._id || c.data?.sourceLead?.id;
+      if (sLeadId) {
+        crmApi.getLead(String(sLeadId)).then((res) => {
+          if (res.data) setSourceLead(res.data);
+        }).catch(() => {});
+      }
       setSummary(s.data);
       setContacts(ct.data || []);
       setNotes(n.data || []);
@@ -456,28 +581,6 @@ export const ClientDetailPage: React.FC = () => {
         } else if (tab === 'contacts') {
           const res = await crmApi.getClientContacts(id);
           setContacts(res.data || []);
-        } else if (tab === 'commercial') {
-          const sourceLeadId = client.leadId || client.sourceLead?._id;
-          if (!sourceLeadId) {
-            setSourceLead(null);
-            setSourceLeadError(null);
-            setSourceLeadLoading(false);
-          } else {
-            setSourceLeadLoading(true);
-            setSourceLeadError(null);
-            try {
-              const res = await crmApi.getLead(String(sourceLeadId));
-              setSourceLead(res.data || null);
-              if (!res.data) setSourceLeadError('Source lead commercial data was not found.');
-            } catch (err: unknown) {
-              setSourceLead(null);
-              setSourceLeadError(
-                err instanceof Error ? err.message : 'Failed to load source lead commercial data'
-              );
-            } finally {
-              setSourceLeadLoading(false);
-            }
-          }
         }
       } catch (err: unknown) {
         showToast(err instanceof Error ? err.message : 'Failed to load tab data');
@@ -547,6 +650,16 @@ export const ClientDetailPage: React.FC = () => {
 
   const handleSaveOverview = async () => {
     if (!id || !editName.trim()) return;
+    if (editPhone.trim()) {
+      const split = splitPhoneNumber(editPhone);
+      if (split.dial && split.national) {
+        const check = validateNationalNumber(split.dial, split.national);
+        if (check.state === 'invalid' || check.state === 'incomplete') {
+          showToast(`Phone: ${check.message}`);
+          return;
+        }
+      }
+    }
     setSaving(true);
     try {
       const websiteRaw = editWebsite.trim();
@@ -700,6 +813,16 @@ export const ClientDetailPage: React.FC = () => {
 
   const handleSaveContact = async () => {
     if (!id || !editingContactId || !contactForm.name.trim()) return;
+    if (contactForm.phone.trim()) {
+      const split = splitPhoneNumber(contactForm.phone);
+      if (split.dial && split.national) {
+        const check = validateNationalNumber(split.dial, split.national);
+        if (check.state === 'invalid' || check.state === 'incomplete') {
+          showToast(`Phone: ${check.message}`);
+          return;
+        }
+      }
+    }
     try {
       await crmApi.updateClientContact(id, editingContactId, contactForm);
       setContactForm({ name: '', email: '', phone: '', designation: '', isPrimary: false });
@@ -827,17 +950,43 @@ export const ClientDetailPage: React.FC = () => {
     );
   }
 
-  const leadId = client.leadId || client.sourceLead?._id;
+  const leadId = client.leadId || client.sourceLead?._id || client.sourceLead?.id || sourceLead?._id;
+
+  const extensionRequestType = {
+    key: extensionData?.requestType?.key,
+    name: extensionData?.requestType?.name || client.sourceLead?.requestType || sourceLead?.requestType,
+  };
+
+  const leadRequestType =
+    sourceLead?.requestType ||
+    client.sourceLead?.requestType ||
+    extensionData?.requestType?.name ||
+    '';
+
+  /**
+   * Read-only sections an extension contributes to this Overview tab
+   * (crm-travel adds Travel Requirement when the source lead's Request Type
+   * is Travel). Formatted by the extension — never raw JSON.
+   */
+  const overviewSections = extensionData
+    ? clientOverviewSectionsForRequestType(extensionRequestType)
+    : [];
+
+  /**
+   * Native tabs contributed by enabled extensions, filtered by the source
+   * lead's request type (crm-travel adds Passports when the lead's Request
+   * Type is Travel).
+   */
+  const extensionTabs = extensionData ? clientTabsForRequestType(extensionRequestType) : [];
+
+  const activeExtensionTab = isExtensionTab(tab)
+    ? extensionTabs.find((t) => extensionTabId(t.id) === tab) || null
+    : null;
 
   const tabs = (
     [
       { id: 'overview', label: 'Overview' },
       { id: 'contacts', label: `Contacts (${contacts.length})` },
-      {
-        id: 'commercial',
-        label: 'Commercial Requirement',
-        show: Boolean(client.leadId || client.sourceLead?._id),
-      },
       { id: 'addresses', label: 'Addresses' },
       { id: 'notes', label: `Notes (${notes.length})` },
       { id: 'timeline', label: 'Timeline' },
@@ -850,6 +999,10 @@ export const ClientDetailPage: React.FC = () => {
       { id: 'tickets', label: 'Tickets', show: canTickets },
       { id: 'health', label: 'Health' },
       { id: 'audit', label: 'Audit', show: canAudit },
+      ...extensionTabs.map((t) => ({
+        id: extensionTabId(t.id),
+        label: t.label,
+      })),
     ] as { id: TabId; label: string; show?: boolean }[]
   ).filter((t) => t.show !== false);
 
@@ -1224,10 +1377,16 @@ export const ClientDetailPage: React.FC = () => {
                   <span className="text-[11px] font-semibold uppercase text-zinc-500">Email</span>
                   <input className={fieldClass} value={editEmail} disabled={!canWrite} onChange={(e) => setEditEmail(e.target.value)} />
                 </label>
-                <label className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1">
                   <span className="text-[11px] font-semibold uppercase text-zinc-500">Phone</span>
-                  <input className={fieldClass} value={editPhone} disabled={!canWrite} onChange={(e) => setEditPhone(e.target.value)} />
-                </label>
+                  <PhoneNumberField
+                    value={editPhone}
+                    disabled={!canWrite}
+                    onChange={setEditPhone}
+                    inputClassName={fieldClass}
+                    placeholder="98765 43210"
+                  />
+                </div>
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-semibold uppercase text-zinc-500">Website</span>
                   <input className={fieldClass} value={editWebsite} disabled={!canWrite} onChange={(e) => setEditWebsite(e.target.value)} />
@@ -1302,6 +1461,27 @@ export const ClientDetailPage: React.FC = () => {
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] font-semibold uppercase text-zinc-500">Request type</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      className={`${fieldClass} bg-zinc-50 text-zinc-700 cursor-default`}
+                      value={leadRequestType || '—'}
+                      readOnly
+                      disabled
+                      placeholder="—"
+                    />
+                    {leadId ? (
+                      <Link
+                        to={`/leads/${leadId}`}
+                        className="inline-flex items-center text-xs font-semibold text-primary hover:underline whitespace-nowrap"
+                        title="View source lead"
+                      >
+                        View lead
+                      </Link>
+                    ) : null}
+                  </div>
                 </label>
               </div>
             </div>
@@ -1393,6 +1573,32 @@ export const ClientDetailPage: React.FC = () => {
               </div>
             </div>
 
+            {/*
+              A failed extension-data fetch means the request type is unknown,
+              so no extension sections or tabs can appear — say so rather than
+              silently rendering nothing.
+            */}
+            {extensionDataError && leadId ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800">
+                Extension data could not be loaded: {extensionDataError}
+              </div>
+            ) : null}
+
+            {/*
+              Extension-contributed read-only sections (e.g. crm-travel's
+              Travel Requirement). Read through from the source lead and
+              formatted by the extension's own logic module.
+            */}
+            {overviewSections.map((entry) => (
+              <ClientExtensionOverviewSection
+                key={entry.sectionId}
+                section={entry}
+                extension={extensionData?.extension || null}
+                leadId={extensionData?.leadId || (leadId ? String(leadId) : null)}
+                loading={extensionDataLoading}
+              />
+            ))}
+
             {canWrite && (
               <div className="sticky bottom-4 z-10 flex justify-end">
                 <button
@@ -1462,11 +1668,11 @@ export const ClientDetailPage: React.FC = () => {
                 value={contactForm.email}
                 onChange={(e) => setContactForm((p) => ({ ...p, email: e.target.value }))}
               />
-              <input
-                className={fieldClass}
+              <PhoneNumberField
+                inputClassName={fieldClass}
                 placeholder="Phone"
                 value={contactForm.phone}
-                onChange={(e) => setContactForm((p) => ({ ...p, phone: e.target.value }))}
+                onChange={(phone) => setContactForm((p) => ({ ...p, phone }))}
               />
               <input
                 className={fieldClass}
@@ -1617,42 +1823,35 @@ export const ClientDetailPage: React.FC = () => {
         </div>
       )}
 
-      {tab === 'commercial' && (
-        <div className="flex flex-col gap-4" data-tour="clients-tab-commercial-panel">
-          <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-xs text-zinc-600">
-            Commercial requirement (including lead-specific field options) is loaded from the source
-            lead. After conversion it is read-only here — open the source lead before convert to
-            edit.
-            {leadId ? (
-              <>
-                {' '}
-                <Link to={`/leads/${leadId}`} className="font-semibold text-zinc-900 no-underline hover:underline">
-                  View source lead
-                </Link>
-              </>
-            ) : null}
+
+
+      {/*
+        Extension-contributed record tabs — the CRM record manager (upload +
+        OCR + list) whose fields come from the extension package. Read-only
+        enquiry data is a section on the Overview tab instead.
+      */}
+      {activeExtensionTab ? (
+        <ClientPassportsTab
+          key={activeExtensionTab.tabId}
+          clientId={String(id)}
+          tab={activeExtensionTab}
+          group={clientFieldsForTab(activeExtensionTab.extensionId, activeExtensionTab.id)}
+          leadId={extensionData?.leadId || (leadId ? String(leadId) : null)}
+          canWrite={canWrite}
+          showToast={(message) => showToast(message)}
+          confirm={confirm}
+        />
+      ) : isExtensionTab(tab) ? (
+        extensionDataLoading ? (
+          <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-10 text-center text-xs text-zinc-500">
+            Loading extension tab…
           </div>
-          {sourceLeadLoading ? (
-            <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-10 text-center text-xs text-zinc-500">
-              Loading commercial requirement…
-            </div>
-          ) : sourceLeadError ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">
-              {sourceLeadError}
-            </div>
-          ) : sourceLead && leadId ? (
-            <CommercialRequirementTab
-              leadId={String(leadId)}
-              lead={sourceLead}
-              canWrite={false}
-              showToast={(message) => showToast(message)}
-              onSaved={(updated) => setSourceLead(updated)}
-            />
-          ) : (
-            emptyState('No source lead linked — commercial requirement is unavailable for this client.')
-          )}
-        </div>
-      )}
+        ) : (
+          emptyState(
+            'This tab is no longer available — the extension that provided it may be disabled, or this client’s request type changed.'
+          )
+        )
+      ) : null}
 
       {tab === 'addresses' && (
         <div className="flex flex-col gap-4">
@@ -2485,44 +2684,99 @@ export const ClientDetailPage: React.FC = () => {
                     const statusClass =
                       status.toLowerCase() === 'active'
                         ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                        : status.toLowerCase() === 'suspended'
+                        : status.toLowerCase() === 'pending_approval'
                           ? 'border-amber-200 bg-amber-50 text-amber-800'
-                          : status.toLowerCase() === 'revoked'
-                            ? 'border-red-200 bg-red-50 text-red-700'
-                            : 'border-zinc-200 bg-zinc-100 text-zinc-700';
+                          : status.toLowerCase() === 'rejected'
+                            ? 'border-rose-200 bg-rose-50 text-rose-800'
+                            : status.toLowerCase() === 'suspended'
+                              ? 'border-amber-200 bg-amber-50 text-amber-800'
+                              : status.toLowerCase() === 'revoked'
+                                ? 'border-red-200 bg-red-50 text-red-700'
+                                : 'border-zinc-200 bg-zinc-100 text-zinc-700';
+                    const displayStatus =
+                      status === 'Pending_Approval'
+                        ? 'Pending Approval'
+                        : status;
                     return (
                       <tr key={u._id} className="border-b border-zinc-100 hover:bg-zinc-50">
                         <td className="px-4 py-3 text-sm">
-                          <div className="font-semibold text-zinc-900">{u.name}</div>
+                          <div className="font-semibold text-zinc-900">{u.name || 'User'}</div>
                           <div className="text-[11px] text-zinc-500">{u.email}</div>
                           {u.username ? <div className="text-[10px] text-zinc-400">@{u.username}</div> : null}
+                          {u.requestedByName ? (
+                            <div className="text-[10px] text-zinc-400">Requested by: {u.requestedByName}</div>
+                          ) : null}
+                          {status === 'Rejected' && u.rejectionReason ? (
+                            <div className="text-[10px] font-semibold text-rose-600 mt-0.5">Reason: {u.rejectionReason}</div>
+                          ) : null}
                         </td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClass}`}>
-                            {status}
+                            {displayStatus}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-[11px] text-zinc-500">
-                          <div>Invited: {u.invitedAt ? new Date(u.invitedAt).toLocaleDateString() : '—'}</div>
+                          <div>{status === 'Pending_Approval' ? 'Requested' : 'Invited'}: {u.requestedAt || u.invitedAt ? new Date(u.requestedAt || u.invitedAt!).toLocaleDateString() : '—'}</div>
                           <div>Last login: {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : '—'}</div>
                         </td>
-                        <td className="px-4 py-3 text-[10px] text-zinc-500">{(u.permissions || []).join(', ') || '—'}</td>
+                        <td className="px-4 py-3 text-[10px] text-zinc-500">Standard CRM Client Permissions</td>
                         <td className="px-4 py-3 text-right">
                           {canWrite && (
-                            <div className="flex flex-wrap items-center justify-end gap-1">
+                            <div className="flex flex-wrap items-center justify-end gap-1.5">
+                              {u.status === 'Pending_Approval' && canApprovePortal && (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="cursor-pointer rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100"
+                                    onClick={() => handleApprovePortalUser(u._id)}
+                                  >
+                                    Approve
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="cursor-pointer rounded border border-rose-300 bg-rose-50 px-2 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100"
+                                    onClick={() => {
+                                      setRejectingAccessId(u._id);
+                                      setClientRejectionReason('');
+                                    }}
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              )}
+                              {u.status === 'Rejected' && (
+                                <button
+                                  type="button"
+                                  className="cursor-pointer rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
+                                  onClick={() => {
+                                    setResubmittingAccessId(u._id);
+                                    setPortalInvite({
+                                      name: u.name || '',
+                                      email: u.email,
+                                      username: u.username || '',
+                                      password: '',
+                                      portalRole: u.portalRole || 'Standard',
+                                      permissions: [],
+                                    });
+                                    setShowPortalInvite(true);
+                                  }}
+                                >
+                                  Resubmit
+                                </button>
+                              )}
                               {u.status === 'Invited' && (
                                 <>
-                                  <button type="button" className="cursor-pointer border-none bg-transparent text-[11px] text-zinc-700" onClick={async () => { await crmApi.resendClientPortalInvitation(id, u._id); showToast('Resent'); }}>Resend</button>
-                                  <button type="button" className="cursor-pointer border-none bg-transparent text-[11px] text-zinc-700" onClick={async () => { await crmApi.activateClientPortalUser(id, u._id); const res = await crmApi.getClientPortalAccess(id); setPortalUsers(res.data || []); }}>Activate</button>
+                                  <button type="button" className="cursor-pointer border-none bg-transparent text-[11px] text-zinc-700 hover:underline" onClick={async () => { await crmApi.resendClientPortalInvitation(id, u._id); showToast('Resent'); }}>Resend</button>
+                                  <button type="button" className="cursor-pointer border-none bg-transparent text-[11px] text-zinc-700 hover:underline" onClick={async () => { await crmApi.activateClientPortalUser(id, u._id); const res = await crmApi.getClientPortalAccess(id); setPortalUsers(res.data || []); }}>Activate</button>
                                 </>
                               )}
                               {u.status === 'Active' && (
-                                <button type="button" className="cursor-pointer border-none bg-transparent text-[11px] text-zinc-700" onClick={async () => { await crmApi.suspendClientPortalUser(id, u._id, 'Suspended from CRM'); const res = await crmApi.getClientPortalAccess(id); setPortalUsers(res.data || []); }}>Suspend</button>
+                                <button type="button" className="cursor-pointer border-none bg-transparent text-[11px] text-zinc-700 hover:underline" onClick={async () => { await crmApi.suspendClientPortalUser(id, u._id, 'Suspended from CRM'); const res = await crmApi.getClientPortalAccess(id); setPortalUsers(res.data || []); }}>Suspend</button>
                               )}
                               {u.status === 'Suspended' && (
-                                <button type="button" className="cursor-pointer border-none bg-transparent text-[11px] text-zinc-700" onClick={async () => { await crmApi.reinstateClientPortalUser(id, u._id); const res = await crmApi.getClientPortalAccess(id); setPortalUsers(res.data || []); }}>Reinstate</button>
+                                <button type="button" className="cursor-pointer border-none bg-transparent text-[11px] text-zinc-700 hover:underline" onClick={async () => { await crmApi.reinstateClientPortalUser(id, u._id); const res = await crmApi.getClientPortalAccess(id); setPortalUsers(res.data || []); }}>Reinstate</button>
                               )}
-                              <button type="button" className="cursor-pointer border-none bg-transparent text-[11px] text-red-600" onClick={async () => { if (!(await confirm({ message: 'Revoke portal access?', tone: 'danger', confirmLabel: 'Revoke' }))) return; await crmApi.revokeClientPortalAccess(id, u._id); setPortalUsers((prev) => prev.filter((x) => x._id !== u._id)); }}>Revoke</button>
+                              <button type="button" className="cursor-pointer border-none bg-transparent text-[11px] text-red-600 hover:underline" onClick={async () => { if (!(await confirm({ message: 'Revoke portal access?', tone: 'danger', confirmLabel: 'Revoke' }))) return; await crmApi.revokeClientPortalAccess(id, u._id); setPortalUsers((prev) => prev.filter((x) => x._id !== u._id)); }}>Revoke</button>
                             </div>
                           )}
                         </td>
@@ -2531,6 +2785,45 @@ export const ClientDetailPage: React.FC = () => {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+                    {rejectingAccessId && (
+            <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-4">
+              <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl">
+                <h3 className="m-0 text-base font-bold text-zinc-950">Reject Portal Access Request</h3>
+                <p className="mt-1 mb-3 text-xs text-zinc-500">
+                  Please provide a rejection reason so the sales representative can make necessary corrections.
+                </p>
+                <textarea
+                  rows={3}
+                  className="w-full rounded-lg border border-zinc-300 p-2.5 text-xs text-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-950"
+                  value={clientRejectionReason}
+                  onChange={(e) => setClientRejectionReason(e.target.value)}
+                  placeholder="Enter rejection reason (e.g., Missing verification or incorrect contact details)..."
+                />
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={rejectingSaving}
+                    onClick={() => {
+                      setRejectingAccessId(null);
+                      setClientRejectionReason('');
+                    }}
+                    className="h-8 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={rejectingSaving}
+                    onClick={handleRejectPortalUser}
+                    className="h-8 rounded-lg border-0 bg-red-600 px-3 text-xs font-semibold text-white hover:bg-red-700"
+                  >
+                    {rejectingSaving ? 'Rejecting…' : 'Confirm Reject'}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -2551,10 +2844,10 @@ export const ClientDetailPage: React.FC = () => {
                 <div className="flex items-start justify-between gap-3 border-b border-zinc-100 px-5 py-4">
                   <div>
                     <h3 id="client-portal-invite-title" className="m-0 text-base font-bold text-zinc-950">
-                      Invite client portal user
+                      {resubmittingAccessId ? 'Resubmit Client Portal Request' : canApprovePortal ? 'Invite Client Portal User' : 'Request Client Portal Access'}
                     </h3>
                     <p className="m-0 mt-1 text-[11px] text-zinc-500">
-                      Create login credentials and email the full portal URL to this client.
+                      {canApprovePortal ? 'Create login credentials and email the full portal URL to this client.' : 'Submit credentials to Sales Manager for approval. Once approved, login link and credentials will be emailed to the client.'}
                     </p>
                   </div>
                   <button
@@ -2611,39 +2904,7 @@ export const ClientDetailPage: React.FC = () => {
                     </label>
                   </div>
 
-                  <div>
-                    <div className="mb-2 text-[11px] font-semibold text-zinc-600">Permissions</div>
-                    <div className="flex flex-wrap gap-2">
-                      {CLIENT_PORTAL_PERMISSIONS.map((perm) => {
-                        const checked = portalInvite.permissions.includes(perm);
-                        return (
-                          <label
-                            key={perm}
-                            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold ${
-                              checked
-                                ? 'border-zinc-950 bg-zinc-950 text-white'
-                                : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              className="sr-only"
-                              checked={checked}
-                              onChange={(e) =>
-                                setPortalInvite((p) => ({
-                                  ...p,
-                                  permissions: e.target.checked
-                                    ? [...p.permissions, perm]
-                                    : p.permissions.filter((x) => x !== perm),
-                                }))
-                              }
-                            />
-                            {perm}
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
+
 
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
                     <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
@@ -2670,7 +2931,7 @@ export const ClientDetailPage: React.FC = () => {
                     onClick={submitPortalInvite}
                     className="inline-flex h-9 cursor-pointer items-center rounded-lg border-none bg-zinc-950 px-4 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
                   >
-                    {portalInviteSaving ? 'Sending…' : 'Send invite'}
+                    {portalInviteSaving ? 'Submitting…' : resubmittingAccessId ? 'Resubmit Request' : canApprovePortal ? 'Send Invite' : 'Submit for Approval'}
                   </button>
                 </div>
               </div>

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import CloseIcon from '@mui/icons-material/Close';
 
 export interface AddLeadFieldOptionModalProps {
@@ -41,9 +42,11 @@ export const AddLeadFieldOptionModal: React.FC<AddLeadFieldOptionModalProps> = (
 
   if (!open) return null;
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
+  const handleSubmit = async (event?: React.SyntheticEvent) => {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
     const trimmed = label.trim();
     if (!trimmed) {
       setError('Option name is required');
@@ -65,7 +68,7 @@ export const AddLeadFieldOptionModal: React.FC<AddLeadFieldOptionModalProps> = (
     }
   };
 
-  return (
+  const modalNode = (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       data-tour="add-lead-field-option-modal"
@@ -73,14 +76,16 @@ export const AddLeadFieldOptionModal: React.FC<AddLeadFieldOptionModalProps> = (
         if (e.target === e.currentTarget && !saving) onClose();
       }}
     >
-      <form
-        onSubmit={(e) => void handleSubmit(e)}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-lead-field-option-title"
         className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
-            <h3 className="m-0 text-sm font-bold text-zinc-950">Add new option</h3>
+            <h3 id="add-lead-field-option-title" className="m-0 text-sm font-bold text-zinc-950">Add new option</h3>
             <p className="mb-0 mt-1 text-xs text-zinc-500">
               For <strong className="text-zinc-800">{fieldLabel}</strong>. Saved for this lead
               only unless you add it to the global catalog.
@@ -90,7 +95,7 @@ export const AddLeadFieldOptionModal: React.FC<AddLeadFieldOptionModalProps> = (
             type="button"
             disabled={saving}
             onClick={onClose}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border-0 bg-zinc-100 text-zinc-600"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border-0 bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
             aria-label="Close"
           >
             <CloseIcon sx={{ fontSize: 18 }} />
@@ -106,6 +111,13 @@ export const AddLeadFieldOptionModal: React.FC<AddLeadFieldOptionModalProps> = (
             value={label}
             disabled={saving}
             onChange={(e) => setLabel(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                void handleSubmit(e);
+              }
+            }}
           />
         </label>
 
@@ -138,19 +150,22 @@ export const AddLeadFieldOptionModal: React.FC<AddLeadFieldOptionModalProps> = (
             type="button"
             disabled={saving}
             onClick={onClose}
-            className="inline-flex h-9 items-center rounded-lg border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700"
+            className="inline-flex h-9 items-center rounded-lg border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
           >
             Cancel
           </button>
           <button
-            type="submit"
+            type="button"
             disabled={saving}
-            className="inline-flex h-9 items-center rounded-lg border-0 bg-zinc-950 px-4 text-xs font-semibold text-white disabled:opacity-50"
+            onClick={(e) => void handleSubmit(e)}
+            className="inline-flex h-9 items-center rounded-lg border-0 bg-zinc-950 px-4 text-xs font-semibold text-white disabled:opacity-50 hover:bg-zinc-800"
           >
             {saving ? 'Saving…' : 'Save option'}
           </button>
         </div>
-      </form>
+      </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalNode, document.body) : modalNode;
 };

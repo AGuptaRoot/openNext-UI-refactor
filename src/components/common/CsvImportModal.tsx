@@ -42,6 +42,7 @@ interface PreviewRow {
   company?: string;
   email?: string;
   phone?: string;
+  requestType?: string;
   stage?: string;
   category?: string;
   status?: string;
@@ -137,11 +138,11 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
     setIsDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const f = e.dataTransfer.files[0];
-      if (f.name.endsWith('.csv') || f.name.endsWith('.tsv') || f.name.endsWith('.txt') || f.type.includes('csv') || f.type.includes('tab')) {
+      if (f.name.endsWith('.csv') || f.name.endsWith('.tsv') || f.name.endsWith('.txt') || f.name.endsWith('.json') || f.type.includes('csv') || f.type.includes('tab') || f.type.includes('json')) {
         setFile(f);
         setErrorMessage('');
       } else {
-        setErrorMessage('Please drop a valid .csv / .tsv file.');
+        setErrorMessage('Please drop a valid .csv / .tsv / .json file.');
       }
     }
   };
@@ -191,6 +192,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
           phone: r.phone,
           stage: r.stage,
           status: r.status,
+          requestType: r.requestType || (r.data as Record<string, unknown> | undefined)?.requestType as string || '',
           valid: r.valid,
           errors: r.errors,
           warnings: r.warnings,
@@ -393,17 +395,17 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
               >
                 <CloudUploadOutlinedIcon sx={{ fontSize: 40 }} className="text-zinc-400" />
                 <div className="text-sm font-bold text-zinc-900">
-                  {file ? file.name : 'Drag & drop your CSV file here'}
+                  {file ? file.name : 'Drag & drop your CSV or JSON file here'}
                 </div>
                 <div className="text-xs text-zinc-500">
                   {file
                     ? `${(file.size / 1024).toFixed(1)} KB · Click to change file`
-                    : 'or click to browse (.csv, .tsv, .txt — comma, tab, or semicolon)'}
+                    : 'or click to browse (.csv, .tsv, .txt, .json — comma, tab, semicolon, or JSON array)'}
                 </div>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
+                  accept=".csv,.tsv,.txt,.json,text/csv,text/tab-separated-values,text/plain,application/json"
                   onChange={handleFileChange}
                   className="hidden"
                 />
@@ -615,6 +617,12 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                             <td className="p-2 pr-3 text-zinc-500">+91 9876543210</td>
                           </tr>
                           <tr>
+                            <td className="p-2 pl-3 font-semibold text-zinc-900">Required Type *</td>
+                            <td className="p-2 font-mono text-[11px]">Required Type, Request Type, request_type</td>
+                            <td className="p-2 font-semibold text-red-600">Required</td>
+                            <td className="p-2 pr-3 text-zinc-500">Product, Project (Software)</td>
+                          </tr>
+                          <tr>
                             <td className="p-2 pl-3 font-semibold text-zinc-900">Pipeline Stage</td>
                             <td className="p-2 font-mono text-[11px]">Stage, Pipeline Stage</td>
                             <td className="p-2 text-zinc-500">Optional</td>
@@ -800,7 +808,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                                 </div>
                               ) : (
                                 <div className="text-emerald-700 font-medium">
-                                  Ready to import ({r.stage || r.category || r.status || 'Standard'})
+                                  Ready to import ({r.requestType ? `${r.requestType} · ` : ''}{r.stage || r.category || r.status || 'Standard'})
                                 </div>
                               )}
                             </td>

@@ -25,6 +25,14 @@ export const QUOTATION_CURRENCIES = [
 
 export const QUOTATION_TAX_SLABS = [0, 5, 12, 18, 28] as const;
 
+/**
+ * How the client pays this quotation — Settings → General → Proforma &
+ * Advance Payment. `full` asks for the whole amount; `advance` asks for a
+ * percentage of the total or a fixed amount up front.
+ */
+export type QuotationPaymentType = 'full' | 'advance';
+export type QuotationAdvanceMode = 'percent' | 'amount';
+
 export interface QuotationLineItem {
   name: string;
   description?: string;
@@ -89,6 +97,13 @@ export interface QuotationItem {
   rejectionReason?: string;
   convertedInvoiceId?: string;
   convertedSalesOrderId?: string;
+  /** Payment terms — only meaningful while proforma & advance payment is on. */
+  paymentType?: QuotationPaymentType;
+  advanceMode?: QuotationAdvanceMode;
+  advanceValue?: number;
+  /** The payment request raised from this quotation, once one exists. */
+  proformaInvoiceId?: string;
+  proformaInvoiceNo?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -125,6 +140,8 @@ export type QuotationCreateInput = Omit<
   | 'rejectionReason'
   | 'convertedInvoiceId'
   | 'convertedSalesOrderId'
+  | 'proformaInvoiceId'
+  | 'proformaInvoiceNo'
   | 'createdAt'
   | 'updatedAt'
 >;
@@ -150,8 +167,11 @@ export interface QuotationRevisionInput {
   lineItems?: QuotationLineItem[];
   discountType?: DiscountType;
   discountValue?: number;
+  /** Percent discount on the revision; what the server reads. */
+  discountPercent?: number;
   shippingCharge?: number;
   recipientNotes?: string;
+  terms?: string;
 }
 
 export interface QuotationTemplateItem {

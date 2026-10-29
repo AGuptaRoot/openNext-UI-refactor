@@ -2,12 +2,14 @@ import { displayLabel } from '../../utils/displayLabels';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import SendIcon from '@mui/icons-material/Send';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import PrintIcon from '@mui/icons-material/Print';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import LinkIcon from '@mui/icons-material/Link';
 import ArchiveIcon from '@mui/icons-material/Archive';
 import UnarchiveIcon from '@mui/icons-material/Unarchive';
 import MoneyOffIcon from '@mui/icons-material/MoneyOff';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useDialog } from '../../context/DialogContext';
@@ -16,31 +18,9 @@ import type { InvoiceItem, InvoicePaymentRecord } from '../../types/invoices';
 import { calculateFinanceTotals } from '../../utils/financeTotals';
 import { canShowInvoiceRazorpayPay } from '../../utils/permissions';
 import { buildFullInvoicePortalLink } from '../../utils/portalLinks';
+import { loadRazorpayCheckoutScript } from '../../utils/razorpayCheckout';
 import { getRuntimeDefaultCurrency } from '../../utils/currency';
 import { CreditCard } from 'lucide-react';
-
-let razorpayScriptPromise: Promise<void> | null = null;
-function loadRazorpayCheckoutScript(): Promise<void> {
-  if (typeof window !== 'undefined' && (window as any).Razorpay) return Promise.resolve();
-  if (razorpayScriptPromise) return razorpayScriptPromise;
-  razorpayScriptPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-razorpay-checkout]');
-    if (existing) {
-      existing.addEventListener('load', () => resolve());
-      existing.addEventListener('error', () => reject(new Error('Failed to load Razorpay checkout')));
-      if ((window as any).Razorpay) resolve();
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.async = true;
-    script.dataset.razorpayCheckout = 'true';
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Failed to load Razorpay checkout SDK'));
-    document.head.appendChild(script);
-  });
-  return razorpayScriptPromise;
-}
 
 function statusClass(status: string): string {
   const map: Record<string, string> = {
@@ -72,6 +52,7 @@ export const InvoiceDetailPage: React.FC = () => {
   const [payingWithRazorpay, setPayingWithRazorpay] = useState(false);
   const [portalLink, setPortalLink] = useState('');
   const [razorpayConfigured, setRazorpayConfigured] = useState(false);
+  const [salesOrderDelivered, setSalesOrderDelivered] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -85,6 +66,21 @@ export const InvoiceDetailPage: React.FC = () => {
       setInvoice(inv.data);
       setPayments(pays.data || []);
       setRazorpayConfigured(Boolean(razorpayStatus?.data?.configured));
+      let isSoDelivered = Boolean(
+        inv.data?.isSalesOrderDelivered ||
+        inv.data?.salesOrderDeliveryStatus === 'Delivered'
+      );
+      if (!isSoDelivered && inv.data?.salesOrderId) {
+        try {
+          const soRes = await crmApi.getSalesOrder(inv.data.salesOrderId);
+          if (soRes?.data?.deliveryStatus === 'Delivered' || (soRes?.data as any)?.status === 'Delivered') {
+            isSoDelivered = true;
+          }
+        } catch {
+          // non-blocking
+        }
+      }
+      setSalesOrderDelivered(isSoDelivered);
       const fullUrl = buildFullInvoicePortalLink(
         inv.data.portalUrl || (inv.data as any).payUrl,
         inv.data.payToken
@@ -285,6 +281,23 @@ export const InvoiceDetailPage: React.FC = () => {
     }
   };
 
+  /**
+   * Raise the tax invoice from this proforma.
+   *
+   * Deliberately a button and not an automatic step: the tax invoice records
+   * the supply, so a person decides when the supply has happened. The advance
+   * already collected moves onto the new invoice.
+   */
+  const convertProforma = () =>
+    run(async () => {
+      const created = await crmApi.convertProformaInvoice(id);
+      const taxInvoice = created.data?.invoice;
+      await alert(
+        `Tax invoice ${taxInvoice?.invoiceNo || ''} raised. The advance paid has been carried across.`.trim()
+      );
+      if (taxInvoice?._id) navigate(`/invoices/${taxInvoice._id}`);
+    });
+
   const writeOff = () =>
     run(async () => {
       if (!writeOffReason.trim()) throw new Error('Write-off reason is required.');
@@ -309,6 +322,18 @@ export const InvoiceDetailPage: React.FC = () => {
   }
 
   const readOnly = ['Cancelled', 'Written Off'].includes(invoice.status) || invoice.isArchived;
+  /*
+   * A proforma is a payment request raised from a quotation — not a tax
+   * document. It keeps its own numbering and stays out of tax reporting until
+   * it is converted.
+   */
+  const isProforma = invoice.documentType === 'proforma';
+  const canConvertProforma = isProforma && canWriteFinance && !invoice.convertedInvoiceId;
+  const isSalesOrderDelivered = Boolean(
+    invoice.isSalesOrderDelivered ||
+    invoice.salesOrderDeliveryStatus === 'Delivered' ||
+    salesOrderDelivered
+  );
   const canPayWithRazorpay = canShowInvoiceRazorpayPay({
     user,
     activeRole,
@@ -355,6 +380,11 @@ export const InvoiceDetailPage: React.FC = () => {
             <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${statusClass(invoice.status)}`}>
               {invoice.status}
             </span>
+            {isProforma && (
+              <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-[11px] font-semibold text-violet-900">
+                Proforma
+              </span>
+            )}
             {(invoice.isRecurring || invoice.recurringProfileId) && (
               <span className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-0.5 text-[11px] font-semibold text-zinc-700">
                 Recurring{invoice.recurringCycle ? ` #${invoice.recurringCycle}` : ''}
@@ -372,6 +402,17 @@ export const InvoiceDetailPage: React.FC = () => {
           </p>
         </div>
         <div data-tour="invoices-detail-actions" className="flex flex-wrap gap-2">
+          {/* A draft is still ours to correct; once sent, the client holds these
+              figures and a credit note is the honest route. */}
+          {canWriteFinance && invoice.status === 'Draft' && !readOnly && (
+            <Link
+              to={`/invoices/${id}/edit`}
+              title="Correct this invoice before sending it"
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-800 no-underline cursor-pointer hover:bg-zinc-50"
+            >
+              <EditOutlinedIcon sx={{ fontSize: 15 }} /> Edit
+            </Link>
+          )}
           {canWriteFinance && (
             <button type="button" disabled={busy || readOnly} onClick={sendInvoice} className="inline-flex h-9 items-center gap-1 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold cursor-pointer disabled:opacity-50">
               <SendIcon sx={{ fontSize: 15 }} /> Send
@@ -389,6 +430,24 @@ export const InvoiceDetailPage: React.FC = () => {
             <PictureAsPdfIcon sx={{ fontSize: 15 }} /> PDF
           </button>
           {payButton}
+          {canConvertProforma && (
+            <>
+              {isSalesOrderDelivered && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                  ✓ Ready to Convert
+                </span>
+              )}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={convertProforma}
+                title="Raise the tax invoice for the full value and carry the advance across"
+                className="inline-flex h-9 items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold text-indigo-900 cursor-pointer disabled:opacity-50"
+              >
+                <ReceiptLongIcon sx={{ fontSize: 15 }} /> Convert to tax invoice
+              </button>
+            </>
+          )}
           {canWriteFinance && !readOnly && invoice.status !== 'Paid' && (
             <button type="button" disabled={busy} onClick={() => setWriteOffOpen(true)} className="inline-flex h-9 items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-900 cursor-pointer disabled:opacity-50">
               <MoneyOffIcon sx={{ fontSize: 15 }} /> Write off
@@ -422,6 +481,75 @@ export const InvoiceDetailPage: React.FC = () => {
 
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
+      {isProforma && (
+        <div className="flex flex-col gap-3 rounded-xl border border-violet-200 bg-violet-50 p-4 text-xs text-violet-950">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+            <p className="m-0 text-sm font-semibold">Payment request, not a tax invoice</p>
+            <p className="m-0 mt-0.5 text-violet-800">
+              {invoice.convertedInvoiceId
+                ? 'Converted. The payment and the supply now sit on the tax invoice.'
+                : 'It has its own numbering and is left out of tax and revenue reports. Convert it into a tax invoice for the full value once the work is delivered — the advance paid moves across.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            {invoice.quotationId && (
+              <Link
+                to={`/quotations/${invoice.quotationId}`}
+                className="font-semibold text-violet-900 no-underline hover:underline"
+              >
+                Open quotation →
+              </Link>
+            )}
+            {invoice.convertedInvoiceId && (
+              <Link
+                to={`/invoices/${invoice.convertedInvoiceId}`}
+                className="font-semibold text-violet-900 no-underline hover:underline"
+              >
+                {invoice.convertedInvoiceNo
+                  ? `Open ${invoice.convertedInvoiceNo} →`
+                  : 'Open tax invoice →'}
+              </Link>
+            )}
+          </div>
+        </div>
+        {canConvertProforma && isSalesOrderDelivered && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-300 bg-emerald-100/70 px-3.5 py-2.5 text-xs text-emerald-950">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-emerald-800">✓ Ready to Convert:</span>
+              <span>The related Sales Order has been delivered. This proforma is ready to be converted into a final tax invoice.</span>
+            </div>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={convertProforma}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white cursor-pointer hover:bg-emerald-700 disabled:opacity-50"
+            >
+              <ReceiptLongIcon sx={{ fontSize: 14 }} /> Convert now
+            </button>
+          </div>
+        )}
+      </div>
+    )}
+
+      {!isProforma && invoice.proformaInvoiceId && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs text-zinc-800">
+          <div className="min-w-0">
+            <p className="m-0 text-sm font-semibold text-zinc-950">Raised from a proforma</p>
+            <p className="m-0 mt-0.5 text-zinc-600">
+              This invoice carries the full value; the advance collected on the proforma is already
+              counted in Received.
+            </p>
+          </div>
+          <Link
+            to={`/invoices/${invoice.proformaInvoiceId}`}
+            className="font-semibold text-zinc-900 no-underline hover:underline"
+          >
+            {invoice.proformaInvoiceNo ? `Open ${invoice.proformaInvoiceNo} →` : 'Open proforma →'}
+          </Link>
+        </div>
+      )}
+
       {(invoice.isRecurring || invoice.recurringProfileId) && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs text-zinc-800">
           <div>
@@ -446,7 +574,7 @@ export const InvoiceDetailPage: React.FC = () => {
             <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-800">
               Client portal URL
             </div>
-            <a
+            {/* <a
               href={portalLink}
               target="_blank"
               rel="noopener noreferrer"
@@ -454,7 +582,7 @@ export const InvoiceDetailPage: React.FC = () => {
               title={portalLink}
             >
               {portalLink}
-            </a>
+            </a> */}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button

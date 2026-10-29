@@ -54,6 +54,65 @@ export type ExtensionLeadCreateFields = {
   fields: ExtensionFieldDef[];
 };
 
+/**
+ * Read-only section an extension contributes to the client **Overview** tab.
+ *
+ * The extension's logic module exports `toDisplaySections(bag)` returning
+ * finished label/value strings, so the CRM renders the enquiry without
+ * interpreting it — no raw ids, no JSON.
+ */
+export type ExtensionClientOverviewSection = {
+  extensionId: string;
+  id: string;
+  sectionId: string;
+  label: string;
+  slot: string;
+  whenRequestTypeKey: string | null;
+  whenRequestTypeName: string | null;
+  logicUrl?: string;
+  schemaUrl?: string;
+  order: number;
+  hintMessage: string;
+};
+
+/**
+ * Client-detail tab contributed by an extension. Rendered natively by the CRM,
+ * so there is no HTML entry or iframe.
+ *
+ * `records` → CRM record manager (upload + extension fields + list).
+ */
+export type ExtensionClientTab = {
+  extensionId: string;
+  id: string;
+  tabId: string;
+  label: string;
+  title: string;
+  slot: string;
+  kind: 'records';
+  whenRequestTypeKey: string | null;
+  whenRequestTypeName: string | null;
+  /** Dotted path in the extension bag holding the allowed record count. */
+  countBy: string | null;
+  /** Plural noun for the "{n} missing" banner (e.g. "passports"). */
+  countLabel: string;
+  order: number;
+  hintMessage: string;
+};
+
+/** Field group backing a `records` client tab — schema and logic live in the zip. */
+export type ExtensionClientFieldGroup = {
+  extensionId: string;
+  tabId: string;
+  key: string;
+  sectionLabel: string;
+  /** Array key under client.extension[extensionId] that stores the records. */
+  storeKey: string;
+  logicUrl?: string;
+  schemaUrl?: string;
+  fields: ExtensionFieldDef[];
+  order?: number;
+};
+
 export type ExtensionUiSummary = {
   extensions: Array<{ extensionId: string; version?: string; hostSlotsUrl?: string }>;
   navigation: Array<{
@@ -72,6 +131,12 @@ export type ExtensionUiSummary = {
   leadCreateHints: ExtensionPageContribution[];
   /** Generic Create Lead fields slot — contributions.fields + ui/fields/calc.js */
   leadCreateFields?: ExtensionLeadCreateFields[];
+  /** Read-only sections on the client Overview — host-slots.clientOverviewSections */
+  clientOverviewSections?: ExtensionClientOverviewSection[];
+  /** Native Client Details tabs (no iframe) — host-slots.clientDetailTabs */
+  clientDetailTabs?: ExtensionClientTab[];
+  /** Field groups backing a `records` client tab — host-slots.clientDetailFields */
+  clientDetailFields?: ExtensionClientFieldGroup[];
   requestTypes: Array<{
     extensionId: string;
     key: string;
@@ -113,7 +178,120 @@ type HostSlotsFile = {
     hintMessage?: string;
   }>;
   requestTypes?: Array<{ key?: string; name?: string; description?: string }>;
+  clientOverviewSections?: Array<{
+    id?: string;
+    label?: string;
+    whenRequestTypeKey?: string;
+    whenRequestTypeName?: string;
+    logic?: string;
+    schema?: string;
+    order?: number;
+    hintMessage?: string;
+  }>;
+  clientDetailTabs?: Array<{
+    id?: string;
+    pageId?: string;
+    label?: string;
+    kind?: string;
+    whenRequestTypeKey?: string;
+    whenRequestTypeName?: string;
+    countBy?: string;
+    countLabel?: string;
+    order?: number;
+    hintMessage?: string;
+  }>;
+  clientDetailFields?: Array<{
+    tabId?: string;
+    key?: string;
+    storeKey?: string;
+    sectionLabel?: string;
+    logic?: string;
+    schema?: string;
+    fields?: ExtensionFieldDef[];
+    order?: number;
+  }>;
 };
+
+const CLIENT_TAB_KINDS = new Set(['records']);
+
+const extensionAssetUrl = (extensionId: string, relative?: string) =>
+  relative
+    ? `/extensions/${encodeURIComponent(extensionId)}/${String(relative).replace(/^\/+/, '')}`
+    : '';
+
+/** Mirror of the server-side normalizer in api/extension-host.js. */
+function normalizeClientOverviewSection(
+  extensionId: string,
+  entry: NonNullable<HostSlotsFile['clientOverviewSections']>[number]
+): ExtensionClientOverviewSection | null {
+  const id = String(entry?.id || '').trim();
+  if (!id) return null;
+  return {
+    extensionId,
+    id,
+    sectionId: `ext__${extensionId}__overview__${id}`,
+    label: String(entry.label || id),
+    slot: 'client.overview.section',
+    whenRequestTypeKey: entry.whenRequestTypeKey
+      ? String(entry.whenRequestTypeKey).trim().toLowerCase()
+      : null,
+    whenRequestTypeName: entry.whenRequestTypeName
+      ? String(entry.whenRequestTypeName).trim().toLowerCase()
+      : null,
+    logicUrl: extensionAssetUrl(extensionId, entry.logic),
+    schemaUrl: extensionAssetUrl(extensionId, entry.schema),
+    order: Number.isFinite(Number(entry.order)) ? Number(entry.order) : 100,
+    hintMessage: entry.hintMessage ? String(entry.hintMessage) : '',
+  };
+}
+
+/** Mirror of the server-side normalizer in api/extension-host.js. */
+function normalizeClientTab(
+  extensionId: string,
+  tab: NonNullable<HostSlotsFile['clientDetailTabs']>[number]
+): ExtensionClientTab | null {
+  const id = String(tab?.id || tab?.pageId || '').trim();
+  if (!id) return null;
+  const kind = String(tab.kind || 'extension-data').trim();
+  return {
+    extensionId,
+    id,
+    tabId: `ext__${extensionId}__client__${id}`,
+    label: String(tab.label || id),
+    title: String(tab.label || id),
+    slot: 'client.detail.tab',
+    kind: (CLIENT_TAB_KINDS.has(kind) ? kind : 'records') as ExtensionClientTab['kind'],
+    whenRequestTypeKey: tab.whenRequestTypeKey
+      ? String(tab.whenRequestTypeKey).trim().toLowerCase()
+      : null,
+    whenRequestTypeName: tab.whenRequestTypeName
+      ? String(tab.whenRequestTypeName).trim().toLowerCase()
+      : null,
+    countBy: tab.countBy ? String(tab.countBy).trim() : null,
+    countLabel: tab.countLabel ? String(tab.countLabel).trim() : '',
+    order: Number.isFinite(Number(tab.order)) ? Number(tab.order) : 100,
+    hintMessage: tab.hintMessage ? String(tab.hintMessage) : '',
+  };
+}
+
+function normalizeClientFieldGroup(
+  extensionId: string,
+  group: NonNullable<HostSlotsFile['clientDetailFields']>[number]
+): ExtensionClientFieldGroup | null {
+  const tabId = String(group?.tabId || '').trim();
+  if (!tabId) return null;
+  return {
+    extensionId,
+    tabId,
+    key: String(group.key || tabId),
+    sectionLabel: String(group.sectionLabel || 'Extension fields'),
+    storeKey: String(group.storeKey || group.key || 'records'),
+    logicUrl: extensionAssetUrl(extensionId, group.logic),
+    schemaUrl: extensionAssetUrl(extensionId, group.schema),
+    fields: Array.isArray(group.fields) ? group.fields : [],
+    order: Number.isFinite(Number(group.order)) ? Number(group.order) : 100,
+  };
+}
 
 function matchesRequestType(
   page: Pick<ExtensionPageContribution, 'whenRequestTypeKey' | 'whenRequestTypeName'>,
@@ -139,6 +317,9 @@ function mergeHostSlotsIntoSummary(data: ExtensionUiSummary, extensionId: string
   if (!data.requestTypes) data.requestTypes = [];
   if (!data.leadCreateHints) data.leadCreateHints = [];
   if (!data.leadCreateFields) data.leadCreateFields = [];
+  if (!data.clientDetailTabs) data.clientDetailTabs = [];
+  if (!data.clientDetailFields) data.clientDetailFields = [];
+  if (!data.clientOverviewSections) data.clientOverviewSections = [];
   if (!data.pages) data.pages = [];
 
   const pageById = new Map(
@@ -264,6 +445,35 @@ function mergeHostSlotsIntoSummary(data: ExtensionUiSummary, extensionId: string
       order: Number(emb.order || 100),
       hintMessage: emb.hintMessage || '',
     });
+  }
+
+  // Client Overview sections — read-only, formatted by the extension's logic.
+  for (const entry of slots.clientOverviewSections || []) {
+    const item = normalizeClientOverviewSection(extensionId, entry);
+    if (!item) continue;
+    if (data.clientOverviewSections.some((x) => x.sectionId === item.sectionId)) continue;
+    data.clientOverviewSections.push(item);
+  }
+
+  // Client Details tabs — native, so they need no contributed page to resolve.
+  for (const tab of slots.clientDetailTabs || []) {
+    const item = normalizeClientTab(extensionId, tab);
+    if (!item) continue;
+    if (data.clientDetailTabs.some((x) => x.tabId === item.tabId)) continue;
+    data.clientDetailTabs.push(item);
+  }
+
+  for (const group of slots.clientDetailFields || []) {
+    const item = normalizeClientFieldGroup(extensionId, group);
+    if (!item) continue;
+    if (
+      data.clientDetailFields.some(
+        (x) => x.extensionId === item.extensionId && x.tabId === item.tabId
+      )
+    ) {
+      continue;
+    }
+    data.clientDetailFields.push(item);
   }
 }
 
@@ -422,6 +632,38 @@ export function useExtensions() {
     []
   );
 
+  /** Read-only Overview sections matching the source lead's request type. */
+  const clientOverviewSectionsForRequestType = useCallback(
+    (requestType?: { key?: string | null; name?: string | null } | null) => {
+      return (summary?.clientOverviewSections || [])
+        .filter((entry) => matchesRequestType(entry, requestType))
+        .sort((a, b) => (a.order || 100) - (b.order || 100));
+    },
+    [summary]
+  );
+
+  /** Native Client Details tabs matching the source lead's request type. */
+  const clientTabsForRequestType = useCallback(
+    (requestType?: { key?: string | null; name?: string | null } | null) => {
+      return (summary?.clientDetailTabs || [])
+        .filter((tab) => matchesRequestType(tab, requestType))
+        .sort((a, b) => (a.order || 100) - (b.order || 100));
+    },
+    [summary]
+  );
+
+  /** Field group that backs a `records` client tab. */
+  const clientFieldsForTab = useCallback(
+    (extensionId: string, tabId: string) => {
+      return (
+        (summary?.clientDetailFields || []).find(
+          (group) => group.extensionId === extensionId && group.tabId === tabId
+        ) || null
+      );
+    },
+    [summary]
+  );
+
   const settingsTabs = useMemo(() => summary?.settings || [], [summary]);
   const modulePages = useMemo(() => summary?.modulePages || [], [summary]);
   const navigation = useMemo(() => summary?.navigation || [], [summary]);
@@ -439,6 +681,9 @@ export function useExtensions() {
     createHintsForRequestType,
     createFieldsForRequestType,
     detailEmbedsForLead,
+    clientOverviewSectionsForRequestType,
+    clientTabsForRequestType,
+    clientFieldsForTab,
     extensionPageUrl,
   };
 }

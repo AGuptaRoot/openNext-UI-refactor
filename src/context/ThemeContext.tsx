@@ -39,21 +39,65 @@ function normalizeTheme(value: unknown): ThemeMode | null {
   return null;
 }
 
-function applyDocumentTheme(theme: ThemeMode) {
-  const root = document.documentElement;
-  root.classList.toggle('dark', theme === 'dark');
-  root.dataset.theme = theme;
-  try {
-    root.style.colorScheme = theme;
-  } catch {
-    // ignore
+/**
+ * True when the CRM is mounted inside the CMS dashboard through the Mount API
+ * (no iframe). `src/mount.tsx` sets the flag before rendering.
+ *
+ * It changes two things: `<html>` belongs to the CMS, so it is the source of
+ * truth for the theme and must never be written to by us; and our own styles
+ * are scoped to the mount element, which is where the `dark` class has to go.
+ */
+export function isCrmMountedInHost(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    (window as unknown as { __OPENNEXT_CRM_MOUNTED__?: boolean }).__OPENNEXT_CRM_MOUNTED__ === true
+  );
+}
+
+/** Elements the CRM owns: the mount roots when hosted, else the document. */
+function themeTargets(): HTMLElement[] {
+  const targets: HTMLElement[] = [];
+  if (isCrmMountedInHost()) {
+    targets.push(...document.querySelectorAll<HTMLElement>('[data-crm-mount-root]'));
+    targets.push(...document.querySelectorAll<HTMLElement>('.crm-mount-root'));
+    const pluginRoot = document.getElementById('plugin-root');
+    if (pluginRoot && !targets.includes(pluginRoot)) targets.push(pluginRoot);
+  } else {
+    targets.push(document.documentElement);
+    if (document.body) targets.push(document.body);
   }
-  try {
-    document.body.classList.toggle('dark', theme === 'dark');
-    document.body.dataset.theme = theme;
-  } catch {
-    // ignore
+  return targets;
+}
+
+export function applyDocumentTheme(theme: ThemeMode) {
+  for (const target of themeTargets()) {
+    target.classList.toggle('dark', theme === 'dark');
+    target.dataset.theme = theme;
+    try {
+      target.style.colorScheme = theme;
+    } catch {
+      // ignore
+    }
   }
+}
+
+/**
+ * Read the CMS theme from our own document.
+ *
+ * Mounted in the dashboard there is no parent frame to ask — `<html>` is the
+ * CMS's own element, so its `dark` class and `data-theme` are the answer. We
+ * never write there in that mode, so this cannot read back our own value.
+ */
+function readHostCmsTheme(): ThemeMode | null {
+  if (typeof window === 'undefined' || !isCrmMountedInHost()) return null;
+  const html = document.documentElement;
+  if (html.classList.contains('dark')) return 'dark';
+  const dataTheme = normalizeTheme(html.dataset.theme);
+  if (dataTheme) return dataTheme;
+  if (document.body?.classList.contains('dark')) return 'dark';
+  const bodyTheme = normalizeTheme(document.body?.dataset.theme);
+  if (bodyTheme) return bodyTheme;
+  return 'light';
 }
 
 /** Read OpenNext CMS theme from the parent window (same-origin plugin iframe). */
@@ -101,7 +145,7 @@ function readOwnStoredTheme(): ThemeMode | null {
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<ThemeMode>(() => {
     if (typeof window === 'undefined') return 'light';
-    return readParentCmsTheme() || readOwnStoredTheme() || 'light';
+    return readHostCmsTheme() || readParentCmsTheme() || readOwnStoredTheme() || 'light';
   });
   const themeRef = useRef(theme);
   themeRef.current = theme;
@@ -127,8 +171,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   useEffect(() => {
     const syncFromParent = () => {
-      const fromParent = readParentCmsTheme();
-      if (fromParent) setTheme(fromParent);
+      const fromHost = readHostCmsTheme() || readParentCmsTheme();
+      if (fromHost) setTheme(fromHost);
     };
 
     syncFromParent();
@@ -138,10 +182,15 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // Watch CMS <html class="dark"> toggled by CMS ThemeContext.
     try {
-      if (window.parent !== window && window.parent.document?.documentElement) {
-        const parentHtml = window.parent.document.documentElement;
+      // Mounted: watch the CMS's own <html>. In an iframe: watch the parent's.
+      const watched = isCrmMountedInHost()
+        ? document.documentElement
+        : window.parent !== window
+          ? window.parent.document?.documentElement
+          : null;
+      if (watched) {
         observer = new MutationObserver(syncFromParent);
-        observer.observe(parentHtml, {
+        observer.observe(watched, {
           attributes: true,
           attributeFilter: ['class', 'data-theme'],
         });

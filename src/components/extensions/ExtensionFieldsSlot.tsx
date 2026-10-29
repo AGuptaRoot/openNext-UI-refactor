@@ -26,6 +26,8 @@ export type ExtensionFieldDef = {
   placeholder?: string;
   helpText?: string;
   section?: string | null;
+  /** Accepted MIME types for `image` / `file` fields rendered by the host. */
+  accept?: string;
   whenRequestTypeKey?: string | null;
   whenRequestTypeName?: string | null;
 };
@@ -41,9 +43,44 @@ export type ExtensionFieldGroup = {
   fields: ExtensionFieldDef[];
 };
 
-type FieldLogicModule = {
+/** Context an extension's `validate` may use for cross-record rules. */
+export type FieldLogicContext = {
+  /** Today as YYYY-MM-DD, so the extension owns date-boundary rules. */
+  today?: string;
+  /** Records already stored for this parent (duplicate checks). */
+  records?: Array<Record<string, unknown>>;
+  /** Id of the record being edited, excluded from duplicate checks. */
+  recordId?: string;
+};
+
+export type FieldLogicModule = {
   onFieldChange?: (values: Record<string, unknown>, changedKey: string | null) => Record<string, unknown>;
-  validate?: (values: Record<string, unknown>) => Array<{ id?: string; message: string }>;
+  validate?: (
+    values: Record<string, unknown>,
+    context?: FieldLogicContext
+  ) => Array<{ id?: string; message: string }>;
+  /** Non-blocking notices shown beside a saved record. */
+  warnings?: (
+    record: Record<string, unknown>,
+    context?: FieldLogicContext
+  ) => Array<{ level?: string; message: string }>;
+  /** Form values → stored record keys (record slots). */
+  toRecord?: (values: Record<string, unknown>) => Record<string, unknown>;
+  /** Stored record → form values (record slots). */
+  fromRecord?: (record: Record<string, unknown>) => Record<string, unknown>;
+  /** One-line label for a stored record in a list. */
+  summarizeRecord?: (record: Record<string, unknown>) => string;
+  /**
+   * Read-only display: turn an extension bag into finished sections of
+   * label/value strings. Lets the extension own its own presentation so the
+   * host never has to interpret the payload (or print JSON).
+   */
+  toDisplaySections?: (
+    extensionOrBag: Record<string, unknown>,
+    context?: { extensionId?: string }
+  ) =>
+    | Promise<Array<{ title?: string; fields?: Array<{ label?: string; value?: unknown; mono?: boolean }> }>>
+    | Array<{ title?: string; fields?: Array<{ label?: string; value?: unknown; mono?: boolean }> }>;
   toExtensionBag?: (
     values: Record<string, unknown>,
     meta?: Record<string, string>
@@ -150,7 +187,7 @@ async function applyOptionsSources(fields: ExtensionFieldDef[]): Promise<Extensi
   return out;
 }
 
-async function loadFieldLogic(url?: string): Promise<FieldLogicModule | null> {
+export async function loadFieldLogic(url?: string): Promise<FieldLogicModule | null> {
   if (!url) return null;
   if (!logicCache.has(url)) {
     logicCache.set(
@@ -180,6 +217,50 @@ async function loadFieldLogic(url?: string): Promise<FieldLogicModule | null> {
     );
   }
   return logicCache.get(url) || null;
+}
+
+/**
+ * Merge a field group's declared fields with the richer schema shipped in the
+ * extension zip (`ui/fields/*.json`), then resolve any `optionsSource` URLs.
+ *
+ * The manifest can only carry `{ id, label, fieldType }` — ordering, layout
+ * rows, options and help text all come from the schema file.
+ */
+export async function resolveExtensionFields(
+  baseFields: ExtensionFieldDef[],
+  schemaUrl?: string,
+  logic?: FieldLogicModule | null
+): Promise<ExtensionFieldDef[]> {
+  let fields: ExtensionFieldDef[] = Array.isArray(baseFields) ? [...baseFields] : [];
+
+  if (schemaUrl) {
+    try {
+      const res = await fetch(schemaUrl, { credentials: 'include' });
+      if (res.ok) {
+        const json = await res.json();
+        if (Array.isArray(json?.fields)) {
+          const byId = new Map(fields.map((f) => [f.id, f]));
+          for (const sf of json.fields as ExtensionFieldDef[]) {
+            const base = byId.get(sf.id);
+            byId.set(sf.id, base ? { ...base, ...sf, id: sf.id } : sf);
+          }
+          fields = [...byId.values()];
+        }
+      }
+    } catch {
+      /* optional schema enrichment */
+    }
+  }
+
+  if (logic?.enrichFields) {
+    try {
+      fields = (await logic.enrichFields(fields)) || fields;
+    } catch {
+      /* keep static fields if the options API fails */
+    }
+  }
+
+  return applyOptionsSources(fields);
 }
 
 function matchesRequestType(
@@ -265,35 +346,11 @@ export function ExtensionFieldsSlot({
       for (const g of visibleGroups) {
         const logic = await loadFieldLogic(g.logicUrl);
         nextLogic[g.extensionId] = logic;
-        let fields: ExtensionFieldDef[] = Array.isArray(g.fields) ? [...g.fields] : [];
-        if (g.schemaUrl) {
-          try {
-            const res = await fetch(g.schemaUrl, { credentials: 'include' });
-            if (res.ok) {
-              const json = await res.json();
-              if (Array.isArray(json?.fields)) {
-                const byId = new Map(fields.map((f) => [f.id, f]));
-                for (const sf of json.fields as ExtensionFieldDef[]) {
-                  const base = byId.get(sf.id);
-                  byId.set(sf.id, base ? { ...base, ...sf, id: sf.id } : sf);
-                }
-                fields = [...byId.values()];
-              }
-            }
-          } catch {
-            /* optional schema enrichment */
-          }
-        }
-        if (logic?.enrichFields) {
-          try {
-            fields = (await logic.enrichFields(fields)) || fields;
-          } catch {
-            /* keep static fields if options API fails */
-          }
-        }
-        // Always resolve optionsSource (does not depend on calc.js dynamic import)
-        fields = await applyOptionsSources(fields);
-        nextSchema[g.extensionId] = fields;
+        nextSchema[g.extensionId] = await resolveExtensionFields(
+          g.fields || [],
+          g.schemaUrl,
+          logic
+        );
       }
       if (!cancelled) {
         setLogicByExt(nextLogic);
@@ -380,11 +437,16 @@ export function ExtensionFieldsSlot({
             data-extension-id={group.extensionId}
             className={sectionClassName}
           >
-            <h3 className={titleClassName}>{group.sectionLabel || 'Extension fields'}</h3>
-            <p className="mt-0 mb-3 text-xs text-zinc-500">
-              Fields from extension <code className="text-[11px]">{group.extensionId}</code> — logic
-              runs in the extension package (not hard-coded in CRM).
-            </p>
+            {/* An empty sectionLabel suppresses the header — used by per-record forms. */}
+            {group.sectionLabel === '' ? null : (
+              <>
+                <h3 className={titleClassName}>{group.sectionLabel || 'Extension fields'}</h3>
+                <p className="mt-0 mb-3 text-xs text-zinc-500">
+                  Fields from extension <code className="text-[11px]">{group.extensionId}</code> —
+                  logic runs in the extension package (not hard-coded in CRM).
+                </p>
+              </>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {groupFieldsForLayout(fields).map((block) => {
                 const renderField = (field: ExtensionFieldDef) => {

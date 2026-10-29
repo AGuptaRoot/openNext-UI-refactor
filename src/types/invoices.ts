@@ -30,9 +30,20 @@ export interface InvoicePaymentRecord {
   remark?: string;
 }
 
+/**
+ * What kind of document this is.
+ *
+ * A `proforma` is a payment request raised from a quotation: its own numbering
+ * series, excluded from tax and revenue reporting, and converted into a `tax`
+ * invoice for the full value once the work is delivered. Records saved before
+ * the field existed have none, and are tax invoices.
+ */
+export type InvoiceDocumentType = 'tax' | 'proforma';
+
 export interface InvoiceItem {
   _id: string;
   invoiceNo: string;
+  documentType?: InvoiceDocumentType;
   issueDate: string;
   dueDate: string;
   currency: string;
@@ -45,8 +56,20 @@ export interface InvoiceItem {
   projectId?: string;
   projectName?: string;
   quotationId?: string;
+  quotationNo?: string;
+  /** Set on a proforma raised for a prospect who has no client account yet. */
+  leadId?: string;
+  /** The proforma this tax invoice came from, and the advance it carried. */
+  proformaInvoiceId?: string;
+  proformaInvoiceNo?: string;
+  /** On a proforma: the tax invoice it was converted into. */
+  convertedInvoiceId?: string;
+  convertedInvoiceNo?: string;
+  convertedAt?: string;
   salesOrderId?: string;
   salesOrderNo?: string;
+  isSalesOrderDelivered?: boolean;
+  salesOrderDeliveryStatus?: string;
   paymentDetails?: string;
   billingAddress?: string;
   shippingAddress?: string;
@@ -110,6 +133,12 @@ export type InvoiceCreateInput = Omit<
   | 'cancelledAt'
   | 'sentAt'
   | 'viewedAt'
+  | 'documentType'
+  | 'proformaInvoiceId'
+  | 'proformaInvoiceNo'
+  | 'convertedInvoiceId'
+  | 'convertedInvoiceNo'
+  | 'convertedAt'
   | 'createdAt'
   | 'updatedAt'
 >;
@@ -119,6 +148,8 @@ export interface InvoiceQueryParams {
   limit?: number;
   search?: string;
   status?: string;
+  /** Omitted shows tax invoices only, which is what the list means by default. */
+  documentType?: InvoiceDocumentType | 'all';
   clientId?: string;
   projectId?: string;
   archived?: boolean | 'true' | 'false' | 'all';
@@ -327,6 +358,12 @@ export interface RazorpayOrderData {
     balanceDue?: number;
     currency?: string;
   };
+  /** Present when the order was raised from a quotation. */
+  proformaId?: string;
+  proformaNo?: string;
+  quotationId?: string;
+  quotationNo?: string;
+  isAdvance?: boolean;
 }
 
 export interface RazorpayConfirmInput {

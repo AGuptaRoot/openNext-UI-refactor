@@ -8,7 +8,7 @@ import PhotoCameraOutlinedIcon from '@mui/icons-material/PhotoCameraOutlined';
 import { useAuth } from '../../context/AuthContext';
 import { useDialog } from '../../context/DialogContext';
 import { crmApi } from '../../services/api';
-import { canAssignToOtherUsers } from '../../utils/permissions';
+import { canAssignToOtherUsers, canChangeLeadStage } from '../../utils/permissions';
 import {
   LeadItem,
   LeadPaginationMeta,
@@ -65,12 +65,14 @@ const ROLE_SUBTITLES: Record<string, string> = {
 export const LeadsPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { activeRole, isClient, hasPermission, user } = useAuth();
+  const { activeRole, isClient, isAdmin, hasPermission, user } = useAuth();
   const { confirm } = useDialog();
   const canWrite = hasPermission('crm.leads.write') && !isClient;
   const canDelete = hasPermission('crm.leads.delete') && !isClient;
   const canConvert = hasPermission('crm.leads.convert') && !isClient;
   const canAssignOthers = canAssignToOtherUsers(user, { isClient, activeRole });
+  /** Moving a lead's stage by hand is a manager action. */
+  const canChangeStage = canWrite && canChangeLeadStage({ isAdmin, isClient, activeRole });
 
   const [currentView, setCurrentView] = useState<ViewMode>(() => {
     try {
@@ -438,6 +440,10 @@ export const LeadsPage: React.FC = () => {
   // Single lead operations
   const handleMoveStage = async (leadId: string, newStage: string) => {
     if (!canWrite) return;
+    if (!canChangeStage) {
+      showToast('Only a CRM manager or sales manager can change the lead stage', 'error');
+      return;
+    }
     // Optimistic local update for instant responsive UI
     setLeads((prev) =>
       prev.map((l) => (l._id === leadId ? { ...l, stage: newStage } : l))
@@ -1006,6 +1012,7 @@ export const LeadsPage: React.FC = () => {
               currentSortAsc={currentSortAsc}
               onSort={handleSort}
               canWrite={canWrite}
+              canChangeStage={canChangeStage}
               canDelete={canDelete}
               canConvert={canConvert}
               canAssignOthers={canAssignOthers}
@@ -1023,6 +1030,7 @@ export const LeadsPage: React.FC = () => {
               onUpdateStatus={handleUpdateStatus}
               onConvertLead={handleConvertLead}
               canWrite={canWrite}
+              canChangeStage={canChangeStage}
               canConvert={canConvert}
             />
           )}

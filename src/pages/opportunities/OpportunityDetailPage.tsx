@@ -5,10 +5,12 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import RequestQuoteOutlinedIcon from '@mui/icons-material/RequestQuoteOutlined';
 import ShoppingCartOutlinedIcon from '@mui/icons-material/ShoppingCartOutlined';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 
 import { useAuth } from '../../context/AuthContext';
 import { useDialog } from '../../context/DialogContext';
 import { ApiError, crmApi } from '../../services/api';
+import { LeadPortalAccessButton } from '../../components/leads/LeadPortalAccess';
 import { AssignableUser } from '../../types/leads';
 import {
   OpportunityItem,
@@ -19,6 +21,7 @@ import {
   isOpportunityWonStage,
   isOpportunityLostStage,
   canCreateOpportunityQuotation,
+  describeOpportunityAmountBlock,
 } from '../../types/opportunities';
 import { useOpportunityStages } from '../../hooks/useOpportunityStages';
 import {
@@ -27,6 +30,10 @@ import {
   isAssignableSalesRepresentative,
 } from '../../utils/permissions';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import {
+  OpportunityEditModal,
+  type OpportunityEditSection,
+} from '../../components/opportunities/OpportunityEditModal';
 import { formatCrmMoney } from '../../utils/currency';
 
 function formatMoney(value?: number, currency?: string) {
@@ -92,6 +99,20 @@ export const OpportunityDetailPage: React.FC = () => {
   const [info, setInfo] = useState('');
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [assignOwnerId, setAssignOwnerId] = useState('');
+  /** Which section the edit modal is showing, or null when closed. */
+  const [editSection, setEditSection] = useState<OpportunityEditSection | null>(null);
+  /** Stage types offered by this deal's own pipeline (drives the sample button). */
+  const [pipelineStageTypes, setPipelineStageTypes] = useState<string[] | null>(null);
+
+  /**
+   * The sample workflow only exists for pipelines that actually model it, so
+   * hide the button unless this deal's pipeline defines a sample stage. While
+   * the pipeline is still loading (null) the button stays hidden rather than
+   * flickering in and out.
+   */
+  const pipelineSupportsSamples =
+    pipelineStageTypes !== null &&
+    pipelineStageTypes.some((type) => type === 'SAMPLE_SENT' || type === 'SAMPLE_APPROVED');
   const [assigning, setAssigning] = useState(false);
 
   const load = useCallback(async () => {
@@ -113,6 +134,34 @@ export const OpportunityDetailPage: React.FC = () => {
   useEffect(() => {
     load();
   }, [load]);
+
+  /**
+   * Load the stage types of the deal's own pipeline. Falls back to the active
+   * pipeline when the deal carries no pipelineId (older records), and to an
+   * empty list on failure — which keeps the sample button hidden rather than
+   * offering a workflow the pipeline does not model.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      if (!item) return;
+      try {
+        const res = item.pipelineId
+          ? await crmApi.getOpportunityPipeline(String(item.pipelineId))
+          : await crmApi.getActiveOpportunityPipeline();
+        if (cancelled) return;
+        const stages = res.data?.stages;
+        setPipelineStageTypes(
+          Array.isArray(stages) ? stages.map((st) => String(st.type || '')) : []
+        );
+      } catch {
+        if (!cancelled) setPipelineStageTypes([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [item?.pipelineId, item?._id]);
 
   useEffect(() => {
     if (!canAssignOwner) {
@@ -402,7 +451,7 @@ export const OpportunityDetailPage: React.FC = () => {
         </div>
 
         <div data-tour="opportunities-detail-actions" className="flex flex-wrap gap-2">
-          {canRequestSample && (
+          {canRequestSample && pipelineSupportsSamples && (
             <Link
               to={`/samples/create?opportunityId=${encodeURIComponent(item._id)}`}
               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold no-underline text-zinc-800 hover:bg-zinc-50"
@@ -411,10 +460,25 @@ export const OpportunityDetailPage: React.FC = () => {
               Request Sample
             </Link>
           )}
+          {canWrite && item.leadId && !item.isPortal && !item.leadIsPortal ? (
+            <LeadPortalAccessButton
+              leadId={String(item.leadId)}
+              leadEmail={item.contactEmail}
+              leadName={item.title}
+              canWrite={canWrite}
+              hideIfPortalActive
+              showToast={(message, tone) =>
+                tone === 'error' ? setError(message) : setInfo(message)
+              }
+            />
+          ) : null}
           {canWrite && canCreateOpportunityQuotation(item) && (
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || Boolean(describeOpportunityAmountBlock(item))}
+              title={
+                describeOpportunityAmountBlock(item) || 'Create a quotation from this deal'
+              }
               onClick={() => void runConvertQuotation()}
               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold cursor-pointer disabled:opacity-50 hover:bg-zinc-50"
             >
@@ -657,7 +721,19 @@ export const OpportunityDetailPage: React.FC = () => {
           data-tour="opportunities-detail-contact"
           className="bg-white border border-zinc-300 rounded-xl p-5"
         >
-          <h2 className="text-sm font-bold text-zinc-950 m-0 mb-4">Primary contact</h2>
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <h2 className="text-sm font-bold text-zinc-950 m-0">Primary contact</h2>
+            {canWrite && (
+              <button
+                type="button"
+                onClick={() => setEditSection('contact')}
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-[11px] font-semibold text-zinc-800 cursor-pointer hover:bg-zinc-50"
+              >
+                <EditOutlinedIcon sx={{ fontSize: 13 }} />
+                Edit
+              </button>
+            )}
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <InfoRow label="Contact person">{item.contactPerson || '—'}</InfoRow>
             <InfoRow label="Email">{item.contactEmail || '—'}</InfoRow>
@@ -669,7 +745,8 @@ export const OpportunityDetailPage: React.FC = () => {
           data-tour="opportunities-detail-products"
           className="bg-white border border-zinc-300 rounded-xl overflow-hidden"
         >
-          <div className="px-5 py-4 border-b border-zinc-200">
+          <div className="px-5 py-4 border-b border-zinc-200 flex items-start justify-between gap-3">
+            <div>
             <h2 className="text-sm font-bold text-zinc-950 m-0">
               Proposed Products &amp; Line Items
             </h2>
@@ -678,6 +755,17 @@ export const OpportunityDetailPage: React.FC = () => {
               {formatMoney(financials.subtotal, item.currency)} · Tax{' '}
               {formatMoney(financials.taxTotal, item.currency)}
             </p>
+            </div>
+            {canWrite && (
+              <button
+                type="button"
+                onClick={() => setEditSection('products')}
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-[11px] font-semibold text-zinc-800 cursor-pointer hover:bg-zinc-50"
+              >
+                <EditOutlinedIcon sx={{ fontSize: 13 }} />
+                Edit
+              </button>
+            )}
           </div>
           {products.length === 0 ? (
             <div className="p-8 text-center text-sm text-zinc-500">No proposed products on this deal.</div>
@@ -733,7 +821,19 @@ export const OpportunityDetailPage: React.FC = () => {
           data-tour="opportunities-detail-shipping"
           className="bg-white border border-zinc-300 rounded-xl p-5"
         >
-          <h2 className="text-sm font-bold text-zinc-950 m-0 mb-4">Shipping &amp; financials</h2>
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <h2 className="text-sm font-bold text-zinc-950 m-0">Shipping &amp; financials</h2>
+            {canWrite && (
+              <button
+                type="button"
+                onClick={() => setEditSection('financials')}
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-[11px] font-semibold text-zinc-800 cursor-pointer hover:bg-zinc-50"
+              >
+                <EditOutlinedIcon sx={{ fontSize: 13 }} />
+                Edit currency &amp; charges
+              </button>
+            )}
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <InfoRow label="Destination state">{item.shippingState || '—'}</InfoRow>
             <InfoRow label="Products subtotal">
@@ -799,6 +899,29 @@ export const OpportunityDetailPage: React.FC = () => {
           </div>
         </section>
       </div>
+
+      {editSection && item ? (
+        <OpportunityEditModal
+          item={item}
+          section={editSection}
+          fallbackCurrency={settingsCurrency}
+          showToast={(message, kind) => {
+            if (kind === 'error') setError(message);
+            else setInfo(message);
+          }}
+          onClose={() => setEditSection(null)}
+          onSaved={(updated) => {
+            setItem(updated);
+            setEditSection(null);
+            setError('');
+            setInfo(
+              updated.contactSynced
+                ? 'Opportunity updated and the contact record was synced'
+                : 'Opportunity updated'
+            );
+          }}
+        />
+      ) : null}
     </div>
   );
 };

@@ -52,6 +52,7 @@ import { SettingsTabIcon } from '../../components/icons/SettingsTabIcon';
 import { ExtensionIframe } from '../../components/extensions/ExtensionIframe';
 import { useExtensions } from '../../hooks/useExtensions';
 import {
+  CalendarClock,
   Compass,
   FolderKanban,
   FolderOpen,
@@ -123,6 +124,7 @@ function ChipListEditor({
   value,
   placeholder,
   onChange,
+  fixedValues = [],
 }: {
   title: string;
   description: string;
@@ -131,6 +133,7 @@ function ChipListEditor({
   value: string[];
   placeholder?: string;
   onChange: (value: string[]) => void;
+  fixedValues?: string[];
 }) {
   const [draft, setDraft] = useState('');
   const [showBulk, setShowBulk] = useState(false);
@@ -151,6 +154,10 @@ function ChipListEditor({
   };
 
   const removeItem = (index: number) => {
+    const item = stringValues[index];
+    if (fixedValues.some((f) => f.toLowerCase() === item.toLowerCase())) {
+      return;
+    }
     onChange(stringValues.filter((_, i) => i !== index));
   };
 
@@ -178,22 +185,38 @@ function ChipListEditor({
           <p className="m-0 text-center text-xs text-zinc-400 py-4">No values yet — add the first one below.</p>
         ) : (
           <div className="flex flex-wrap gap-2">
-            {stringValues.map((item, index) => (
-              <span
-                key={`${item}-${index}`}
-                className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-zinc-200 bg-white py-1 pl-3 pr-1.5 text-xs font-semibold text-zinc-800"
-              >
-                <span className="truncate">{item}</span>
-                <button
-                  type="button"
-                  onClick={() => removeItem(index)}
-                  className="inline-flex h-5 w-5 items-center justify-center rounded-full border-0 bg-zinc-100 text-zinc-500 hover:bg-zinc-900 hover:text-white"
-                  aria-label={`Remove ${item}`}
+            {stringValues.map((item, index) => {
+              const isFixed = fixedValues.some((f) => f.toLowerCase() === item.toLowerCase());
+              return (
+                <span
+                  key={`${item}-${index}`}
+                  className={`inline-flex max-w-full items-center gap-1.5 rounded-full border py-1 pl-3 text-xs font-semibold ${
+                    isFixed
+                      ? 'border-zinc-300 bg-zinc-100 pr-2.5 text-zinc-800'
+                      : 'border-zinc-200 bg-white pr-1.5 text-zinc-800'
+                  }`}
                 >
-                  <CloseIcon sx={{ fontSize: 12 }} />
-                </button>
-              </span>
-            ))}
+                  <span className="truncate">{item}</span>
+                  {isFixed ? (
+                    <span
+                      title="Fixed system activity type (cannot be removed)"
+                      className="inline-flex text-[11px] text-zinc-400 select-none"
+                    >
+                      🔒
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => removeItem(index)}
+                      className="inline-flex h-5 w-5 items-center justify-center rounded-full border-0 bg-zinc-100 text-zinc-500 hover:bg-zinc-900 hover:text-white cursor-pointer"
+                      aria-label={`Remove ${item}`}
+                    >
+                      <CloseIcon sx={{ fontSize: 12 }} />
+                    </button>
+                  )}
+                </span>
+              );
+            })}
           </div>
         )}
       </div>
@@ -1016,6 +1039,7 @@ export const SettingsPage: React.FC = () => {
   // Travel Tab: Service Requirements
   const [travelServices, setTravelServices] = useState<string[]>([]);
   const [savingTravelServices, setSavingTravelServices] = useState(false);
+  const [savingQualifyPrompt, setSavingQualifyPrompt] = useState(false);
   const [travelServicesDirty, setTravelServicesDirty] = useState(false);
 
   useEffect(() => {
@@ -1045,6 +1069,29 @@ export const SettingsPage: React.FC = () => {
     setTravelLocations((prev) => ({ ...prev, [key]: values }));
     setTravelLocationsDirty(true);
     setDirty(true);
+  };
+
+  /**
+   * The Qualification Match tab hides the global Save bar (its panels save
+   * themselves), so this one checkbox carries its own save.
+   */
+  const handleSaveQualifyPrompt = async () => {
+    if (!settings) return;
+    setSavingQualifyPrompt(true);
+    try {
+      await crmApi.updateSettings({
+        qualification_prompt_on_requirement_save:
+          settings.qualification_prompt_on_requirement_save,
+      });
+      setMessage({ kind: 'success', text: 'Qualification stage prompt saved' });
+    } catch (err) {
+      setMessage({
+        kind: 'error',
+        text: err instanceof Error ? err.message : 'Failed to save the qualification stage prompt',
+      });
+    } finally {
+      setSavingQualifyPrompt(false);
+    }
   };
 
   const handleSaveTravelLocations = async () => {
@@ -1330,6 +1377,7 @@ export const SettingsPage: React.FC = () => {
         'lead_types',
         'lead_priorities',
         'pipeline_stages',
+        'activity_types',
       ];
       if (requiredLeadLists.some((key) => !(settings[key] as string[])?.length)) {
         return setMessage({ kind: 'error', text: 'Required lead option lists cannot be empty.' });
@@ -1340,6 +1388,7 @@ export const SettingsPage: React.FC = () => {
       payload.lead_types = settings.lead_types;
       payload.lead_priorities = settings.lead_priorities;
       payload.lead_tags = settings.lead_tags;
+      payload.activity_types = settings.activity_types;
       payload.lead_custom_fields = settings.lead_custom_fields;
     } else if (activeTab === 'clients') {
       payload.client_categories = settings.client_categories;
@@ -1743,6 +1792,108 @@ export const SettingsPage: React.FC = () => {
       {activeTab === 'general' && (
         <section data-tour="settings-general-profile" className={cardClass}>
           <h2 className="mt-0 text-base font-bold text-zinc-950">General & Company Profile</h2>
+
+          {/*
+            Proforma & advance payment — one switch for the whole feature, off
+            by default. Turning it off hides the quotation payment options and
+            blocks new proformas, and keeps everything already recorded.
+          */}
+          <section className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
+                checked={Boolean(settings.proforma_advance_enabled)}
+                onChange={(e) => update('proforma_advance_enabled', e.target.checked)}
+              />
+              <span>
+                <span className="block text-sm font-semibold text-zinc-950">
+                  Enable Proforma &amp; Advance Payment
+                </span>
+                <span className="mt-0.5 block text-xs text-zinc-600">
+                  Lets a quotation be paid in full or as an advance. A proforma invoice is raised
+                  for the payment, it is recorded in Payments, and it later converts into a tax
+                  invoice for the full value with the advance carried across. Existing proformas
+                  and payments are never deleted when this is switched off.
+                </span>
+              </span>
+            </label>
+
+            {settings.proforma_advance_enabled ? (
+              <div className="mt-4 space-y-4 border-t border-zinc-200 pt-4">
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
+                    checked={Boolean(settings.quotation_auto_accept_on_payment)}
+                    onChange={(e) => update('quotation_auto_accept_on_payment', e.target.checked)}
+                  />
+                  <span>
+                    <span className="block text-sm font-semibold text-zinc-950">
+                      Auto-accept quotation on successful payment
+                    </span>
+                    <span className="mt-0.5 block text-xs text-zinc-600">
+                      A successful payment also accepts the quotation, which marks the opportunity
+                      Won and locks the deal. Leave this off to take the money and accept the
+                      quotation as a separate, deliberate step.
+                    </span>
+                  </span>
+                </label>
+
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
+                    checked={Boolean(settings.auto_convert_proforma_on_delivery)}
+                    onChange={(e) => update('auto_convert_proforma_on_delivery', e.target.checked)}
+                  />
+                  <span>
+                    <span className="block text-sm font-semibold text-zinc-950">
+                      Auto convert Proforma to Tax Invoice when Sales Order is marked Delivered
+                    </span>
+                    <span className="mt-0.5 block text-xs text-zinc-600">
+                      When all shipments on the sales order are delivered, automatically convert the eligible proforma into a final tax invoice and carry advance payments across. Leave this off to convert manually.
+                    </span>
+                  </span>
+                </label>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <label>
+                    <span className={labelClass}>Proforma Number Prefix</span>
+                    <input
+                      className={inputClass}
+                      maxLength={12}
+                      value={settings.proforma_prefix}
+                      onChange={(e) => update('proforma_prefix', e.target.value)}
+                      placeholder="PI-"
+                    />
+                    <span className="mt-1 block text-[11px] text-zinc-500">
+                      Its own series, so a proforma never uses a tax-invoice number.
+                    </span>
+                  </label>
+                  <label>
+                    <span className={labelClass}>Default Advance %</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      className={inputClass}
+                      value={settings.default_advance_percent}
+                      onChange={(e) => update('default_advance_percent', Number(e.target.value) || 0)}
+                    />
+                    <span className="mt-1 block text-[11px] text-zinc-500">
+                      Suggested on a quotation; staff can override it per quotation.
+                    </span>
+                  </label>
+                </div>
+              </div>
+            ) : (
+              <p className="m-0 mt-3 border-t border-zinc-200 pt-3 text-xs text-zinc-500">
+                While this is off, quotations follow the normal approval flow only: Draft → Sent →
+                Accepted → Opportunity Won → Sales Order. A payment never accepts a quotation.
+              </p>
+            )}
+          </section>
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <label>
               <span className={labelClass}>Registered Company Name *</span>
@@ -2301,6 +2452,7 @@ export const SettingsPage: React.FC = () => {
                     { label: 'Types', count: settings.lead_types.length },
                     { label: 'Priorities', count: settings.lead_priorities.length },
                     { label: 'Tags', count: settings.lead_tags.length },
+                    { label: 'Activities', count: settings.activity_types.length },
                     { label: 'Stages', count: settings.pipeline_stages.length },
                   ].map((stat) => (
                     <div
@@ -2367,6 +2519,16 @@ export const SettingsPage: React.FC = () => {
               placeholder="e.g. Hot Lead"
               onChange={(value) => update('lead_tags', value)}
             />
+            <ChipListEditor
+              title="Activity Types"
+              description="Interaction types on the lead Activities tab — Call, Meeting, Follow up, WhatsApp…"
+              icon={<CalendarClock className="h-[18px] w-[18px] shrink-0" aria-hidden />}
+              accent="bg-zinc-100"
+              value={settings.activity_types}
+              placeholder="e.g. Site Visit"
+              fixedValues={['Call', 'Meeting', 'Follow up', 'WhatsApp']}
+              onChange={(value) => update('activity_types', value)}
+            />
           </section>
 
           <div data-tour="settings-leads-pipeline">
@@ -2399,6 +2561,44 @@ export const SettingsPage: React.FC = () => {
 
       {activeTab === 'qualification-match' && (
         <div className="space-y-5" data-tour="settings-qualification-match-tab">
+          <section className={cardClass} data-tour="settings-qualify-prompt">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <h2 className="m-0 text-base font-bold text-zinc-950">
+                  Stage prompt after a commercial requirement save
+                </h2>
+                <p className="mb-0 mt-1 text-xs text-zinc-500">
+                  Saving a lead's commercial requirement already moves it to Contacted. Turn this
+                  on to also be asked whether the lead should go to Qualified — the rep answers
+                  Yes or No on the lead page, so the stage never changes on its own.
+                </p>
+                <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm font-semibold text-zinc-800">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={settings.qualification_prompt_on_requirement_save}
+                    onChange={(e) =>
+                      update('qualification_prompt_on_requirement_save', e.target.checked)
+                    }
+                  />
+                  <span>
+                    Ask to convert the lead stage to Qualified after saving the commercial
+                    requirement
+                  </span>
+                </label>
+              </div>
+              <button
+                type="button"
+                onClick={handleSaveQualifyPrompt}
+                disabled={savingQualifyPrompt}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-zinc-900 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-50 transition-colors shadow-none cursor-pointer"
+              >
+                <Check className="h-3.5 w-3.5" />
+                <span>{savingQualifyPrompt ? 'Saving…' : 'Save prompt setting'}</span>
+              </button>
+            </div>
+          </section>
+
           <RequestTypesPanel />
           <div className={`${cardClass} text-xs text-zinc-500`}>
             Tip: open a Request Type and use <strong className="text-zinc-800">Match catalog</strong>{' '}

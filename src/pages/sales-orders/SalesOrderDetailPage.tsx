@@ -116,10 +116,15 @@ export const SalesOrderDetailPage: React.FC = () => {
   const [shipmentOpen, setShipmentOpen] = useState(false);
   const [shipSelection, setShipSelection] = useState<ShipSelection>({});
   const [courierName, setCourierName] = useState('');
+  /** Optional: blank when the courier has not issued the AWB yet. */
+  const [trackingNumber, setTrackingNumber] = useState('');
   const [weightKg, setWeightKg] = useState(1);
   const [shipNotes, setShipNotes] = useState('');
 
   const [deliveryOpen, setDeliveryOpen] = useState<SalesOrderShipment | null>(null);
+  /** Shipment whose AWB is being filled in after dispatch. */
+  const [trackingTarget, setTrackingTarget] = useState<SalesOrderShipment | null>(null);
+  const [trackingDraft, setTrackingDraft] = useState('');
   const [proofOfDelivery, setProofOfDelivery] = useState('');
 
   const [rmaOpen, setRmaOpen] = useState(false);
@@ -178,12 +183,19 @@ export const SalesOrderDetailPage: React.FC = () => {
   const isSalesManager = activeRole === 'sales-manager';
   const isAuthorizedRmaRole = isClient || isAdmin || isSalesManager || activeRole === 'crm-manager';
 
+  /** Nothing can come back before it has arrived — the server enforces this too. */
+  const isDelivered =
+    !!order &&
+    (order.deliveryStatus === 'Delivered' ||
+      String(order.status || '').toLowerCase() === 'completed');
+
   const canGenerateRma = useMemo(() => {
     if (!isAuthorizedRmaRole || !order || order.status === 'Cancelled' || order.status === 'Draft') {
       return false;
     }
+    if (!isDelivered) return false;
     return (order.lineItems || []).some((line) => remainingReturnQty(line) > 0);
-  }, [isAuthorizedRmaRole, order]);
+  }, [isAuthorizedRmaRole, order, isDelivered]);
 
   const canReserve =
     canWriteOrders &&
@@ -227,6 +239,7 @@ export const SalesOrderDetailPage: React.FC = () => {
     });
     setShipSelection(next);
     setCourierName('');
+    setTrackingNumber('');
     setWeightKg(1);
     setShipNotes('');
     setShipmentOpen(true);
@@ -243,13 +256,28 @@ export const SalesOrderDetailPage: React.FC = () => {
       if (!items.length) throw new Error('Select at least one item to ship.');
       await crmApi.addSalesOrderShipment(id, {
         courierName: courierName.trim(),
-        trackingNumber: '',
+        trackingNumber: trackingNumber.trim(),
         weightKg,
         notes: shipNotes.trim(),
         items,
       });
       setShipmentOpen(false);
     }, 'Shipment dispatched.');
+
+  const openTrackingEditor = (shipment: SalesOrderShipment) => {
+    setTrackingTarget(shipment);
+    setTrackingDraft(shipment.trackingNumber || '');
+  };
+
+  const submitTrackingNumber = () =>
+    run(async () => {
+      if (!trackingTarget) return;
+      await crmApi.updateSalesOrderShipment(id, trackingTarget._id, {
+        trackingNumber: trackingDraft.trim(),
+      });
+      setTrackingTarget(null);
+      setTrackingDraft('');
+    }, 'Tracking number saved.');
 
   const submitDelivery = () =>
     run(async () => {
@@ -892,7 +920,17 @@ export const SalesOrderDetailPage: React.FC = () => {
                     {shipment.shipmentNumber} · {shipment.courierName}
                   </div>
                   <div className="text-zinc-600 mt-1">
-                    AWB {shipment.trackingNumber}
+                    {shipment.trackingNumber ? (
+                      `AWB ${shipment.trackingNumber}`
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => openTrackingEditor(shipment)}
+                        className="border-0 bg-transparent p-0 text-xs font-semibold text-blue-700 underline cursor-pointer"
+                      >
+                        Add tracking number
+                      </button>
+                    )}
                     {shipment.weightKg != null ? ` · ${shipment.weightKg} kg` : ''}
                   </div>
                   <div className="text-zinc-600 mt-1">
@@ -1122,6 +1160,17 @@ export const SalesOrderDetailPage: React.FC = () => {
                 </select>
               </label>
               <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-semibold uppercase text-zinc-500">
+                  Tracking number / AWB
+                </span>
+                <input
+                  className={financeFieldClass}
+                  value={trackingNumber}
+                  onChange={(event) => setTrackingNumber(event.target.value)}
+                  placeholder="Leave blank if not issued yet"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-semibold uppercase text-zinc-500">Weight (kg)</span>
                 <input
                   className={financeFieldClass}
@@ -1156,6 +1205,43 @@ export const SalesOrderDetailPage: React.FC = () => {
                 className="h-9 px-3 text-xs font-semibold rounded-lg border border-zinc-950 bg-zinc-950 text-white cursor-pointer disabled:opacity-50"
               >
                 Dispatch package
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {trackingTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-zinc-300 bg-white p-5 shadow-lg">
+            <h3 className="m-0 mb-1 text-sm font-semibold text-zinc-950">
+              Tracking number · {trackingTarget.shipmentNumber}
+            </h3>
+            <p className="m-0 mb-3 text-xs text-zinc-500">
+              {trackingTarget.courierName}. Leave it blank for a hand delivery.
+            </p>
+            <input
+              className={financeFieldClass}
+              value={trackingDraft}
+              autoFocus
+              onChange={(event) => setTrackingDraft(event.target.value)}
+              placeholder="AWB / docket number"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setTrackingTarget(null)}
+                className="h-9 px-3 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={submitTrackingNumber}
+                className="h-9 px-3 text-xs font-semibold rounded-lg border border-zinc-950 bg-zinc-950 text-white cursor-pointer disabled:opacity-50"
+              >
+                Save
               </button>
             </div>
           </div>

@@ -6,7 +6,6 @@ import Step from '@mui/material/Step';
 import StepLabel from '@mui/material/StepLabel';
 import StepContent from '@mui/material/StepContent';
 import Typography from '@mui/material/Typography';
-import Chip from '@mui/material/Chip';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
@@ -18,10 +17,11 @@ import LocationOnIcon from '@mui/icons-material/LocationOn';
 import type { SampleItem } from '../../types/samples';
 import {
   sampleStatusTone,
-  sampleUrgencyEmoji,
   sampleUrgencyTone,
   SAMPLE_RATING_LABELS,
 } from '../../types/samples';
+import { SampleUrgencyDot } from '../icons/SampleUrgencyDot';
+import { BADGE, CARD, CARD_TITLE } from './sampleUi';
 
 export interface SampleStepDef {
   id: string;
@@ -101,10 +101,10 @@ const CustomStepIcon: React.FC<{
   icon: React.ReactNode;
 }> = ({ active, completed, error, icon }) => {
   if (error) {
-    return <ErrorOutlineIcon sx={{ color: '#dc2626', fontSize: 22 }} />;
+    return <ErrorOutlineIcon sx={{ color: '#09090b', fontSize: 22 }} />;
   }
   if (completed) {
-    return <CheckCircleIcon sx={{ color: '#16a34a', fontSize: 22 }} />;
+    return <CheckCircleIcon sx={{ color: '#09090b', fontSize: 22 }} />;
   }
   if (active) {
     return (
@@ -156,7 +156,10 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
 }) => {
   const [copied, setCopied] = useState(false);
 
-  const isRejected = normalizeStatus(sample.status) === 'rejected';
+  const isCancelled = normalizeStatus(sample.status) === 'cancelled';
+  // A cancelled request stops the timeline exactly as a rejected one does —
+  // nothing after this point happened.
+  const isRejected = normalizeStatus(sample.status) === 'rejected' || isCancelled;
   const hasFeedback = Boolean(
     sample.feedback && (sample.feedback.rating != null || sample.feedback.comments || sample.feedback.feedbackDate)
   );
@@ -225,48 +228,42 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
   };
 
   return (
-    <section
-      data-tour="sample-detail-shipping-tracker"
-      className="bg-white border border-zinc-300 rounded-xl p-5"
-    >
+    <section data-tour="sample-detail-shipping-tracker" className={CARD}>
       {/* Top Header */}
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-950 m-0">Sample progress & tracking</h2>
+          <h2 className={CARD_TITLE}>Sample progress &amp; tracking</h2>
           <p className="text-[11px] text-zinc-500 m-0 mt-1">
             Fulfillment timeline from initial request through delivery and client feedback.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Chip
-            size="small"
-            label={sample.status}
-            className={`border font-semibold text-xs ${sampleStatusTone(sample.status)}`}
-            sx={{ fontWeight: 600, fontSize: 11 }}
-          />
-          <Chip
-            size="small"
-            variant="outlined"
-            label={`${sampleUrgencyEmoji(sample.urgency)} ${sample.urgency}`}
-            className={`border font-semibold text-xs ${sampleUrgencyTone(sample.urgency)}`}
-            sx={{ fontWeight: 600, fontSize: 11 }}
-          />
-          <Chip
-            size="small"
-            color={progressPct === 100 ? 'success' : progressPct >= 65 ? 'primary' : 'default'}
-            label={`${progressPct}% fulfilled`}
-            sx={{ fontWeight: 700, fontSize: 11 }}
-          />
+          <span className={`${BADGE} ${sampleStatusTone(sample.status)}`}>{sample.status}</span>
+          <span className={`${BADGE} ${sampleUrgencyTone(sample.urgency)}`}>
+            <SampleUrgencyDot urgency={sample.urgency} />
+            {sample.urgency}
+          </span>
+          <span
+            className={`${BADGE} ${
+              progressPct === 100
+                ? 'border-zinc-950 bg-zinc-950 text-white font-bold'
+                : 'border-zinc-200 bg-zinc-50 text-zinc-700 font-medium'
+            }`}
+          >
+            {progressPct}% fulfilled
+          </span>
         </div>
       </div>
 
       {/* Rejection Alert Banner */}
       {isRejected && (
-        <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-semibold text-rose-800">
-          <span className="font-bold">Sample Request Rejected</span>
-          {sample.rejectionReason && (
-            <p className="mt-1 font-normal text-rose-700 m-0">
-              Reason: {sample.rejectionReason}
+        <div className="mb-4 rounded-lg border border-zinc-950 bg-zinc-50 px-3.5 py-2.5 text-xs font-semibold text-zinc-900">
+          <span className="font-bold">
+            {isCancelled ? 'Sample request cancelled' : 'Sample request rejected'}
+          </span>
+          {(sample.rejectionReason || sample.cancellationReason) && (
+            <p className="m-0 mt-1 font-normal text-zinc-700">
+              Reason: {sample.cancellationReason || sample.rejectionReason}
             </p>
           )}
         </div>
@@ -288,10 +285,10 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
             }
             orientation="vertical"
             sx={{
-              '& .MuiStepIcon-root.Mui-completed': { color: '#16a34a' },
+              '& .MuiStepIcon-root.Mui-completed': { color: '#09090b' },
               '& .MuiStepIcon-root.Mui-active': { color: '#09090b' },
               '& .MuiStepConnector-root.Mui-completed .MuiStepConnector-line': {
-                borderColor: '#16a34a',
+                borderColor: '#09090b',
               },
               '& .MuiStepConnector-line': { borderColor: '#e4e4e7', minHeight: 20 },
             }}
@@ -345,9 +342,9 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
                           sx={{
                             color:
                               hasError
-                                ? '#dc2626'
+                                ? '#09090b'
                                 : (isDelivered && index === 4) || (isCompleted && index === 5)
-                                  ? '#16a34a'
+                                  ? '#09090b'
                                   : 'text.secondary',
                             fontWeight:
                               (isDelivered && index === 4) || (isCompleted && index === 5) || hasError
@@ -362,7 +359,7 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
                   >
                     <span
                       className={`text-sm font-semibold ${
-                        hasError ? 'text-red-700' : 'text-zinc-950'
+                        hasError ? 'text-zinc-950 underline' : 'text-zinc-950'
                       }`}
                     >
                       {step.label}
@@ -423,7 +420,7 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
 
                     {/* Step 1: Rejection details */}
                     {index === 1 && isRejected && (
-                      <div className="rounded-lg bg-red-50 border border-red-200 p-2.5 text-xs text-red-700 space-y-1">
+                      <div className="rounded-lg bg-zinc-50 border border-zinc-950 p-2.5 text-xs text-zinc-900 space-y-1">
                         <div>
                           <strong>Rejection Reason:</strong> {sample.rejectionReason || 'Not specified'}
                         </div>
@@ -444,13 +441,13 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
 
                     {/* Step 3: Dispatched & In Transit */}
                     {index === 3 && (sample.courierName || sample.trackingNumber) && (
-                      <div className="rounded-lg bg-violet-50/70 border border-violet-200 p-2.5 text-xs text-violet-950 space-y-1">
+                      <div className="rounded-lg bg-zinc-50 border border-zinc-200 p-2.5 text-xs text-zinc-800 space-y-1">
                         <div className="flex items-center justify-between">
                           <span>
                             <strong>Courier:</strong> {sample.courierName || 'Standard Express'}
                           </span>
                           {sample.estimatedDeliveryDate && (
-                            <span className="text-[11px] text-violet-700">
+                            <span className="text-[11px] text-zinc-600">
                               ETA: {formatDate(sample.estimatedDeliveryDate)}
                             </span>
                           )}
@@ -459,14 +456,14 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
                           <div className="flex items-center gap-2">
                             <span>
                               <strong>AWB:</strong>{' '}
-                              <code className="bg-white px-1.5 py-0.5 rounded border border-violet-200 font-mono text-violet-900">
+                              <code className="bg-white px-1.5 py-0.5 rounded border border-zinc-200 font-mono text-zinc-900">
                                 {sample.trackingNumber}
                               </code>
                             </span>
                             <button
                               type="button"
                               onClick={copyTracking}
-                              className="text-[11px] text-violet-600 hover:text-violet-800 underline inline-flex items-center gap-0.5"
+                              className="text-[11px] text-zinc-950 hover:underline font-semibold inline-flex items-center gap-0.5 cursor-pointer"
                             >
                               <ContentCopyIcon sx={{ fontSize: 13 }} />
                               {copied ? 'Copied!' : 'Copy'}
@@ -476,20 +473,20 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
                       </div>
                     )}
 
-                    {/* Step 4: Delivered details with green tick confirmation */}
+                    {/* Step 4: Delivered details with confirmation */}
                     {index === 4 && isDelivered && (
-                      <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-2.5 text-xs text-emerald-950 space-y-1">
-                        <div className="flex items-center gap-1 font-semibold text-emerald-800">
-                          <CheckCircleIcon sx={{ fontSize: 16, color: '#16a34a' }} />
+                      <div className="rounded-lg bg-zinc-50 border border-zinc-200 p-2.5 text-xs text-zinc-800 space-y-1">
+                        <div className="flex items-center gap-1 font-semibold text-zinc-950">
+                          <CheckCircleIcon sx={{ fontSize: 16, color: '#09090b' }} />
                           Sample successfully delivered to recipient
                         </div>
                         {sample.deliveredAt && (
-                          <div className="text-[11px] text-emerald-700">
+                          <div className="text-[11px] text-zinc-600">
                             Delivered at: {formatWhen(sample.deliveredAt)}
                           </div>
                         )}
                         {sample.deliveryAddress && (
-                          <div className="text-[11px] text-emerald-700 truncate">
+                          <div className="text-[11px] text-zinc-600 truncate">
                             Delivered to: {sample.deliveryAddress}
                           </div>
                         )}
@@ -498,22 +495,22 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
 
                     {/* Step 5: Customer Feedback & Review */}
                     {index === 5 && sample.feedback && (
-                      <div className="rounded-lg bg-amber-50/80 border border-amber-200 p-2.5 text-xs text-amber-950 space-y-1.5">
+                      <div className="rounded-lg bg-zinc-50 border border-zinc-200 p-2.5 text-xs text-zinc-800 space-y-1.5">
                         <div className="flex items-center gap-1">
                           <span className="font-semibold">Rating:</span>
-                          <span className="inline-flex text-amber-500">
+                          <span className="inline-flex text-zinc-900">
                             {[1, 2, 3, 4, 5].map((star) => (
                               <StarIcon
                                 key={star}
                                 sx={{
                                   fontSize: 16,
                                   color:
-                                    (sample.feedback?.rating || 0) >= star ? '#f59e0b' : '#d4d4d8',
+                                    (sample.feedback?.rating || 0) >= star ? '#18181b' : '#d4d4d8',
                                 }}
                               />
                             ))}
                           </span>
-                          <span className="text-[11px] font-medium text-amber-800 ml-1">
+                          <span className="text-[11px] font-medium text-zinc-700 ml-1">
                             {sample.feedback.rating
                               ? SAMPLE_RATING_LABELS[sample.feedback.rating] || `${sample.feedback.rating}/5`
                               : 'Not rated'}
@@ -528,8 +525,8 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
                           <div className="text-[11px]">
                             <strong>Order intent:</strong>{' '}
                             {sample.feedback.interestedInOrder ? (
-                              <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold">
-                                <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+                              <span className="inline-flex items-center gap-1 text-zinc-950 font-semibold">
+                                <CheckCircle2 className="h-4 w-4 shrink-0 text-zinc-950" aria-hidden />
                                 Interested in placing bulk order
                               </span>
                             ) : (
@@ -538,7 +535,7 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
                           </div>
                         )}
                         {sample.feedback.requiresImprovement && (
-                          <div className="text-[11px] text-amber-800">
+                          <div className="text-[11px] text-zinc-800">
                             <strong>Improvement routed:</strong>{' '}
                             {sample.feedback.routedDepartment || 'R&D / Technical'}
                           </div>
@@ -555,7 +552,7 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
         {/* Right Column: Shipment Logistics & Overview Panel */}
         <div className="flex flex-col gap-4">
           {/* Progress bar card */}
-          <div className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-4">
+          <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
             <div className="flex items-center justify-between text-xs font-semibold text-zinc-700 mb-1.5">
               <span>Overall fulfillment progress</span>
               <span className="text-zinc-950 font-bold">{progressPct}%</span>
@@ -564,12 +561,8 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
               <div
                 className={`h-2 rounded-full transition-all duration-500 ${
                   isRejected
-                    ? 'bg-red-500'
-                    : progressPct === 100
-                      ? 'bg-emerald-600'
-                      : progressPct >= 65
-                        ? 'bg-blue-600'
-                        : 'bg-zinc-800'
+                    ? 'bg-zinc-400'
+                    : 'bg-zinc-950'
                 }`}
                 style={{ width: `${progressPct}%` }}
               />
@@ -586,7 +579,7 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
           {/* Courier & Shipping Card */}
           <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm space-y-3">
             <div className="flex items-center gap-2 border-b border-zinc-100 pb-2">
-              <LocalShippingIcon sx={{ fontSize: 18, color: '#3b82f6' }} />
+              <LocalShippingIcon sx={{ fontSize: 18, color: '#09090b' }} />
               <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-800 m-0">
                 Logistics & courier details
               </h3>
@@ -614,7 +607,7 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
                     >
                       <ContentCopyIcon sx={{ fontSize: 14 }} />
                     </button>
-                    {copied && <span className="text-[10px] text-emerald-600 font-semibold">Copied!</span>}
+                    {copied && <span className="text-[10px] text-zinc-950 font-semibold">Copied!</span>}
                   </div>
                 ) : (
                   <span className="text-zinc-400">—</span>
@@ -643,7 +636,7 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
               </div>
               <div>
                 <span className="text-[11px] text-zinc-500 block uppercase">Delivered On</span>
-                <span className="font-semibold text-emerald-700">
+                <span className="font-semibold text-zinc-950">
                   {formatDate(sample.deliveredAt)}
                 </span>
               </div>
@@ -661,21 +654,21 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
 
           {/* Client Feedback Card (if submitted) */}
           {hasFeedback && sample.feedback && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4 shadow-sm space-y-2.5">
-              <div className="flex items-center justify-between border-b border-amber-200 pb-2">
+            <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm space-y-2.5">
+              <div className="flex items-center justify-between border-b border-zinc-100 pb-2">
                 <div className="flex items-center gap-1.5">
-                  <StarIcon sx={{ fontSize: 18, color: '#f59e0b' }} />
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-amber-950 m-0">
-                    Client review & satisfaction
+                  <StarIcon sx={{ fontSize: 18, color: '#09090b' }} />
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-950 m-0">
+                    Client review &amp; satisfaction
                   </h3>
                 </div>
-                <span className="text-[11px] font-bold text-amber-800">
+                <span className="text-[11px] font-bold text-zinc-800">
                   {sample.feedback.rating ? `${sample.feedback.rating} / 5 Stars` : ''}
                 </span>
               </div>
 
               {sample.feedback.comments && (
-                <p className="text-xs text-zinc-800 m-0 bg-white p-2.5 rounded border border-amber-200 italic">
+                <p className="text-xs text-zinc-800 m-0 bg-zinc-50 p-2.5 rounded border border-zinc-200 italic">
                   &ldquo;{sample.feedback.comments}&rdquo;
                 </p>
               )}
@@ -683,17 +676,17 @@ export const SampleRequestTimelineTracker: React.FC<SampleRequestTimelineTracker
               <div className="flex flex-wrap items-center gap-3 text-xs pt-1">
                 {sample.feedback.interestedInOrder != null && (
                   <div className="flex items-center gap-1">
-                    <ThumbUpIcon sx={{ fontSize: 14, color: sample.feedback.interestedInOrder ? '#16a34a' : '#71717a' }} />
-                    <span className="font-semibold">Order Intent:</span>
-                    <span className={sample.feedback.interestedInOrder ? 'text-emerald-700 font-semibold' : 'text-zinc-600'}>
+                    <ThumbUpIcon sx={{ fontSize: 14, color: sample.feedback.interestedInOrder ? '#09090b' : '#71717a' }} />
+                    <span className="font-semibold text-zinc-700">Order Intent:</span>
+                    <span className={sample.feedback.interestedInOrder ? 'text-zinc-950 font-bold' : 'text-zinc-500'}>
                       {sample.feedback.interestedInOrder ? 'High Interest' : 'None'}
                     </span>
                   </div>
                 )}
                 {sample.feedback.requiresImprovement && (
-                  <div className="flex items-center gap-1 text-amber-800">
+                  <div className="flex items-center gap-1 text-zinc-800 font-medium">
                     <BuildCircleIcon sx={{ fontSize: 14 }} />
-                    <span className="font-semibold">Routed:</span>
+                    <span className="font-semibold text-zinc-700">Routed:</span>
                     <span>{sample.feedback.routedDepartment || 'R&D'}</span>
                   </div>
                 )}

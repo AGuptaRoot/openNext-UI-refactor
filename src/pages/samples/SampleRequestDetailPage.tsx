@@ -12,6 +12,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import EmailIcon from '@mui/icons-material/Email';
 import PhoneIcon from '@mui/icons-material/Phone';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
+import EditIcon from '@mui/icons-material/Edit';
 import NotesIcon from '@mui/icons-material/Notes';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { CheckCircle2, Star } from 'lucide-react';
@@ -21,16 +22,56 @@ import { useDialog } from '../../context/DialogContext';
 import type { CrmSettings } from '../../types/admin';
 import type {
   SampleItem,
+  SampleProductItem,
   SampleRoutedDepartment,
 } from '../../types/samples';
 import {
   SAMPLE_DEPARTMENTS,
   SAMPLE_RATING_LABELS,
+  SAMPLE_UNITS,
+  SAMPLE_URGENCIES,
+  canCancelSampleRequest,
+  canEditSampleRequest,
   sampleStatusTone,
-  sampleUrgencyEmoji,
   sampleUrgencyTone,
 } from '../../types/samples';
 import { SampleRequestTimelineTracker } from '../../components/samples/SampleRequestTimelineTracker';
+import { SampleUrgencyDot } from '../../components/icons/SampleUrgencyDot';
+import {
+  BADGE,
+  BTN_CONFIRM,
+  BTN_DANGER_QUIET,
+  BTN_INLINE,
+  BTN_PRIMARY,
+  BTN_SECONDARY,
+  BTN_TOOLBAR,
+  CARD,
+  CARD_HEAD,
+  CARD_HEAD_BETWEEN,
+  CARD_TITLE,
+  FIELD_EMPTY,
+  FIELD_LABEL,
+  FIELD_LABEL_ROW,
+  FIELD_VALUE,
+  FIELD_VALUE_MUTED,
+  FIELD_VALUE_STRONG,
+  HEADER_CARD,
+  INPUT,
+  LINK,
+  LINK_SMALL,
+  MODAL_BACKDROP,
+  MODAL_PANEL,
+  NOTE_BOX,
+  STAT_CARD,
+  STAT_HINT,
+  STAT_LABEL,
+  STAT_VALUE,
+  TABLE,
+  TABLE_HEAD,
+  TABLE_TD,
+  TABLE_TH,
+  TABLE_WRAP,
+} from '../../components/samples/sampleUi';
 
 function localToday(): string {
   return new Date().toISOString().slice(0, 10);
@@ -50,8 +91,19 @@ function formatDateTime(value?: string | null): string {
   return parsed.toLocaleString();
 }
 
-const fieldClass =
-  'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-950 focus:outline-none focus:ring-1 focus:ring-zinc-950';
+/**
+ * The headline product name for a multi-item request. SampleRequest.productName
+ * is capped at 200 characters, so a long list is summarised rather than sent and
+ * rejected.
+ */
+function summariseItemNames(items: { productName: string }[]): string {
+  const joined = items.map((item) => item.productName).join(', ');
+  if (joined.length <= 200) return joined;
+  const summary = `${items[0].productName} +${items.length - 1} more`;
+  return summary.slice(0, 200);
+}
+
+const fieldClass = INPUT;
 
 export const SampleRequestDetailPage: React.FC = () => {
   const { id = '' } = useParams();
@@ -73,6 +125,16 @@ export const SampleRequestDetailPage: React.FC = () => {
   const canDeliverSamples = isSampleLifecycleManager && (hasPermission('crm.samples.write') || isAdmin);
   const canManageStockAddress = isSampleLifecycleManager;
   const canFeedbackSamples = hasPermission('crm.samples.feedback') || isClient;
+  // The request can still be corrected until it is handed to the courier.
+  const canWriteSamples = !isClient && (hasPermission('crm.samples.write') || isAdmin);
+  /**
+   * Cancelling is the client's own escape hatch; on the staff side it is a
+   * manager's call, so a sales representative (or finance manager) does not get
+   * the button even though they can otherwise write to samples. The server
+   * applies the same rule.
+   */
+  const canCancelFromRole =
+    isClient || isAdmin || activeRole === 'crm-manager' || activeRole === 'sales-manager';
 
   const [sample, setSample] = useState<SampleItem | null>(null);
   const [settings, setSettings] = useState<CrmSettings | null>(null);
@@ -90,9 +152,21 @@ export const SampleRequestDetailPage: React.FC = () => {
   const [stockAddressModalOpen, setStockAddressModalOpen] = useState(false);
   const [editingStockAddress, setEditingStockAddress] = useState('');
 
+  // Edit modal state — only open while the request has not been dispatched
+  const [editOpen, setEditOpen] = useState(false);
+  const [editItems, setEditItems] = useState<SampleProductItem[]>([]);
+  const [editUrgency, setEditUrgency] = useState<string>('Normal');
+  const [editDeliveryAddress, setEditDeliveryAddress] = useState('');
+  const [editRecipientName, setEditRecipientName] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editIsChargeable, setEditIsChargeable] = useState(false);
+  const [editChargeAmount, setEditChargeAmount] = useState('0');
+
   // Dispatch modal state
   const [dispatchOpen, setDispatchOpen] = useState(false);
   const [courierName, setCourierName] = useState('');
+  /** Optional: blank when the courier has not issued the AWB yet. */
+  const [trackingNumber, setTrackingNumber] = useState('');
   const [dispatchDate, setDispatchDate] = useState(localToday());
   const [etaDate, setEtaDate] = useState('');
 
@@ -159,6 +233,98 @@ export const SampleRequestDetailPage: React.FC = () => {
     ];
   }, [settings?.courier_carriers]);
 
+  const availableUnits = useMemo(() => {
+    const list = settings?.sample_units_of_measure;
+    if (Array.isArray(list) && list.length > 0) return list;
+    return Array.from(SAMPLE_UNITS);
+  }, [settings]);
+
+  const openEdit = () => {
+    if (!sample) return;
+    const rows =
+      Array.isArray(sample.items) && sample.items.length
+        ? sample.items.map((item) => ({
+            productName: String(item.productName || ''),
+            quantity: Math.max(1, Number(item.quantity) || 1),
+            unit: String(item.unit || 'pcs'),
+          }))
+        : [
+            {
+              productName: String(sample.productName || ''),
+              quantity: Math.max(1, Number(sample.quantity) || 1),
+              unit: String(sample.unit || 'pcs'),
+            },
+          ];
+    setEditItems(rows);
+    setEditUrgency(String(sample.urgency || 'Normal'));
+    setEditDeliveryAddress(sample.deliveryAddress || '');
+    setEditRecipientName(sample.recipientName || '');
+    setEditNotes(sample.notes || '');
+    setEditIsChargeable(Boolean(sample.isChargeable));
+    setEditChargeAmount(String(sample.chargeAmount || 0));
+    setEditOpen(true);
+    setError('');
+  };
+
+  const patchEditItem = (index: number, patch: Partial<SampleProductItem>) => {
+    setEditItems((current) =>
+      current.map((item, idx) => (idx === index ? { ...item, ...patch } : item))
+    );
+  };
+
+  const addEditItem = () => {
+    setEditItems((current) => [
+      ...current,
+      { productName: '', quantity: 1, unit: availableUnits[0] || 'pcs' },
+    ]);
+  };
+
+  const removeEditItem = (index: number) => {
+    setEditItems((current) =>
+      current.length === 1 ? current : current.filter((_, idx) => idx !== index)
+    );
+  };
+
+  const submitEdit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!sample) return;
+    const validItems = editItems
+      .filter((item) => item.productName.trim())
+      .map((item) => ({
+        productName: item.productName.trim(),
+        quantity: Math.max(1, Number(item.quantity) || 1),
+        unit: item.unit || 'pcs',
+      }));
+    if (!validItems.length) {
+      return setError('At least one item name is required.');
+    }
+    setSaving(true);
+    try {
+      const response = await crmApi.updateSample(sample._id, {
+        // The headline product / quantity / unit mirror the rows, the same way
+        // the create form writes them, so the two never disagree. The model
+        // caps productName at 200 characters, so a long list is summarised.
+        productName: summariseItemNames(validItems),
+        quantity: validItems.reduce((sum, item) => sum + item.quantity, 0),
+        unit: validItems[0].unit,
+        items: validItems,
+        urgency: editUrgency,
+        deliveryAddress: editDeliveryAddress.trim(),
+        recipientName: editRecipientName.trim(),
+        notes: editNotes.trim(),
+        isChargeable: editIsChargeable,
+        chargeAmount: editIsChargeable ? Number(editChargeAmount) || 0 : 0,
+      });
+      setSuccess(response.message || 'Sample request updated.');
+      setEditOpen(false);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update the sample request');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Modal openers
   const openApprove = (action: 'approve' | 'reject') => {
     if (!sample) return;
@@ -173,6 +339,33 @@ export const SampleRequestDetailPage: React.FC = () => {
     setEditingStockAddress(sample.stockLocation || (officeLocations[0] || ''));
     setStockAddressModalOpen(true);
     setError('');
+  };
+
+  /**
+   * Call off the request. Offered to the client who asked for it and to staff
+   * acting on their behalf, and never once the kit has been delivered.
+   */
+  const cancelRequest = async () => {
+    if (!sample) return;
+    const agreed = await confirm({
+      title: 'Cancel this sample request?',
+      message: `${sample.sampleNumber} will be marked Cancelled. This cannot be undone — a new request would have to be raised.`,
+      confirmLabel: 'Yes, cancel it',
+      cancelLabel: 'Keep it',
+    });
+    if (!agreed) return;
+
+    setSaving(true);
+    setError('');
+    try {
+      const response = await crmApi.cancelSample(sample._id);
+      setSuccess(response.message || 'Sample request cancelled.');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not cancel this sample request');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const submitStockAddress = async (event: React.FormEvent) => {
@@ -220,6 +413,7 @@ export const SampleRequestDetailPage: React.FC = () => {
     if (!sample) return;
     const existingCourier = String(sample.courierName || '').trim();
     setCourierName(existingCourier || courierOptions[0] || '');
+    setTrackingNumber(String(sample.trackingNumber || '').trim());
     setDispatchDate(sample.dispatchDate?.slice(0, 10) || localToday());
     setEtaDate(sample.estimatedDeliveryDate?.slice(0, 10) || '');
     setDispatchOpen(true);
@@ -236,7 +430,7 @@ export const SampleRequestDetailPage: React.FC = () => {
     try {
       const response = await crmApi.dispatchSample(sample._id, {
         courierName: courierName.trim(),
-        trackingNumber: '',
+        trackingNumber: trackingNumber.trim(),
         dispatchDate: dispatchDate || undefined,
         estimatedDeliveryDate: etaDate || undefined,
       });
@@ -323,14 +517,14 @@ export const SampleRequestDetailPage: React.FC = () => {
   if (error && !sample) {
     return (
       <div className="space-y-4">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-4 text-sm text-zinc-900 font-medium">
           {error}
         </div>
         <Link
           to="/samples"
-          className="inline-flex items-center gap-1.5 text-sm font-semibold text-zinc-900 hover:underline"
+          className="inline-flex items-center gap-1.5 text-sm font-semibold text-zinc-900 hover:underline cursor-pointer"
         >
-          <ArrowBackIcon sx={{ fontSize: 16 }} /> Back to Sample Requests
+          <ArrowBackIcon sx={{ fontSize: 16 }} /> Back to sample requests
         </Link>
       </div>
     );
@@ -356,47 +550,30 @@ export const SampleRequestDetailPage: React.FC = () => {
           to="/samples"
           className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-600 hover:text-zinc-900 no-underline"
         >
-          <ArrowBackIcon sx={{ fontSize: 16 }} /> Back to Sample Requests
+          <ArrowBackIcon sx={{ fontSize: 16 }} /> Back to sample requests
         </Link>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={printSummary}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
-          >
-            <PrintIcon sx={{ fontSize: 16 }} /> Print Summary
+          <button type="button" onClick={printSummary} className={BTN_TOOLBAR}>
+            <PrintIcon sx={{ fontSize: 16 }} /> Print summary
           </button>
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
-          >
+          <button type="button" onClick={() => void load()} className={BTN_TOOLBAR}>
             <RefreshIcon sx={{ fontSize: 16 }} /> Refresh
           </button>
         </div>
       </div>
 
       {/* Main Header Card */}
-      <header className="rounded-2xl border border-zinc-300 bg-white p-5 sm:p-6 shadow-sm">
+      <header className={HEADER_CARD}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="text-2xl font-bold tracking-tight text-zinc-950 m-0">
                 {sample.sampleNumber}
               </h1>
-              <span
-                className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold ${sampleStatusTone(
-                  sample.status
-                )}`}
-              >
-                {sample.status}
-              </span>
-              <span
-                className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold ${sampleUrgencyTone(
-                  sample.urgency
-                )}`}
-              >
-                {sampleUrgencyEmoji(sample.urgency)} {sample.urgency} Urgency
+              <span className={`${BADGE} ${sampleStatusTone(sample.status)}`}>{sample.status}</span>
+              <span className={`${BADGE} ${sampleUrgencyTone(sample.urgency)}`}>
+                <SampleUrgencyDot urgency={sample.urgency} />
+                {sample.urgency} urgency
               </span>
             </div>
             <p className="mt-1.5 text-sm text-zinc-600 m-0">
@@ -407,23 +584,35 @@ export const SampleRequestDetailPage: React.FC = () => {
 
           {/* Lifecycle Action Buttons */}
           <div className="flex flex-wrap items-center gap-2">
+            {canWriteSamples && canEditSampleRequest(sample.status) && (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={openEdit}
+                className={BTN_SECONDARY}
+                title="Correct the items, quantities or delivery details before dispatch"
+              >
+                <EditIcon sx={{ fontSize: 16 }} /> Edit request
+              </button>
+            )}
+
             {sample.status === 'Requested' && canApproveSamples && (
               <>
                 <button
                   type="button"
                   disabled={saving}
                   onClick={() => openApprove('approve')}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border-0 bg-emerald-700 px-3.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-800 disabled:opacity-50"
+                  className={BTN_CONFIRM}
                 >
-                  <CheckCircleIcon sx={{ fontSize: 16 }} /> Approve Sample
+                  <CheckCircleIcon sx={{ fontSize: 16 }} /> Approve sample
                 </button>
                 <button
                   type="button"
                   disabled={saving}
                   onClick={() => openApprove('reject')}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3.5 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
+                  className={BTN_DANGER_QUIET}
                 >
-                  <CloseIcon sx={{ fontSize: 16 }} /> Reject Sample
+                  <CloseIcon sx={{ fontSize: 16 }} /> Reject sample
                 </button>
               </>
             )}
@@ -434,19 +623,19 @@ export const SampleRequestDetailPage: React.FC = () => {
                   type="button"
                   disabled={saving}
                   onClick={openStockAddressModal}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3.5 text-xs font-semibold text-indigo-700 shadow-sm hover:bg-indigo-100 disabled:opacity-50"
-                  title="Configure or update Stock Address from Office Location"
+                  className={BTN_SECONDARY}
+                  title="Pick the office location this sample ships from"
                 >
                   <LocationOnIcon sx={{ fontSize: 16 }} />
-                  {sample.stockLocation ? 'Change Stock Address' : 'Add Stock Address'}
+                  {sample.stockLocation ? 'Change stock address' : 'Add stock address'}
                 </button>
                 <button
                   type="button"
                   disabled={saving}
                   onClick={openDispatch}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border-0 bg-slate-950 px-3.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 disabled:opacity-50"
+                  className={BTN_PRIMARY}
                 >
-                  <LocalShippingIcon sx={{ fontSize: 16 }} /> Dispatch Sample
+                  <LocalShippingIcon sx={{ fontSize: 16 }} /> Dispatch sample
                 </button>
               </>
             )}
@@ -456,9 +645,21 @@ export const SampleRequestDetailPage: React.FC = () => {
                 type="button"
                 disabled={saving}
                 onClick={() => void markDelivered()}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg border-0 bg-emerald-700 px-3.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-800 disabled:opacity-50"
+                className={BTN_CONFIRM}
               >
-                <CheckCircleIcon sx={{ fontSize: 16 }} /> Mark Delivered
+                <CheckCircleIcon sx={{ fontSize: 16 }} /> Mark delivered
+              </button>
+            )}
+
+            {canCancelFromRole && canCancelSampleRequest(sample.status) && (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void cancelRequest()}
+                className={BTN_DANGER_QUIET}
+                title="Call off this sample request"
+              >
+                <CloseIcon sx={{ fontSize: 16 }} /> Cancel request
               </button>
             )}
 
@@ -467,10 +668,10 @@ export const SampleRequestDetailPage: React.FC = () => {
                 type="button"
                 disabled={saving}
                 onClick={openFeedback}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3.5 text-xs font-semibold text-zinc-800 shadow-sm hover:bg-zinc-50 disabled:opacity-50"
+                className={BTN_SECONDARY}
               >
-                <StarIcon sx={{ fontSize: 16, color: '#f59e0b' }} />
-                {sample.feedback?.rating ? 'Edit Review' : 'Submit Review'}
+                <StarIcon sx={{ fontSize: 16 }} className="text-zinc-900" />
+                {sample.feedback?.rating ? 'Edit review' : 'Submit review'}
               </button>
             )}
           </div>
@@ -479,73 +680,57 @@ export const SampleRequestDetailPage: React.FC = () => {
 
       {/* Notifications */}
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm font-medium text-zinc-900">
           {error}
         </div>
       )}
       {success && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+        <div className="rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm font-medium text-zinc-900">
           {success}
         </div>
       )}
 
       {/* KPI Highlights Summary Banner */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 block mb-1">
-            Product & Quantity
-          </span>
-          <div className="text-sm font-bold text-zinc-900 truncate">{sample.productName}</div>
-          <div className="text-xs text-zinc-500 mt-0.5">
+        <div className={STAT_CARD}>
+          <span className={STAT_LABEL}>Product &amp; quantity</span>
+          <div className={STAT_VALUE}>{sample.productName}</div>
+          <div className={STAT_HINT}>
             {sample.quantity} {sample.unit}
           </div>
         </div>
 
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 block mb-1">
-            Requester Account
-          </span>
-          <div className="text-sm font-bold text-zinc-900 truncate">
-            {sample.linkedName || '—'}
-          </div>
-          <div className="text-xs text-zinc-500 mt-0.5 capitalize">
-            {sample.linkType} record
+        <div className={STAT_CARD}>
+          <span className={STAT_LABEL}>Requester account</span>
+          <div className={STAT_VALUE}>{sample.linkedName || '—'}</div>
+          <div className={`${STAT_HINT} capitalize`}>{sample.linkType} record</div>
+        </div>
+
+        <div className={STAT_CARD}>
+          <span className={STAT_LABEL}>Logistics &amp; courier</span>
+          <div className={STAT_VALUE}>{sample.courierName || 'Pending dispatch'}</div>
+          <div className={`${STAT_HINT} font-mono`}>
+            {sample.trackingNumber ? `AWB: ${sample.trackingNumber}` : 'No tracking number'}
           </div>
         </div>
 
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 block mb-1">
-            Logistics & Courier
-          </span>
-          <div className="text-sm font-bold text-zinc-900 truncate">
-            {sample.courierName || 'Pending dispatch'}
-          </div>
-          <div className="text-xs text-zinc-500 mt-0.5 font-mono">
-            {sample.trackingNumber ? `AWB: ${sample.trackingNumber}` : '—'}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 block mb-1">
-            Client Rating & Review
-          </span>
-          <div className="text-sm font-bold text-zinc-900 flex items-center gap-1">
+        <div className={STAT_CARD}>
+          <span className={STAT_LABEL}>Client rating</span>
+          <div className={`${STAT_VALUE} flex items-center gap-1`}>
             {sample.feedback?.rating ? (
               <>
-                <span className="text-amber-500 flex items-center">
-                  <StarIcon sx={{ fontSize: 16 }} />
-                </span>
+                <StarIcon sx={{ fontSize: 16 }} className="text-zinc-900" />
                 <span>{sample.feedback.rating} / 5</span>
               </>
             ) : (
               <span className="text-zinc-400 font-normal">Pending evaluation</span>
             )}
           </div>
-          <div className="text-xs text-zinc-500 mt-0.5">
+          <div className={STAT_HINT}>
             {sample.feedback?.interestedInOrder ? (
               <span className="inline-flex items-center gap-1">
                 <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
-                Bulk Order Interest
+                Bulk order interest
               </span>
             ) : (
               '—'
@@ -560,65 +745,68 @@ export const SampleRequestDetailPage: React.FC = () => {
       {/* Detailed Specifications & Requester Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Card 1: Sample Request Details */}
-        <section className="bg-white border border-zinc-300 rounded-xl p-5 shadow-sm space-y-4">
-          <div className="flex items-center gap-2 border-b border-zinc-100 pb-2.5">
-            <Inventory2Icon sx={{ fontSize: 20, color: '#09090b' }} />
-            <h2 className="text-sm font-semibold text-zinc-950 m-0">Sample request specifications</h2>
+        <section className={`${CARD} space-y-4`}>
+          <div className={CARD_HEAD}>
+            <Inventory2Icon sx={{ fontSize: 18 }} className="text-zinc-500" />
+            <h2 className={CARD_TITLE}>Sample request specifications</h2>
           </div>
 
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
-              <span className="text-[11px] font-semibold uppercase text-zinc-500 block">Sample ID</span>
-              <span className="font-semibold text-zinc-900">{sample.sampleNumber}</span>
+              <span className={FIELD_LABEL}>Sample ID</span>
+              <span className={FIELD_VALUE_STRONG}>{sample.sampleNumber}</span>
             </div>
             <div>
-              <span className="text-[11px] font-semibold uppercase text-zinc-500 block">Urgency</span>
-              <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${sampleUrgencyTone(sample.urgency)}`}>
-                {sampleUrgencyEmoji(sample.urgency)} {sample.urgency}
+              <span className={FIELD_LABEL}>Urgency</span>
+              <span className={`${BADGE} ${sampleUrgencyTone(sample.urgency)}`}>
+                <SampleUrgencyDot urgency={sample.urgency} />
+                {sample.urgency}
               </span>
             </div>
             <div>
-              <span className="text-[11px] font-semibold uppercase text-zinc-500 block">Product Name</span>
-              <span className="font-medium text-zinc-900">{sample.productName}</span>
+              <span className={FIELD_LABEL}>Product Name</span>
+              <span className={FIELD_VALUE}>{sample.productName}</span>
             </div>
             <div>
-              <span className="text-[11px] font-semibold uppercase text-zinc-500 block">Quantity & Unit</span>
-              <span className="font-medium text-zinc-900">
+              <span className={FIELD_LABEL}>Quantity & Unit</span>
+              <span className={FIELD_VALUE}>
                 {sample.quantity} {sample.unit}
               </span>
             </div>
             <div>
-              <span className="text-[11px] font-semibold uppercase text-zinc-500 block">Requested On</span>
-              <span className="text-zinc-700">{formatDateTime(sample.createdAt)}</span>
+              <span className={FIELD_LABEL}>Requested On</span>
+              <span className={FIELD_VALUE_MUTED}>{formatDateTime(sample.createdAt)}</span>
             </div>
             <div>
-              <span className="text-[11px] font-semibold uppercase text-zinc-500 block">Last Updated</span>
-              <span className="text-zinc-700">{formatDateTime(sample.updatedAt)}</span>
+              <span className={FIELD_LABEL}>Last Updated</span>
+              <span className={FIELD_VALUE_MUTED}>{formatDateTime(sample.updatedAt)}</span>
             </div>
           </div>
 
           {sample.items && sample.items.length > 0 && (
             <div className="border-t border-zinc-100 pt-3">
-              <span className="text-[11px] font-semibold uppercase text-zinc-500 block mb-2">
-                Sample Items ({sample.items.length})
+              <span className={`${FIELD_LABEL} mb-2`}>
+                Sample items ({sample.items.length})
               </span>
-              <div className="rounded-lg border border-zinc-200 overflow-hidden">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-zinc-50 border-b border-zinc-200 text-zinc-600 font-semibold">
+              <div className={TABLE_WRAP}>
+                <table className={TABLE}>
+                  <thead className={TABLE_HEAD}>
                     <tr>
-                      <th className="py-2 px-3 w-8">#</th>
-                      <th className="py-2 px-3">Product / Item</th>
-                      <th className="py-2 px-3 text-right">Quantity</th>
-                      <th className="py-2 px-3">Unit</th>
+                      <th className={`${TABLE_TH} w-8`}>#</th>
+                      <th className={TABLE_TH}>Product / item</th>
+                      <th className={`${TABLE_TH} text-right`}>Quantity</th>
+                      <th className={TABLE_TH}>Unit</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-zinc-100">
+                  <tbody className="divide-y divide-zinc-200">
                     {sample.items.map((it, idx) => (
-                      <tr key={idx} className="hover:bg-zinc-50/50">
-                        <td className="py-2 px-3 text-zinc-400 font-medium">{idx + 1}</td>
-                        <td className="py-2 px-3 font-medium text-zinc-900">{it.productName}</td>
-                        <td className="py-2 px-3 text-right font-semibold text-zinc-800">{it.quantity}</td>
-                        <td className="py-2 px-3 text-zinc-600">{it.unit}</td>
+                      <tr key={idx} className="hover:bg-zinc-50">
+                        <td className={`${TABLE_TD} font-medium text-zinc-400`}>{idx + 1}</td>
+                        <td className={`${TABLE_TD} font-medium text-zinc-900`}>{it.productName}</td>
+                        <td className={`${TABLE_TD} text-right font-semibold text-zinc-800`}>
+                          {it.quantity}
+                        </td>
+                        <td className={`${TABLE_TD} text-zinc-600`}>{it.unit}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -628,83 +816,85 @@ export const SampleRequestDetailPage: React.FC = () => {
           )}
 
           <div>
-            <span className="text-[11px] font-semibold uppercase text-zinc-500 block mb-1 flex items-center gap-1">
-              <NotesIcon sx={{ fontSize: 14 }} /> Internal Notes & Requirements
+            <span className={FIELD_LABEL_ROW}>
+              <NotesIcon sx={{ fontSize: 14 }} /> Internal notes &amp; requirements
             </span>
-            <p className="m-0 rounded-lg bg-zinc-50 border border-zinc-200 p-3 text-xs leading-relaxed text-zinc-800">
+            <p className={NOTE_BOX}>
               {sample.notes || 'No special requirements or notes provided for this sample request.'}
             </p>
           </div>
         </section>
 
         {/* Card 2: Requester & Recipient Contact */}
-        <section className="bg-white border border-zinc-300 rounded-xl p-5 shadow-sm space-y-4">
-          <div className="flex items-center gap-2 border-b border-zinc-100 pb-2.5">
-            <PersonIcon sx={{ fontSize: 20, color: '#09090b' }} />
-            <h2 className="text-sm font-semibold text-zinc-950 m-0">Requester & recipient details</h2>
+        <section className={`${CARD} space-y-4`}>
+          <div className={CARD_HEAD}>
+            <PersonIcon sx={{ fontSize: 18 }} className="text-zinc-500" />
+            <h2 className={CARD_TITLE}>Requester &amp; recipient details</h2>
           </div>
 
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
-              <span className="text-[11px] font-semibold uppercase text-zinc-500 block">Linked Entity</span>
+              <span className={FIELD_LABEL}>Linked Entity</span>
               {linkedUrl && !isClient ? (
                 <Link
                   to={linkedUrl}
-                  className="font-semibold text-blue-600 hover:text-blue-800 inline-flex items-center gap-1 text-xs"
+                  className={LINK}
                 >
-                  {sample.linkedName || 'Open Record'}
+                  {sample.linkedName || 'Open record'}
                   <OpenInNewIcon sx={{ fontSize: 13 }} />
                 </Link>
               ) : (
-                <span className="font-semibold text-zinc-900">{sample.linkedName || '—'}</span>
+                <span className={FIELD_VALUE_STRONG}>{sample.linkedName || '—'}</span>
               )}
             </div>
             <div>
-              <span className="text-[11px] font-semibold uppercase text-zinc-500 block">Relationship</span>
-              <span className="font-medium text-zinc-700 capitalize">
-                {sample.linkType === 'opportunity' ? 'Deal / Opportunity' : `${sample.linkType} Account`}
+              <span className={FIELD_LABEL}>Relationship</span>
+              <span className={`${FIELD_VALUE_MUTED} capitalize`}>
+                {sample.linkType === 'opportunity' ? 'Deal / opportunity' : `${sample.linkType} account`}
               </span>
             </div>
             <div>
-              <span className="text-[11px] font-semibold uppercase text-zinc-500 block">Recipient Contact</span>
-              <span className="font-medium text-zinc-900">{sample.recipientName || '—'}</span>
+              <span className={FIELD_LABEL}>Recipient Contact</span>
+              <span className={FIELD_VALUE}>{sample.recipientName || '—'}</span>
             </div>
             <div>
-              <span className="text-[11px] font-semibold uppercase text-zinc-500 block">Email Address</span>
+              <span className={FIELD_LABEL}>Email Address</span>
               {sample.recipientEmail ? (
                 <a
                   href={`mailto:${sample.recipientEmail}`}
-                  className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                  className={LINK_SMALL}
                 >
                   <EmailIcon sx={{ fontSize: 13 }} /> {sample.recipientEmail}
                 </a>
               ) : (
-                <span className="text-zinc-400 text-xs">—</span>
+                <span className={FIELD_EMPTY}>—</span>
               )}
             </div>
             <div>
-              <span className="text-[11px] font-semibold uppercase text-zinc-500 block">Phone Number</span>
+              <span className={FIELD_LABEL}>Phone Number</span>
               {sample.recipientPhone ? (
                 <a
                   href={`tel:${sample.recipientPhone}`}
-                  className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                  className={LINK_SMALL}
                 >
                   <PhoneIcon sx={{ fontSize: 13 }} /> {sample.recipientPhone}
                 </a>
               ) : (
-                <span className="text-zinc-400 text-xs">—</span>
+                <span className={FIELD_EMPTY}>—</span>
               )}
             </div>
             <div>
-              <span className="text-[11px] font-semibold uppercase text-zinc-500 block">Stock Address</span>
+              <span className={FIELD_LABEL}>Stock Address</span>
               {sample.stockLocation ? (
                 <div className="flex items-start gap-1.5 mt-0.5">
-                  <span className="text-zinc-900 text-xs font-medium leading-snug">{sample.stockLocation}</span>
+                  <span className="text-xs font-medium leading-snug text-zinc-900">
+                    {sample.stockLocation}
+                  </span>
                   {canManageStockAddress && (
                     <button
                       type="button"
                       onClick={openStockAddressModal}
-                      className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold underline shrink-0 border-0 bg-transparent p-0 cursor-pointer"
+                      className={`${BTN_INLINE} shrink-0`}
                     >
                       Change
                     </button>
@@ -716,12 +906,12 @@ export const SampleRequestDetailPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={openStockAddressModal}
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 border-0 bg-transparent p-0 cursor-pointer"
+                      className={`${BTN_INLINE} inline-flex items-center gap-1`}
                     >
-                      <LocationOnIcon sx={{ fontSize: 13 }} /> Add Stock Address
+                      <LocationOnIcon sx={{ fontSize: 13 }} /> Add stock address
                     </button>
                   ) : (
-                    <span className="text-zinc-400 text-xs">Not added</span>
+                    <span className={FIELD_EMPTY}>Not added</span>
                   )}
                 </div>
               )}
@@ -729,10 +919,10 @@ export const SampleRequestDetailPage: React.FC = () => {
           </div>
 
           <div>
-            <span className="text-[11px] font-semibold uppercase text-zinc-500 block mb-1 flex items-center gap-1">
-              <LocationOnIcon sx={{ fontSize: 14 }} /> Delivery Destination Address
+            <span className={FIELD_LABEL_ROW}>
+              <LocationOnIcon sx={{ fontSize: 14 }} /> Delivery destination address
             </span>
-            <p className="m-0 rounded-lg bg-zinc-50 border border-zinc-200 p-3 text-xs leading-relaxed text-zinc-800">
+            <p className={NOTE_BOX}>
               {sample.deliveryAddress || 'No shipping address provided.'}
             </p>
           </div>
@@ -740,17 +930,17 @@ export const SampleRequestDetailPage: React.FC = () => {
       </div>
 
       {/* Card 3: Client Feedback & Product Evaluation */}
-      <section className="bg-white border border-zinc-300 rounded-xl p-5 shadow-sm space-y-4">
-        <div className="flex items-center justify-between border-b border-zinc-100 pb-2.5">
+      <section className={`${CARD} space-y-4`}>
+        <div className={CARD_HEAD_BETWEEN}>
           <div className="flex items-center gap-2">
-            <StarIcon sx={{ fontSize: 20, color: '#f59e0b' }} />
-            <h2 className="text-sm font-semibold text-zinc-950 m-0">Client feedback & evaluation</h2>
+            <StarIcon sx={{ fontSize: 18 }} className="text-zinc-900" />
+            <h2 className={CARD_TITLE}>Client feedback &amp; evaluation</h2>
           </div>
           {canFeedbackSamples && (sample.status === 'Delivered' || sample.status === 'Completed') && (
             <button
               type="button"
               onClick={openFeedback}
-              className="text-xs font-semibold text-blue-600 hover:underline border-0 bg-transparent cursor-pointer p-0"
+              className="text-xs font-semibold text-zinc-950 hover:underline border-0 bg-transparent cursor-pointer p-0"
             >
               {sample.feedback?.rating ? 'Edit Feedback' : '+ Record Feedback'}
             </button>
@@ -762,13 +952,13 @@ export const SampleRequestDetailPage: React.FC = () => {
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-1">
                 <span className="text-xs font-semibold text-zinc-600">Client Rating:</span>
-                <span className="inline-flex text-amber-500">
+                <span className="inline-flex text-zinc-900">
                   {[1, 2, 3, 4, 5].map((star) => (
                     <StarIcon
                       key={star}
                       sx={{
                         fontSize: 18,
-                        color: (sample.feedback?.rating || 0) >= star ? '#f59e0b' : '#e4e4e7',
+                        color: (sample.feedback?.rating || 0) >= star ? '#18181b' : '#e4e4e7',
                       }}
                     />
                   ))}
@@ -790,7 +980,7 @@ export const SampleRequestDetailPage: React.FC = () => {
                 <span className="text-[11px] font-semibold uppercase text-zinc-500 block mb-1">
                   Review & Comments
                 </span>
-                <p className="m-0 rounded-lg bg-amber-50/60 border border-amber-200 p-3 text-xs leading-relaxed text-zinc-900 italic">
+                <p className="m-0 rounded-lg bg-zinc-50 border border-zinc-200 p-3 text-xs leading-relaxed text-zinc-900 italic">
                   &ldquo;{sample.feedback.comments}&rdquo;
                 </p>
               </div>
@@ -801,10 +991,10 @@ export const SampleRequestDetailPage: React.FC = () => {
                 <span className="text-[11px] font-semibold uppercase text-zinc-500 block mb-0.5">
                   Commercial Purchase Intent
                 </span>
-                <span className={sample.feedback.interestedInOrder ? 'text-emerald-700 font-semibold' : 'text-zinc-600'}>
+                <span className={sample.feedback.interestedInOrder ? 'text-zinc-950 font-semibold' : 'text-zinc-600'}>
                   {sample.feedback.interestedInOrder ? (
                     <span className="inline-flex items-center gap-1">
-                      <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-zinc-950" aria-hidden />
                       Highly interested in placing bulk order
                     </span>
                   ) : (
@@ -817,7 +1007,7 @@ export const SampleRequestDetailPage: React.FC = () => {
                 <span className="text-[11px] font-semibold uppercase text-zinc-500 block mb-0.5">
                   Quality Improvement Needed
                 </span>
-                <span className={sample.feedback.requiresImprovement ? 'text-amber-800 font-semibold' : 'text-zinc-600'}>
+                <span className={sample.feedback.requiresImprovement ? 'text-zinc-950 font-semibold' : 'text-zinc-600'}>
                   {sample.feedback.requiresImprovement
                     ? `Yes — Routed to ${sample.feedback.routedDepartment || 'R&D / Technical'}`
                     : 'No — Meets specifications'}
@@ -846,7 +1036,7 @@ export const SampleRequestDetailPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={openFeedback}
-                  className="h-8 rounded-lg border-0 bg-slate-950 px-3 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 cursor-pointer"
+                  className="h-8 rounded-lg border-0 bg-zinc-950 px-3 text-xs font-semibold text-white shadow-sm hover:bg-zinc-800 cursor-pointer"
                 >
                   <span className="inline-flex items-center gap-1">
                     <Star className="h-4 w-4 shrink-0" aria-hidden />
@@ -861,8 +1051,8 @@ export const SampleRequestDetailPage: React.FC = () => {
 
       {/* APPROVE / REJECT MODAL */}
       {approveOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white shadow-xl">
+        <div className={MODAL_BACKDROP}>
+          <div className={`w-full max-w-md ${MODAL_PANEL}`}>
             <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4">
               <div>
                 <h2 className="m-0 text-base font-semibold text-zinc-950">
@@ -880,12 +1070,12 @@ export const SampleRequestDetailPage: React.FC = () => {
             </div>
             <form onSubmit={submitApprove} className="space-y-4 p-5">
               {error && approveOpen && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm font-medium text-zinc-900">
                   {error}
                 </div>
               )}
               {approveAction === 'approve' ? (
-                <p className="m-0 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
+                <p className="m-0 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-800">
                   Confirm Sales Manager approval for this sample request. The team can prepare and dispatch it after approval.
                 </p>
               ) : (
@@ -915,9 +1105,7 @@ export const SampleRequestDetailPage: React.FC = () => {
                 <button
                   type="submit"
                   disabled={saving}
-                  className={`h-9 rounded-lg border-0 px-4 text-xs font-semibold text-white shadow-sm cursor-pointer disabled:opacity-50 ${
-                    approveAction === 'approve' ? 'bg-emerald-700 hover:bg-emerald-800' : 'bg-red-600 hover:bg-red-700'
-                  }`}
+                  className="h-9 rounded-lg border border-zinc-950 bg-zinc-950 px-4 text-xs font-semibold text-white shadow-xs hover:bg-zinc-800 cursor-pointer disabled:opacity-50"
                 >
                   {saving ? 'Processing…' : approveAction === 'approve' ? 'Confirm Approval' : 'Confirm Rejection'}
                 </button>
@@ -929,8 +1117,8 @@ export const SampleRequestDetailPage: React.FC = () => {
 
       {/* DISPATCH MODAL */}
       {dispatchOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white shadow-xl">
+        <div className={MODAL_BACKDROP}>
+          <div className={`w-full max-w-md ${MODAL_PANEL}`}>
             <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4">
               <div>
                 <h2 className="m-0 text-base font-semibold text-zinc-950">Dispatch Sample & Courier</h2>
@@ -946,7 +1134,7 @@ export const SampleRequestDetailPage: React.FC = () => {
             </div>
             <form onSubmit={submitDispatch} className="space-y-4 p-5">
               {error && dispatchOpen && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">
                   {error}
                 </div>
               )}
@@ -970,6 +1158,17 @@ export const SampleRequestDetailPage: React.FC = () => {
                     <option value={courierName}>{courierName}</option>
                   ) : null}
                 </select>
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-zinc-700">
+                  Tracking number / AWB
+                </span>
+                <input
+                  className={fieldClass}
+                  value={trackingNumber}
+                  onChange={(e) => setTrackingNumber(e.target.value)}
+                  placeholder="Leave blank if not issued yet"
+                />
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="block">
@@ -1006,7 +1205,7 @@ export const SampleRequestDetailPage: React.FC = () => {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="h-9 rounded-lg border-0 bg-slate-950 px-4 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                  className="h-9 rounded-lg border-0 bg-zinc-950 px-4 text-xs font-semibold text-white shadow-sm hover:bg-zinc-800 cursor-pointer disabled:opacity-50"
                 >
                   {saving ? 'Saving…' : 'Record Dispatch'}
                 </button>
@@ -1016,10 +1215,224 @@ export const SampleRequestDetailPage: React.FC = () => {
         </div>
       )}
 
+      {/* EDIT MODAL — pre-dispatch corrections */}
+      {editOpen && (
+        <div className={MODAL_BACKDROP}>
+          <div className={`w-full max-w-2xl ${MODAL_PANEL}`}>
+            <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4">
+              <div>
+                <h2 className="m-0 text-base font-semibold text-zinc-950">Edit Sample Request</h2>
+                <p className="mb-0 mt-0.5 text-xs text-zinc-500">
+                  {sample.sampleNumber} · editable until dispatch
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border-0 bg-zinc-100 text-zinc-600 hover:bg-zinc-200 cursor-pointer"
+              >
+                <CloseIcon sx={{ fontSize: 18 }} />
+              </button>
+            </div>
+            <form onSubmit={submitEdit} className="space-y-4 p-5 max-h-[80vh] overflow-y-auto">
+              {error && editOpen && (
+                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm font-medium text-zinc-900">
+                  {error}
+                </div>
+              )}
+
+              {sample.status !== 'Requested' && (
+                <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-800">
+                  This request was already approved. Changing the items or quantities here does
+                  not ask for approval again — tell the approver what changed.
+                </div>
+              )}
+
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-zinc-700">Items *</span>
+                  <button
+                    type="button"
+                    onClick={addEditItem}
+                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-dashed border-zinc-400 bg-white px-2.5 text-[11px] font-semibold text-zinc-800 hover:border-zinc-950 hover:bg-zinc-50 cursor-pointer"
+                  >
+                    + Add item
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {editItems.map((item, idx) => (
+                    <div
+                      key={`edit-item-${idx}`}
+                      className="grid grid-cols-1 gap-2 rounded-xl border border-zinc-200 bg-zinc-50/60 p-3 sm:grid-cols-12"
+                    >
+                      <div className="sm:col-span-6">
+                        <span className="mb-1 block text-[11px] font-medium text-zinc-600">
+                          Item {idx + 1}
+                        </span>
+                        <input
+                          type="text"
+                          maxLength={200}
+                          className={fieldClass}
+                          placeholder="Product / item name"
+                          value={item.productName}
+                          onChange={(e) => patchEditItem(idx, { productName: e.target.value })}
+                        />
+                      </div>
+                      <div className="sm:col-span-3">
+                        <span className="mb-1 block text-[11px] font-medium text-zinc-600">
+                          Quantity
+                        </span>
+                        <input
+                          type="number"
+                          min={1}
+                          className={fieldClass}
+                          value={item.quantity}
+                          onChange={(e) =>
+                            patchEditItem(idx, { quantity: Math.max(1, Number(e.target.value) || 1) })
+                          }
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <span className="mb-1 block text-[11px] font-medium text-zinc-600">Unit</span>
+                        <select
+                          className={fieldClass}
+                          value={item.unit}
+                          onChange={(e) => patchEditItem(idx, { unit: e.target.value })}
+                        >
+                          {Array.from(new Set([item.unit, ...availableUnits]))
+                            .filter(Boolean)
+                            .map((unit) => (
+                              <option key={unit} value={unit}>
+                                {unit}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                      <div className="flex items-end sm:col-span-1">
+                        <button
+                          type="button"
+                          onClick={() => removeEditItem(idx)}
+                          disabled={editItems.length === 1}
+                          aria-label={`Remove item ${idx + 1}`}
+                          className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-700 hover:border-zinc-950 hover:bg-zinc-100 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <CloseIcon sx={{ fontSize: 16 }} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-semibold text-zinc-700">Urgency</span>
+                  <select
+                    className={fieldClass}
+                    value={editUrgency}
+                    onChange={(e) => setEditUrgency(e.target.value)}
+                  >
+                    {SAMPLE_URGENCIES.map((urgency) => (
+                      <option key={urgency} value={urgency}>
+                        {urgency}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-semibold text-zinc-700">
+                    Recipient name
+                  </span>
+                  <input
+                    type="text"
+                    maxLength={200}
+                    className={fieldClass}
+                    value={editRecipientName}
+                    onChange={(e) => setEditRecipientName(e.target.value)}
+                  />
+                </label>
+              </div>
+
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-zinc-700">
+                  Delivery address
+                </span>
+                <textarea
+                  rows={2}
+                  maxLength={1000}
+                  className={fieldClass}
+                  value={editDeliveryAddress}
+                  onChange={(e) => setEditDeliveryAddress(e.target.value)}
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-zinc-700">
+                  Internal notes
+                </span>
+                <textarea
+                  rows={2}
+                  maxLength={2000}
+                  className={fieldClass}
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                />
+              </label>
+
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-3.5">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editIsChargeable}
+                    onChange={(e) => setEditIsChargeable(e.target.checked)}
+                    className="rounded border-zinc-300 text-zinc-950 focus:ring-zinc-950"
+                  />
+                  <span className="text-xs font-semibold text-zinc-800">
+                    Chargeable sample
+                  </span>
+                </label>
+                {editIsChargeable && (
+                  <label className="mt-3 block">
+                    <span className="mb-1.5 block text-xs font-semibold text-zinc-700">
+                      Charge amount ({sample.currency || sample.currencyCode || 'INR'})
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      className={fieldClass}
+                      value={editChargeAmount}
+                      onChange={(e) => setEditChargeAmount(e.target.value)}
+                    />
+                  </label>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-zinc-100 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setEditOpen(false)}
+                  className="h-9 rounded-lg border border-zinc-300 bg-white px-3.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="h-9 rounded-lg border-0 bg-zinc-950 px-4 text-xs font-semibold text-white shadow-sm hover:bg-zinc-800 cursor-pointer disabled:opacity-50"
+                >
+                  {saving ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* FEEDBACK MODAL */}
       {feedbackOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white shadow-xl">
+        <div className={MODAL_BACKDROP}>
+          <div className={`w-full max-w-lg ${MODAL_PANEL}`}>
             <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4">
               <div>
                 <h2 className="m-0 text-base font-semibold text-zinc-950">Record Client Feedback</h2>
@@ -1035,7 +1448,7 @@ export const SampleRequestDetailPage: React.FC = () => {
             </div>
             <form onSubmit={submitFeedback} className="space-y-4 p-5 max-h-[80vh] overflow-y-auto">
               {error && feedbackOpen && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">
                   {error}
                 </div>
               )}
@@ -1106,9 +1519,9 @@ export const SampleRequestDetailPage: React.FC = () => {
               </label>
 
               {requiresImprovement && (
-                <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-3.5">
+                <div className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3.5">
                   <label className="block">
-                    <span className="mb-1 block text-xs font-semibold text-amber-950">
+                    <span className="mb-1 block text-xs font-semibold text-zinc-900">
                       Route Improvement To Department *
                     </span>
                     <select
@@ -1124,7 +1537,7 @@ export const SampleRequestDetailPage: React.FC = () => {
                     </select>
                   </label>
                   <label className="block">
-                    <span className="mb-1 block text-xs font-semibold text-amber-950">
+                    <span className="mb-1 block text-xs font-semibold text-zinc-900">
                       Improvement Notes & Feedback
                     </span>
                     <textarea
@@ -1150,7 +1563,7 @@ export const SampleRequestDetailPage: React.FC = () => {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="h-9 rounded-lg border-0 bg-slate-950 px-4 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                  className="h-9 rounded-lg border-0 bg-zinc-950 px-4 text-xs font-semibold text-white shadow-sm hover:bg-zinc-800 cursor-pointer disabled:opacity-50"
                 >
                   {saving ? 'Submitting…' : 'Save Feedback'}
                 </button>
@@ -1162,8 +1575,8 @@ export const SampleRequestDetailPage: React.FC = () => {
 
       {/* STOCK ADDRESS MODAL (Configured via Settings office locations or custom) */}
       {stockAddressModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white shadow-xl">
+        <div className={MODAL_BACKDROP}>
+          <div className={`w-full max-w-md ${MODAL_PANEL}`}>
             <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4">
               <div>
                 <h2 className="m-0 text-base font-semibold text-zinc-950">
@@ -1183,7 +1596,7 @@ export const SampleRequestDetailPage: React.FC = () => {
             </div>
             <form onSubmit={submitStockAddress} className="space-y-4 p-5">
               {error && stockAddressModalOpen && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">
                   {error}
                 </div>
               )}
@@ -1201,18 +1614,18 @@ export const SampleRequestDetailPage: React.FC = () => {
                         onClick={() => setEditingStockAddress(loc)}
                         className={`w-full text-left rounded-lg p-2.5 text-xs border transition-all cursor-pointer flex items-start gap-2 ${
                           editingStockAddress === loc
-                            ? 'bg-indigo-50/80 border-indigo-400 text-indigo-950 font-medium ring-1 ring-indigo-400'
+                            ? 'bg-zinc-950 border-zinc-950 text-white font-medium shadow-xs'
                             : 'bg-zinc-50 border-zinc-200 text-zinc-800 hover:bg-zinc-100'
                         }`}
                       >
-                        <LocationOnIcon sx={{ fontSize: 16, color: editingStockAddress === loc ? '#4f46e5' : '#71717a' }} />
+                        <LocationOnIcon sx={{ fontSize: 16, color: editingStockAddress === loc ? '#ffffff' : '#71717a' }} />
                         <span className="flex-1 break-words">{loc}</span>
                       </button>
                     ))}
                   </div>
                 </div>
               ) : (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-800">
                   No office address saved in Settings yet. You can type the address below, or configure office locations in Settings &gt; General tab.
                 </div>
               )}
@@ -1243,7 +1656,7 @@ export const SampleRequestDetailPage: React.FC = () => {
                 <button
                   type="submit"
                   disabled={saving || !editingStockAddress.trim()}
-                  className="h-9 rounded-lg border-0 bg-indigo-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 cursor-pointer disabled:opacity-50"
+                  className="h-9 rounded-lg border border-zinc-950 bg-zinc-950 px-4 text-xs font-semibold text-white shadow-xs hover:bg-zinc-800 cursor-pointer disabled:opacity-50"
                 >
                   {saving ? 'Saving…' : 'Save Stock Address'}
                 </button>

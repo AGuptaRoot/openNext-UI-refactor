@@ -81,7 +81,7 @@ function emptyScheduleForm(currency: string): RecurringInvoiceCreateInput {
 export const InvoicesPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { hasPermission, isClient } = useAuth();
+  const { hasPermission, isClient, features } = useAuth();
   const { confirm } = useDialog();
   const canWriteFinance = hasPermission('crm.finance.write') && !isClient;
   const { clients, projects } = useFinanceOptions();
@@ -98,6 +98,11 @@ export const InvoicesPage: React.FC = () => {
   const [status, setStatus] = useState(() => searchParams.get('status') || '');
   const [attentionIds, setAttentionIds] = useState(() => searchParams.get('ids') || '');
   const [archived, setArchived] = useState(false);
+  /*
+   * Which documents the list means. Tax invoices only by default: a proforma
+   * is a payment request and would otherwise inflate every total on screen.
+   */
+  const [documentType, setDocumentType] = useState<'tax' | 'proforma' | 'all'>('tax');
   const [filterRecurring, setFilterRecurring] = useState(false);
   const [profileFilter, setProfileFilter] = useState('');
   const [loading, setLoading] = useState(true);
@@ -188,6 +193,7 @@ export const InvoicesPage: React.FC = () => {
       const common = {
         search: search || undefined,
         status: status || undefined,
+        documentType,
         ids: attentionIds || undefined,
         archived,
         isRecurring: filterRecurring || undefined,
@@ -213,7 +219,7 @@ export const InvoicesPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [search, status, attentionIds, archived, filterRecurring, profileFilter, page]);
+  }, [search, status, attentionIds, archived, documentType, filterRecurring, profileFilter, page]);
 
   const loadRecurring = useCallback(async () => {
     setLoading(true);
@@ -452,14 +458,18 @@ export const InvoicesPage: React.FC = () => {
                   </div>
                 )}
               </div>
-              <button
-                type="button"
-                data-tour="invoices-templates-btn"
-                onClick={() => navigate('/invoice-templates')}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold"
-              >
-                <FolderOpenIcon sx={{ fontSize: 15 }} /> Templates
-              </button>
+              {/* Templates are an internal billing tool, not something a
+                  portal user sets up. */}
+              {!isClient && (
+                <button
+                  type="button"
+                  data-tour="invoices-templates-btn"
+                  onClick={() => navigate('/invoice-templates')}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold"
+                >
+                  <FolderOpenIcon sx={{ fontSize: 15 }} /> Templates
+                </button>
+              )}
               {canWriteFinance && (
                 <button
                   type="button"
@@ -570,6 +580,34 @@ export const InvoicesPage: React.FC = () => {
               Showing Attention Radar selection · Clear
             </button>
           ) : null}
+          {/* Proforma & advance payment: only shown where proformas exist. */}
+          {features.proformaAdvance && (
+            <div className="inline-flex rounded-lg border border-zinc-200 bg-zinc-50 p-0.5">
+              {(
+                [
+                  { value: 'tax' as const, label: 'Tax' },
+                  { value: 'proforma' as const, label: 'Proforma' },
+                  { value: 'all' as const, label: 'All' },
+                ]
+              ).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => {
+                    setDocumentType(option.value);
+                    setPage(1);
+                  }}
+                  className={`h-8 cursor-pointer rounded-md border-0 px-3 text-xs font-semibold ${
+                    documentType === option.value
+                      ? 'bg-zinc-950 text-white'
+                      : 'bg-transparent text-zinc-600'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          )}
           <div
             data-tour="invoices-archive-toggle"
             className="inline-flex rounded-lg border border-zinc-200 bg-zinc-50 p-0.5"
@@ -733,6 +771,11 @@ export const InvoicesPage: React.FC = () => {
                           >
                             {item.invoiceNo}
                           </Link>
+                          {item.documentType === 'proforma' && (
+                            <span className="ml-1.5 inline-block rounded-full border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-900">
+                              Proforma
+                            </span>
+                          )}
                           {(item.isRecurring || item.recurringProfileId) && (
                             <span className="ml-1.5 inline-block rounded-full border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700">
                               Recurring

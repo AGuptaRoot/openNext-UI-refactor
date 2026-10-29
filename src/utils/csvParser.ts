@@ -40,6 +40,33 @@ function detectDelimiter(text: string): string {
 export function parseCsvString(text: string): Array<Record<string, string>> {
   if (!text || !text.trim()) return [];
 
+  const trimmed = text.replace(/^\uFEFF/, '').trim();
+  if (trimmed.startsWith('[') || (trimmed.startsWith('{') && !trimmed.startsWith('{\\'))) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const list = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed.rows)
+          ? parsed.rows
+          : Array.isArray(parsed.data)
+            ? parsed.data
+            : Array.isArray(parsed.leads)
+              ? parsed.leads
+              : null;
+      if (Array.isArray(list) && list.length > 0 && typeof list[0] === 'object') {
+        return list.map((item) => {
+          const rowObj: Record<string, string> = {};
+          for (const [k, v] of Object.entries(item || {})) {
+            rowObj[k] = v !== null && v !== undefined ? String(v) : '';
+          }
+          return rowObj;
+        });
+      }
+    } catch {
+      // Fall through to CSV parser
+    }
+  }
+
   const delimiter = detectDelimiter(text);
   const lines: string[][] = [];
   let row: string[] = [];
@@ -109,6 +136,7 @@ export function generateSampleLeadCsv(): string {
     'Company Name',
     'Email',
     'Phone',
+    'Required Type',
     'Pipeline Stage',
     'Lead Source',
     'Budget / Value',
@@ -125,6 +153,7 @@ export function generateSampleLeadCsv(): string {
       'Alpha Tech Pvt Ltd',
       'rahul.mehta@example.com',
       '+91 9000000001',
+      'Project (Software)',
       'New',
       'Website',
       '75000',
@@ -139,6 +168,7 @@ export function generateSampleLeadCsv(): string {
       'Nova Solutions',
       'priya.sharma@example.com',
       '+91 9000000002',
+      'Product',
       'Contacted',
       'LinkedIn',
       '120000',

@@ -1,4 +1,5 @@
 import type { LeadCommercialRequirement } from '../utils/qualificationMatchScore';
+import type { ClientPortalAccess } from './clients';
 
 export type {
   LeadCommercialRequirement,
@@ -29,6 +30,9 @@ export interface LeadItem {
   gender?: string;
   pan?: string;
   stage: string;
+  stageUpdatedAt?: string | null;
+  /** Missed scheduled-activity summary (list enrichment). */
+  missedActivities?: LeadMissedActivities;
   status: string;
   source?: string;
   leadType?: string;
@@ -59,6 +63,8 @@ export interface LeadItem {
   avatarUrl?: string;
   convertedClientId?: string | null;
   convertedAt?: string | null;
+  isPortal?: boolean;
+  portalEnabledAt?: string | null;
   createdBy?: string;
   createdByUsername?: string;
   qualification?: LeadQualification;
@@ -81,6 +87,7 @@ export interface LeadItem {
   extension?: Record<string, unknown>;
   createdAt: string;
   updatedAt?: string;
+  isDeleted?: boolean;
 }
 
 export interface LeadQualification {
@@ -137,7 +144,7 @@ export interface LeadEvent {
   description?: string;
   eventDate?: string;
   date?: string; // alias for eventDate
-  status?: 'Open' | 'Completed' | string;
+  status?: 'Open' | 'Assigned' | 'Accepted' | 'Completed' | string;
   completed?: boolean;
   /** Assigned employee / sales user (never a client). */
   assignedTo?: string;
@@ -146,6 +153,77 @@ export interface LeadEvent {
   assignedToLabel?: string;
   createdBy?: string;
   createdAt?: string;
+  /** "logged" = already done when recorded; "scheduled" = booked, completed later. */
+  kind?: 'logged' | 'scheduled' | string;
+  /** Where the row came from — a commercial-requirement row offers "Interested". */
+  source?: 'manual' | 'commercial_requirement' | string;
+  createdLocation?: ActivityLocation | null;
+  acceptedLocation?: ActivityLocation | null;
+  completedLocation?: ActivityLocation | null;
+  goalLocation?: ActivityLocation | null;
+  acceptedAt?: string | null;
+  acceptedBy?: string | null;
+  completedAt?: string | null;
+  completedBy?: string;
+  /** Set once the row has been turned into an opportunity. */
+  convertedOpportunityId?: string;
+}
+
+/** One timestamped note on a lead (Notes tab rows). */
+export interface LeadNote {
+  _id: string;
+  leadId?: string;
+  content: string;
+  createdBy?: string;
+  createdByName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  /** Set once the note has been edited. */
+  editedAt?: string | null;
+}
+
+/** Scheduled activities on a lead that passed their due time uncompleted. */
+export interface LeadMissedActivities {
+  count: number;
+  hasMissed: boolean;
+  oldestDueAt?: string | null;
+  oldestTitle?: string;
+  label?: string;
+}
+
+/** Browser geolocation reading stored against an activity. */
+export interface ActivityLocation {
+  latitude: number | null;
+  longitude: number | null;
+  accuracy?: number | null;
+  address?: string;
+  capturedAt?: string | null;
+  /** Why coordinates are missing (permission denied, unsupported, timeout). */
+  unavailableReason?: string;
+}
+
+export interface ActivityLocationLog {
+  _id?: string;
+  tenantId?: string;
+  activityId: string;
+  leadId?: string;
+  salesRepId: string;
+  salesRepName?: string;
+  activityType?: string;
+  activityTitle?: string;
+  latitude: number;
+  longitude: number;
+  accuracy?: number | null;
+  address?: string;
+  loggedAt: string;
+}
+
+export type Activity = LeadEvent;
+
+/** One item on the "Interested" → opportunity modal (name + description only). */
+export interface OpportunityItemDraft {
+  name: string;
+  description: string;
 }
 
 export interface LeadFollowUp {
@@ -229,6 +307,7 @@ export interface LeadQueryParams {
   stage?: string;
   status?: string;
   source?: string;
+  requestType?: string;
   tag?: string;
   /** Qualification match band: unscored | strong | partial | weak | poor | scored */
   matchScore?: string;
@@ -348,6 +427,7 @@ export interface LeadImportPreviewRow {
   stage?: string;
   status?: string;
   source?: string;
+  requestType?: string;
 }
 
 export interface LeadImportPreviewResult {
@@ -366,4 +446,42 @@ export interface LeadImportExecuteResult {
   failedCount: number;
   createdIds?: string[];
   message?: string;
+}
+
+/** One scheduled activity on the reminder feed. */
+export interface ActivityReminderRow {
+  id: string;
+  leadId: string;
+  leadName: string;
+  title: string;
+  eventType: string;
+  eventDate: string;
+  assignedTo: string;
+  assignedToLabel: string;
+  isMine: boolean;
+  /** Only on `dueSoon` rows. */
+  minutesUntil?: number;
+  /** Only on `missed` rows. */
+  minutesLate?: number;
+}
+
+/**
+ * Scheduled activities needing attention: missed ones and ones about to start.
+ *
+ * `scope` is what the server actually applied — a sales representative always
+ * gets `mine`, even when the page asked for `team`.
+ */
+export interface ActivityReminderFeed {
+  scope: 'mine' | 'team';
+  windowMinutes: number;
+  now: string;
+  missed: ActivityReminderRow[];
+  dueSoon: ActivityReminderRow[];
+}
+
+/** Portal credentials issued (or issuable) for a lead. */
+export interface LeadPortalAccessState {
+  access: ClientPortalAccess[];
+  /** Why a new invite is refused right now; empty when it is allowed. */
+  blockedReason: string;
 }

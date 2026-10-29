@@ -17,6 +17,8 @@ import { CONTACT_EMAIL_RE, CONTACT_PHONE_RE } from '../contacts/ContactFormField
 import { LiveCameraCapture } from '../common/LiveCameraCapture';
 import { fileToVisionDataUrl } from '../../utils/imageDataUrl';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import { PhoneNumberField } from '../common/PhoneNumberField';
+import { splitPhoneNumber, validateNationalNumber } from '../../utils/phoneCountryCodes';
 
 const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif';
 const MAX_BYTES = 12 * 1024 * 1024;
@@ -128,7 +130,13 @@ function validateDraft(d: DraftFields): string | null {
   if (!CONTACT_EMAIL_RE.test(d.email.trim())) return 'Enter a valid email address.';
   const phone = d.phone.replace(/[\s().-]/g, '');
   if (!phone) return 'Mobile number is required to create the lead.';
-  if (!CONTACT_PHONE_RE.test(phone)) return 'Enter a valid mobile number (7–15 digits).';
+  const split = splitPhoneNumber(d.phone);
+  if (split.dial && split.national) {
+    const check = validateNationalNumber(split.dial, split.national);
+    if (check.state === 'invalid' || check.state === 'incomplete') return check.message;
+  } else if (!CONTACT_PHONE_RE.test(phone)) {
+    return 'Enter a valid mobile number (7–15 digits).';
+  }
   if (!d.requestTypeId.trim()) return 'Request Type could not be resolved (expected Project (software)).';
   if (!d.stage.trim()) return 'Stage is required.';
   return null;
@@ -713,14 +721,15 @@ export const VisitingCardLeadCaptureModal: React.FC<VisitingCardLeadCaptureModal
                   onChange={(e) => updateDraft({ email: e.target.value })}
                 />
               </label>
-              <label className="block">
+              <div className="block">
                 <span className={labelCls}>Mobile *</span>
-                <input
-                  className={inputCls}
+                <PhoneNumberField
                   value={draft.phone}
-                  onChange={(e) => updateDraft({ phone: e.target.value })}
+                  onChange={(val) => updateDraft({ phone: val })}
+                  inputClassName={inputCls}
+                  placeholder="98765 43210"
                 />
-              </label>
+              </div>
               <label className="block">
                 <span className={labelCls}>Stage</span>
                 <input className={inputCls} value={draft.stage} readOnly />

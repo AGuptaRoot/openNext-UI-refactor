@@ -12,6 +12,7 @@ import { crmApi } from '../../services/api';
 import { triggerFileDownload } from '../../utils/fileDownload';
 import {
   ReportTabId,
+  ActivityLocationReport,
   ReportPeriod,
   ReportRolePreset,
   ReportTabDefinition,
@@ -36,10 +37,12 @@ import { IncomeExpenseReportTab } from '../../components/reports/tabs/IncomeExpe
 import { AgeingReportTab } from '../../components/reports/tabs/AgeingReportTab';
 import { RecurringInvoicesReportTab } from '../../components/reports/tabs/RecurringInvoicesReportTab';
 import { PaymentReconciliationReportTab } from '../../components/reports/tabs/PaymentReconciliationReportTab';
+import { ActivityLocationReportTab } from '../../components/reports/tabs/ActivityLocationReportTab';
 
 export const ALL_REPORT_TABS: ReportTabDefinition[] = [
   { id: 'sales', label: 'Sales Pipeline', exportKey: 'sales', requiredPerm: null },
   { id: 'conversion', label: 'Lead Conversion', exportKey: 'lead-conversion', requiredPerm: null },
+  { id: 'activity-location', label: 'Activity Location', exportKey: 'activity-location', requiredPerm: null },
   { id: 'projects', label: 'Projects & Tasks', exportKey: 'projects', requiredPerm: 'canProjects' },
   { id: 'employees', label: 'Employees', exportKey: 'employees', requiredPerm: 'canProjects' },
   { id: 'time', label: 'Time & Billable Hours', exportKey: 'time', requiredPerm: 'canTime' },
@@ -56,6 +59,7 @@ export const ROLE_PRESETS: Record<string, ReportRolePreset> = {
     allowedReports: [
       'sales',
       'conversion',
+      'activity-location',
       'projects',
       'employees',
       'time',
@@ -68,7 +72,7 @@ export const ROLE_PRESETS: Record<string, ReportRolePreset> = {
   'sales-manager': {
     title: 'Sales Manager',
     subtitle: 'Sales pipeline progression, lead conversion funnel, quotation metrics, and recurring contracts.',
-    allowedReports: ['sales', 'conversion', 'recurring-invoices'],
+    allowedReports: ['sales', 'conversion', 'activity-location', 'recurring-invoices'],
   },
   'sales-representative': {
     title: 'Sales Representative',
@@ -348,6 +352,9 @@ export const ReportsPage: React.FC = () => {
           case 'conversion':
             result = (await crmApi.getLeadConversionReport(queryParams)).data;
             break;
+          case 'activity-location':
+            result = (await crmApi.getActivityLocationReport(queryParams)).data;
+            break;
           case 'projects':
             result = (await crmApi.getProjectsReport(queryParams)).data;
             break;
@@ -406,6 +413,9 @@ export const ReportsPage: React.FC = () => {
               break;
             case 'conversion':
               payload = (await crmApi.getLeadConversionReport(queryParams)).data;
+              break;
+            case 'activity-location':
+              payload = (await crmApi.getActivityLocationReport(queryParams)).data;
               break;
             case 'projects':
               payload = (await crmApi.getProjectsReport(queryParams)).data;
@@ -676,6 +686,16 @@ export const ReportsPage: React.FC = () => {
           )}
           {activeTab === 'conversion' && (
             <ConversionReportTab data={(currentData as LeadConversionReportData) || {}} />
+          )}
+          {activeTab === 'activity-location' && (
+            <ActivityLocationReportTab
+              data={
+                (currentData as ActivityLocationReport) || {
+                  rows: [],
+                  summary: { total: 0, withLocation: 0, withoutLocation: 0, reps: 0, leads: 0 },
+                }
+              }
+            />
           )}
           {activeTab === 'projects' && (
             <ProjectsReportTab data={(currentData as ProjectsReportData) || {}} perms={currentPerms} />

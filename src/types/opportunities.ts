@@ -73,6 +73,9 @@ export interface OpportunityItem {
   source?: string;
   isDeleted?: boolean;
   deletedAt?: string | null;
+  isPortal?: boolean;
+  leadIsPortal?: boolean;
+  portalEnabledAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -106,12 +109,14 @@ export interface OpportunityCreateInput {
   lostReason?: string;
   description?: string;
   source?: string;
+  pipelineId?: string;
 }
 
 export interface OpportunityQueryParams {
   page?: number;
   limit?: number;
   stage?: string;
+  pipelineId?: string;
   clientId?: string;
   leadId?: string;
   salesOwner?: string;
@@ -407,6 +412,22 @@ export function opportunityLockLabel(
   if (item.generatedSalesOrderId) return 'Sales Order Generated';
   if (item.acceptedQuotationId) return 'Quotation Accepted';
   return '';
+}
+
+/**
+ * Why this deal's amount blocks a quotation, or '' when the amount is fine.
+ *
+ * A ₹0 deal produces a ₹0 quotation, which then produces a ₹0 sales order
+ * and invoice, so the server refuses it; the button carries this sentence as
+ * its tooltip rather than letting the rep find out after clicking. The budget
+ * range itself is only known to the server, which reports it on the attempt.
+ */
+export function describeOpportunityAmountBlock(
+  item: Pick<OpportunityItem, 'estimatedDealValue' | 'expectedRevenue' | 'value'>
+): string {
+  return getEstimatedDealValue(item) > 0
+    ? ''
+    : 'Deal amount is ₹0 — add product prices or an estimated deal value first.';
 }
 
 /** Whether a new quotation may still be created for this opportunity. */

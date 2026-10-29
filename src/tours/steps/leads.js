@@ -464,16 +464,6 @@ export const leadsTourSteps = [
     },
   }),
   step({
-    id: 'leads-tab-followups',
-    target: T('leads-tab-followups'),
-    title: 'Follow-ups tab',
-    content:
-      'Plan future follow-ups and reminders so no New lead goes cold. Schedule the next call or email here.',
-    before: async () => {
-      if (!(await guardLeadDetail(async () => requestLeadTab('follow-ups')))) return;
-    },
-  }),
-  step({
     id: 'leads-tab-audit',
     target: T('leads-tab-audit'),
     title: 'Audit History tab',

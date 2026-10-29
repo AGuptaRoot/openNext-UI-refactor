@@ -87,6 +87,7 @@ export function isSalesOrderDispatched(order?: {
 export const InvoiceCreatePage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const returnTo = searchParams.get('returnTo');
   const fromScan = searchParams.get('fromScan') === '1';
   const { clients, projects } = useFinanceOptions();
   const { alert, prompt } = useDialog();
@@ -524,7 +525,7 @@ export const InvoiceCreatePage: React.FC = () => {
       <CreatePageHeader
         title="Create Invoice"
         backLabel="Invoices"
-        backPath="/invoices"
+        backPath={returnTo || "/invoices"}
         saving={saving}
         formId="invoice-form"
       />
@@ -914,6 +915,22 @@ export const InvoiceCreatePage: React.FC = () => {
                 <span>Grand total</span>
                 <strong>{formatFinanceMoney(totals.grandTotal, currency)}</strong>
               </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => (returnTo ? navigate(returnTo) : navigate('/invoices'))}
+                className="px-4 py-2 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer hover:bg-zinc-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="px-4 py-2 text-xs font-semibold rounded-lg border border-zinc-950 bg-zinc-950 text-white cursor-pointer disabled:opacity-50 hover:bg-zinc-800"
+              >
+                {saving ? 'Creating…' : 'Create Invoice'}
+              </button>
             </div>
           </FormSection>
           </div>

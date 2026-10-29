@@ -1,6 +1,7 @@
 export type ReportTabId =
   | 'sales'
   | 'conversion'
+  | 'activity-location'
   | 'projects'
   | 'employees'
   | 'time'
@@ -351,4 +352,57 @@ export interface EmployeesReportData {
   completedTasks?: number;
   avgProgress?: number;
   message?: string;
+}
+
+/** One row of the Activity Location report (admin / manager view). */
+export interface ActivityLocationPoint {
+  latitude: number | null;
+  longitude: number | null;
+  accuracy?: number | null;
+  address?: string;
+  capturedAt?: string | null;
+  unavailableReason?: string;
+}
+
+export interface ActivityLocationRow {
+  id: string;
+  leadId: string;
+  leadName: string;
+  leadCompany: string;
+  leadStage: string;
+  salesRepId: string;
+  salesRepName: string;
+  createdByName: string;
+  completedByName: string;
+  activityTitle: string;
+  activityType: string;
+  kind: 'logged' | 'scheduled' | string;
+  status: string;
+  description: string;
+  eventDate: string | null;
+  createdAt: string | null;
+  completedAt: string | null;
+  createdLocation: ActivityLocationPoint | null;
+  acceptedLocation?: ActivityLocationPoint | null;
+  startingLocation?: ActivityLocationPoint | null;
+  completedLocation: ActivityLocationPoint | null;
+  goalLocation?: ActivityLocationPoint | null;
+  hasCoordinates: boolean;
+  /** Scheduled activity that was never completed by its due time. */
+  isMissed?: boolean;
+  /** Missed / Completed / Scheduled / Open. */
+  displayStatus?: string;
+}
+
+export interface ActivityLocationReport {
+  rows: ActivityLocationRow[];
+  summary: {
+    total: number;
+    withLocation: number;
+    withoutLocation: number;
+    missed?: number;
+    reps: number;
+    leads: number;
+  };
+  range?: { from: string; to: string };
 }

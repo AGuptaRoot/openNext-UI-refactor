@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 
 const fieldClass =
-  'h-9 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-zinc-400';
+  'h-9 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-950 focus:ring-1 focus:ring-zinc-950 transition-colors';
 
 function localToday(): string {
   const d = new Date();
@@ -62,6 +62,8 @@ export const SamplesPage: React.FC = () => {
   const canDispatchSamples = isSampleLifecycleManager && (hasPermission('crm.samples.write') || isAdmin);
   const canDeliverSamples = isSampleLifecycleManager && (hasPermission('crm.samples.write') || isAdmin);
   const canWriteSamples = hasPermission('crm.samples.write') && !isClient;
+  /** A client may raise (and later call off) a request against their own deal. */
+  const canRequestSamples = canWriteSamples || (isClient && hasPermission('crm.samples.request'));
   const canFeedbackSamples = hasPermission('crm.samples.feedback') || isClient;
   const [items, setItems] = useState<SampleItem[]>([]);
   const [settings, setSettings] = useState<CrmSettings | null>(null);
@@ -296,28 +298,28 @@ export const SamplesPage: React.FC = () => {
     if (item.status === 'Completed' && item.feedback?.rating) {
       return (
         <div className="text-xs text-zinc-700">
-          <div className="inline-flex items-center gap-0.5 font-semibold text-amber-600">
+          <div className="inline-flex items-center gap-0.5 font-semibold text-zinc-900">
             {Array.from({ length: item.feedback.rating }, (_, i) => (
-              <Star key={i} className="h-3.5 w-3.5 shrink-0 fill-amber-500 text-amber-500" aria-hidden />
+              <Star key={i} className="h-3.5 w-3.5 shrink-0 fill-zinc-900 text-zinc-900" aria-hidden />
             ))}
-            <span className="ml-0.5 text-zinc-700">{item.feedback.rating}/5</span>
+            <span className="ml-1 text-zinc-900 font-bold">{item.feedback.rating}/5</span>
           </div>
           <div className="mt-0.5 text-zinc-500">
-            {item.feedback.interestedInOrder ? 'Interested in order' : 'Not ordering yet'}
+            {item.feedback.interestedInOrder ? 'Interested in bulk order' : 'Not ordering yet'}
           </div>
         </div>
       );
     }
     if (item.status === 'Delivered') {
       return (
-        <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
-          <Clock className="h-4 w-4 shrink-0" aria-hidden />
+        <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-700">
+          <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden />
           Review Pending
         </span>
       );
     }
     if (item.status === 'Rejected') {
-      return <span className="text-xs text-red-600">Rejected</span>;
+      return <span className="text-xs text-zinc-500 line-through">Rejected</span>;
     }
     return <span className="text-xs text-zinc-400">—</span>;
   };
@@ -332,10 +334,10 @@ export const SamplesPage: React.FC = () => {
               type="button"
               disabled={busy}
               onClick={() => openApprove(item, 'approve')}
-              className="h-8 rounded-lg border-0 bg-emerald-700 px-2.5 text-xs font-semibold text-white disabled:opacity-50"
+              className="h-8 rounded-lg border-0 bg-zinc-950 px-2.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-50 cursor-pointer shadow-xs"
             >
               <span className="inline-flex items-center gap-1">
-                <Check className="h-4 w-4 shrink-0" aria-hidden />
+                <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 Approve
               </span>
             </button>
@@ -343,10 +345,10 @@ export const SamplesPage: React.FC = () => {
               type="button"
               disabled={busy}
               onClick={() => openApprove(item, 'reject')}
-              className="h-8 rounded-lg border border-red-200 bg-red-50 px-2.5 text-xs font-semibold text-red-700 disabled:opacity-50"
+              className="h-8 rounded-lg border border-zinc-300 bg-white px-2.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 cursor-pointer"
             >
               <span className="inline-flex items-center gap-1">
-                <X className="h-4 w-4 shrink-0" aria-hidden />
+                <X className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 Reject
               </span>
             </button>
@@ -357,10 +359,10 @@ export const SamplesPage: React.FC = () => {
             type="button"
             disabled={busy}
             onClick={() => openDispatch(item)}
-            className="h-8 rounded-lg border-0 bg-slate-950 px-2.5 text-xs font-semibold text-white disabled:opacity-50"
+            className="h-8 rounded-lg border-0 bg-zinc-950 px-2.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-50 cursor-pointer shadow-xs"
           >
             <span className="inline-flex items-center gap-1">
-              <Truck className="h-4 w-4 shrink-0" aria-hidden />
+              <Truck className="h-3.5 w-3.5 shrink-0" aria-hidden />
               Dispatch
             </span>
           </button>
@@ -370,10 +372,10 @@ export const SamplesPage: React.FC = () => {
             type="button"
             disabled={busy}
             onClick={() => void markDelivered(item)}
-            className="h-8 rounded-lg border-0 bg-emerald-700 px-2.5 text-xs font-semibold text-white disabled:opacity-50"
+            className="h-8 rounded-lg border-0 bg-zinc-950 px-2.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-50 cursor-pointer shadow-xs"
           >
             <span className="inline-flex items-center gap-1">
-              <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
               Delivered
             </span>
           </button>
@@ -383,17 +385,17 @@ export const SamplesPage: React.FC = () => {
             type="button"
             disabled={busy}
             onClick={() => openFeedback(item)}
-            className="h-8 rounded-lg border border-zinc-300 bg-white px-2.5 text-xs font-semibold text-zinc-700 disabled:opacity-50"
+            className="h-8 rounded-lg border border-zinc-300 bg-white px-2.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 cursor-pointer"
           >
             <span className="inline-flex items-center gap-1">
-              <Star className="h-4 w-4 shrink-0" aria-hidden />
+              <Star className="h-3.5 w-3.5 shrink-0" aria-hidden />
               {item.status === 'Completed' ? 'View Review' : 'Give Review'}
             </span>
           </button>
         )}
         <Link
           to={`/samples/${item._id}`}
-          className="h-8 inline-flex items-center rounded-lg border border-zinc-300 bg-white px-2.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 no-underline"
+          className="h-8 inline-flex items-center rounded-lg border border-zinc-300 bg-white px-2.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 no-underline cursor-pointer"
         >
           View Details
         </Link>
@@ -441,14 +443,14 @@ export const SamplesPage: React.FC = () => {
               )}
             </div>
           )}
-          {canWriteSamples && (
+          {canRequestSamples && (
             <Link
               to="/samples/create"
               data-tour="samples-create-btn"
-              className="inline-flex h-9 items-center gap-1 rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white no-underline hover:bg-slate-800"
+              className="inline-flex h-9 items-center gap-1 rounded-lg bg-zinc-950 px-4 text-sm font-semibold text-white no-underline hover:bg-zinc-800"
             >
               <AddIcon sx={{ fontSize: 18 }} />
-              New Sample
+              {isClient ? 'Request a sample' : 'New sample'}
             </Link>
           )}
           {!isClient && (
@@ -461,17 +463,17 @@ export const SamplesPage: React.FC = () => {
       </header>
 
       {error && !approveOpen && !dispatchOpen && !feedbackOpen && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
+        <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">{error}</div>
       )}
       {success && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+        <div className="rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">
           {success}
         </div>
       )}
 
       <div
         data-tour="samples-filters"
-        className="flex flex-col gap-3 rounded-xl border border-zinc-300 bg-white p-3 sm:flex-row sm:flex-wrap sm:items-end"
+        className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-3 sm:flex-row sm:flex-wrap sm:items-end"
       >
         <label className="min-w-[220px] flex-1">
           <span className="mb-1 block text-[11px] font-semibold uppercase text-zinc-500">Search</span>
@@ -497,27 +499,29 @@ export const SamplesPage: React.FC = () => {
             ))}
           </select>
         </label>
-        <button
-          type="button"
-          onClick={() => {
-            setSearch('');
-            setStatusFilter('');
-          }}
-          className="h-9 rounded-lg border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-700"
-        >
-          Reset
-        </button>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-700"
-        >
-          <RefreshIcon sx={{ fontSize: 18 }} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2 sm:ml-auto">
+          <button
+            type="button"
+            onClick={() => {
+              setSearch('');
+              setStatusFilter('');
+            }}
+            className="h-9 rounded-lg border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 cursor-pointer"
+          >
+            Reset
+          </button>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 cursor-pointer"
+          >
+            <RefreshIcon sx={{ fontSize: 18 }} />
+            Refresh
+          </button>
+        </div>
       </div>
 
-      <section data-tour="samples-table" className="overflow-hidden rounded-xl border border-zinc-300 bg-white">
+      <section data-tour="samples-table" className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
         {loading ? (
           <div className="p-10 text-center text-sm text-zinc-500">Loading samples…</div>
         ) : items.length === 0 ? (
@@ -547,7 +551,7 @@ export const SamplesPage: React.FC = () => {
                     <td className="px-4 py-3">
                       <Link
                         to={`/samples/${item._id}`}
-                        className="font-semibold text-zinc-950 hover:text-blue-600 hover:underline inline-block"
+                        className="font-semibold text-zinc-950 hover:underline inline-block cursor-pointer"
                       >
                         {item.sampleNumber}
                       </Link>
@@ -576,7 +580,7 @@ export const SamplesPage: React.FC = () => {
                         {item.status}
                       </span>
                       {item.rejectionReason && (
-                        <div className="mt-1 max-w-[180px] text-[11px] text-red-600">
+                        <div className="mt-1 max-w-[180px] text-[11px] text-zinc-600 font-medium">
                           {item.rejectionReason}
                         </div>
                       )}
@@ -649,12 +653,12 @@ export const SamplesPage: React.FC = () => {
             </div>
             <form onSubmit={submitApprove} className="space-y-4 p-5">
               {error && approveOpen && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">
                   {error}
                 </div>
               )}
               {approveAction === 'approve' ? (
-                <p className="m-0 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
+                <p className="m-0 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-800">
                   Confirm Sales Manager approval for this sample request. The team can prepare and dispatch it after approval.
                 </p>
               ) : (
@@ -676,14 +680,14 @@ export const SamplesPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setApproveOpen(false)}
-                  className="h-9 rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-700"
+                  className="h-9 rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="h-9 rounded-lg border-0 bg-slate-950 px-4 text-sm font-semibold text-white disabled:opacity-50"
+                  className="h-9 rounded-lg border-0 bg-zinc-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-zinc-800 cursor-pointer disabled:opacity-50"
                 >
                   {saving ? 'Saving…' : approveAction === 'approve' ? 'Confirm Approve' : 'Confirm Reject'}
                 </button>
@@ -711,7 +715,7 @@ export const SamplesPage: React.FC = () => {
             </div>
             <form onSubmit={submitDispatch} className="space-y-4 p-5">
               {error && dispatchOpen && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">
                   {error}
                 </div>
               )}
@@ -762,14 +766,14 @@ export const SamplesPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setDispatchOpen(false)}
-                  className="h-9 rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-700"
+                  className="h-9 rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="h-9 rounded-lg border-0 bg-slate-950 px-4 text-sm font-semibold text-white disabled:opacity-50"
+                  className="h-9 rounded-lg border-0 bg-zinc-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-zinc-800 cursor-pointer disabled:opacity-50"
                 >
                   {saving ? 'Dispatching…' : 'Submit Dispatch'}
                 </button>
@@ -790,14 +794,14 @@ export const SamplesPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setFeedbackOpen(false)}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border-0 bg-zinc-100 text-zinc-600"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border-0 bg-zinc-100 text-zinc-600 hover:bg-zinc-200 cursor-pointer"
               >
                 <CloseIcon sx={{ fontSize: 18 }} />
               </button>
             </div>
             <form onSubmit={submitFeedback} className="space-y-4 p-5">
               {error && feedbackOpen && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">
                   {error}
                 </div>
               )}
@@ -884,14 +888,14 @@ export const SamplesPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setFeedbackOpen(false)}
-                  className="h-9 rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-700"
+                  className="h-9 rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="h-9 rounded-lg border-0 bg-slate-950 px-4 text-sm font-semibold text-white disabled:opacity-50"
+                  className="h-9 rounded-lg border-0 bg-zinc-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-zinc-800 cursor-pointer disabled:opacity-50"
                 >
                   {saving ? 'Submitting…' : 'Submit Review'}
                 </button>

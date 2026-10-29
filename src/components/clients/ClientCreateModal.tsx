@@ -6,6 +6,8 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { ClientCreateInput, ClientDuplicateCheckResult } from '../../types/clients';
 import { crmApi } from '../../services/api';
 import { AddLeadItemModal } from '../leads/AddLeadItemModal';
+import { PhoneNumberField } from '../common/PhoneNumberField';
+import { splitPhoneNumber, validateNationalNumber } from '../../utils/phoneCountryCodes';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^[+]?[\d\s().-]{7,20}$/;
@@ -132,8 +134,16 @@ export const ClientCreateModal: React.FC<ClientCreateModalProps> = ({
     if (email.trim() && !EMAIL_RE.test(email.trim())) {
       return 'Enter a valid company email address.';
     }
-    if (phone.trim() && !PHONE_RE.test(phone.trim())) {
-      return 'Enter a valid company phone number (7–20 digits).';
+    if (phone.trim()) {
+      const split = splitPhoneNumber(phone);
+      if (split.dial && split.national) {
+        const check = validateNationalNumber(split.dial, split.national);
+        if (check.state === 'invalid' || check.state === 'incomplete') {
+          return `Company phone: ${check.message}`;
+        }
+      } else if (!PHONE_RE.test(phone.trim())) {
+        return 'Enter a valid company phone number (7–20 digits).';
+      }
     }
     const site = normalizeWebsite(website);
     if (site && !URL_RE.test(site)) {
@@ -142,8 +152,16 @@ export const ClientCreateModal: React.FC<ClientCreateModalProps> = ({
     if (contactEmail.trim() && !EMAIL_RE.test(contactEmail.trim())) {
       return 'Enter a valid primary contact email.';
     }
-    if (contactPhone.trim() && !PHONE_RE.test(contactPhone.trim())) {
-      return 'Enter a valid primary contact phone.';
+    if (contactPhone.trim()) {
+      const split = splitPhoneNumber(contactPhone);
+      if (split.dial && split.national) {
+        const check = validateNationalNumber(split.dial, split.national);
+        if (check.state === 'invalid' || check.state === 'incomplete') {
+          return `Contact phone: ${check.message}`;
+        }
+      } else if (!PHONE_RE.test(contactPhone.trim())) {
+        return 'Enter a valid primary contact phone.';
+      }
     }
     return null;
   };
@@ -288,12 +306,11 @@ export const ClientCreateModal: React.FC<ClientCreateModalProps> = ({
               <label className="block text-[11px] font-semibold text-zinc-600 mb-1">
                 Phone Number
               </label>
-              <input
-                type="tel"
+              <PhoneNumberField
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+91 98765 43210"
-                className="w-full text-xs border border-zinc-300 rounded-lg px-3 py-2 bg-white text-zinc-900 outline-none focus:border-zinc-950"
+                onChange={setPhone}
+                inputClassName="w-full text-xs border border-zinc-300 rounded-lg px-3 py-2 bg-white text-zinc-900 outline-none focus:border-zinc-950"
+                placeholder="98765 43210"
               />
             </div>
 
@@ -436,12 +453,11 @@ export const ClientCreateModal: React.FC<ClientCreateModalProps> = ({
               <label className="block text-[11px] font-semibold text-zinc-600 mb-1">
                 Contact Phone
               </label>
-              <input
-                type="tel"
+              <PhoneNumberField
                 value={contactPhone}
-                onChange={(e) => setContactPhone(e.target.value)}
-                placeholder="+91 98765 43210"
-                className="w-full text-xs border border-zinc-300 rounded-lg px-3 py-2 bg-white text-zinc-900 outline-none focus:border-zinc-950"
+                onChange={setContactPhone}
+                inputClassName="w-full text-xs border border-zinc-300 rounded-lg px-3 py-2 bg-white text-zinc-900 outline-none focus:border-zinc-950"
+                placeholder="98765 43210"
               />
             </div>
           </div>

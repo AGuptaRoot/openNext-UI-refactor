@@ -19,6 +19,8 @@ import { CompanyDiscrepancyModal } from '../common/CompanyDiscrepancyModal';
 import { useCompanyDiscrepancyCheck } from '../../hooks/useCompanyDiscrepancyCheck';
 
 import { LeadLocationMap } from './LeadLocationMap';
+import { PhoneNumberField } from '../common/PhoneNumberField';
+import { splitPhoneNumber, validateNationalNumber } from '../../utils/phoneCountryCodes';
 
 import { useAuth } from '../../context/AuthContext';
 
@@ -353,6 +355,15 @@ export const LeadCreateModal: React.FC<LeadCreateModalProps> = ({
     if (!company.trim()) return 'Company Name is required';
 
     if (!email.trim() && !phone.trim()) return 'Either Email or Mobile Number is required';
+    if (phone.trim()) {
+      const split = splitPhoneNumber(phone);
+      if (split.dial && split.national) {
+        const check = validateNationalNumber(split.dial, split.national);
+        if (check.state === 'invalid' || check.state === 'incomplete') {
+          return `Mobile number: ${check.message}`;
+        }
+      }
+    }
 
     return null;
 
@@ -804,29 +815,15 @@ export const LeadCreateModal: React.FC<LeadCreateModalProps> = ({
 
 
             <div className="sm:col-span-4">
-
               <label className="block text-[11px] font-semibold text-zinc-600 mb-1">
-
                 Mobile Number *
-
               </label>
-
-              <input
-
-                type="tel"
-
-                required
-
+              <PhoneNumberField
                 value={phone}
-
-                onChange={(e) => setPhone(e.target.value)}
-
-                placeholder="+91 98765 43210"
-
-                className="w-full text-xs border border-zinc-300 rounded-lg px-3 py-2 bg-white text-zinc-900 outline-none focus:border-zinc-950"
-
+                onChange={setPhone}
+                placeholder="98765 43210"
+                inputClassName="w-full text-xs border border-zinc-300 rounded-lg px-3 py-2 bg-white text-zinc-900 outline-none focus:border-zinc-950"
               />
-
             </div>
 
           </div>

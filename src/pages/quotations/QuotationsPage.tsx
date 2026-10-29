@@ -12,6 +12,7 @@ import { useAuth } from '../../context/AuthContext';
 import { TourButton } from '../../ui/tour';
 import { useDialog } from '../../context/DialogContext';
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
+import { formatDocumentDateShort } from '../../utils/dateFormat';
 import { ListPager, type ListPaginationMeta } from '../../components/common/ListPager';
 import { FinancePdfScanModal } from '../../components/finance/FinancePdfScanModal';
 import { QUOTATION_STATUSES, type QuotationItem } from '../../types/quotations';
@@ -385,12 +386,10 @@ export const QuotationsPage: React.FC = () => {
                       {item.recipientName || item.clientName || item.customerName || item.customerLabel || '—'}
                     </td>
                     <td className="px-4 py-3 text-zinc-600">
-                      {item.issueDate ? new Date(item.issueDate).toLocaleDateString() : '—'}
+                      {formatDocumentDateShort(item.issueDate)}
                     </td>
                     <td className="px-4 py-3 text-zinc-600">
-                      {item.validTill || item.expiryDate
-                        ? new Date(item.validTill || item.expiryDate || '').toLocaleDateString()
-                        : '—'}
+                      {formatDocumentDateShort(item.validTill || item.expiryDate)}
                     </td>
                     <td className="px-4 py-3 font-semibold">
                       {formatFinanceMoney(item.grandTotal, item.currency)}
@@ -413,6 +412,15 @@ export const QuotationsPage: React.FC = () => {
                         >
                           Open
                         </button>
+                        {canWriteQuotes && !archived && item.status === 'Draft' && (
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/quotations/${item._id}/edit`)}
+                            className="h-7 px-2 text-[11px] font-semibold rounded-md border border-zinc-200 bg-white cursor-pointer hover:bg-zinc-100"
+                          >
+                            Edit
+                          </button>
+                        )}
                         {canWriteQuotes &&
                           (archived ? (
                             <button

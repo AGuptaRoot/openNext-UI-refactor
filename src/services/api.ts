@@ -15,7 +15,14 @@ import {
   LeadImportPreviewResult,
   LeadImportExecuteResult,
   LeadOcrExtractResult,
+  LeadNote,
+  ActivityLocation,
+  ActivityLocationLog,
+  OpportunityItemDraft,
+  ActivityReminderFeed,
+  LeadPortalAccessState,
 } from '../types/leads';
+import type { ActivityLocationReport } from '../types/reports';
 import { parseCsvString } from '../utils/csvParser';
 import { pickImportField, LEAD_IMPORT_ALIASES, CLIENT_IMPORT_ALIASES } from '../utils/importFields';
 import { displayUserLabel } from '../utils/displayLabels';
@@ -96,6 +103,10 @@ import {
   ClientDuplicateCheckResult,
   ClientImportPreviewResult,
   ClientImportExecuteResult,
+  ClientExtensionData,
+  ClientPassport,
+  ClientPassportList,
+  ClientPassportMutation,
   DEFAULT_CLIENT_CATEGORIES,
   DEFAULT_CLIENT_TAGS,
   DEFAULT_CLIENT_STATUSES,
@@ -107,6 +118,7 @@ import {
   OpportunitySummary,
   OpportunityPaginationMeta,
   computeOpportunityFinancials,
+  isOpportunityWonStage,
   stageProbability,
   DEFAULT_OPPORTUNITY_STAGE_NAMES,
   DEFAULT_OPPORTUNITY_STAGE_PROBABILITIES,
@@ -167,6 +179,7 @@ import type {
   SalesOrderQueryParams,
   SalesOrderReturnInput,
   SalesOrderShipmentInput,
+  SalesOrderShipmentUpdateInput,
   SalesOrderStatus,
 } from '../types/salesOrders';
 import { remainingShipQty } from '../types/salesOrders';
@@ -287,6 +300,8 @@ import {
   SampleFeedbackInput,
   SampleItem,
   SampleQueryParams,
+  SampleUpdateInput,
+  canEditSampleRequest,
   nextSampleNumber,
   normalizeSample,
 } from '../types/samples';
@@ -463,6 +478,21 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<ApiR
   }
 
   return payload;
+}
+
+/**
+ * Identifies which extension record slot a client-detail request targets.
+ * Both values come from the extension's host-slots declaration; the server
+ * falls back to crm-travel / passports when they are omitted.
+ */
+export type ClientRecordSlot = { extensionId?: string; tabId?: string };
+
+function clientSlotQuery(slot: ClientRecordSlot = {}): string {
+  const params = new URLSearchParams();
+  if (slot.extensionId) params.set('extensionId', slot.extensionId);
+  if (slot.tabId) params.set('tabId', slot.tabId);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
 }
 
 /** Payload returned by CRM list export endpoints (raw CSV/JSON file body). */
@@ -1185,6 +1215,7 @@ const DEFAULT_ADMIN_SETTINGS: CrmSettings = {
   lead_types: [...LEAD_TYPES],
   lead_priorities: [...LEAD_PRIORITIES],
   lead_tags: [...LEAD_TAGS],
+  activity_types: ['Call', 'Meeting', 'Follow up', 'Other'],
   pipeline_stages: [...PIPELINE_STAGES],
   opportunity_stages: [...DEFAULT_OPPORTUNITY_STAGE_NAMES],
   opportunity_stage_probabilities: { ...DEFAULT_OPPORTUNITY_STAGE_PROBABILITIES },
@@ -1205,6 +1236,12 @@ const DEFAULT_ADMIN_SETTINGS: CrmSettings = {
     required: field.required,
   })),
   project_custom_fields: [],
+  qualification_prompt_on_requirement_save: false,
+  proforma_advance_enabled: false,
+  quotation_auto_accept_on_payment: false,
+  auto_convert_proforma_on_delivery: false,
+  proforma_prefix: 'PI-',
+  default_advance_percent: 30,
   qualification_match: { ...DEFAULT_QUALIFICATION_MATCH_CATALOG },
   travel_locations: { ...DEFAULT_TRAVEL_LOCATIONS },
   travel_services: [...DEFAULT_TRAVEL_SERVICES],
@@ -1226,6 +1263,11 @@ function normalizeCrmSettings(raw?: Partial<CrmSettings> | null): CrmSettings {
       Array.isArray(raw?.office_addresses)
         ? raw.office_addresses.map((a) => String(a || '').trim()).filter(Boolean)
         : DEFAULT_ADMIN_SETTINGS.office_addresses || [],
+    // Never let this fall empty: the Leads settings tab refuses to save an
+    // empty required list, and an older server may not know the key at all.
+    activity_types: raw?.activity_types?.length
+      ? raw.activity_types.map((t) => String(t || '').trim()).filter(Boolean)
+      : DEFAULT_ADMIN_SETTINGS.activity_types,
     sample_units_of_measure:
       raw?.sample_units_of_measure?.length
         ? raw.sample_units_of_measure.map((u) => String(u || '').trim()).filter(Boolean)
@@ -1318,6 +1360,16 @@ function normalizeCrmSettings(raw?: Partial<CrmSettings> | null): CrmSettings {
     project_custom_fields: normalizeCustomFields(
       raw?.project_custom_fields ?? DEFAULT_ADMIN_SETTINGS.project_custom_fields
     ),
+    qualification_prompt_on_requirement_save: Boolean(
+      raw?.qualification_prompt_on_requirement_save
+    ),
+    proforma_advance_enabled: Boolean(raw?.proforma_advance_enabled),
+    quotation_auto_accept_on_payment: Boolean(raw?.quotation_auto_accept_on_payment),
+    auto_convert_proforma_on_delivery: Boolean(raw?.auto_convert_proforma_on_delivery),
+    proforma_prefix: String(raw?.proforma_prefix || 'PI-'),
+    default_advance_percent: Number.isFinite(Number(raw?.default_advance_percent))
+      ? Number(raw?.default_advance_percent)
+      : 30,
     qualification_match: {
       projectSoftwareTypes:
         raw?.qualification_match?.projectSoftwareTypes?.length
@@ -4388,6 +4440,9 @@ export const crmApi = {
         const status =
           pickImportField(row, [...LEAD_IMPORT_ALIASES.status]) ||
           String(body.options?.defaultStatus || 'New').trim();
+        const requestType =
+          pickImportField(row, [...LEAD_IMPORT_ALIASES.requestType]) ||
+          String(body.options?.defaultRequestType || body.options?.defaultRequiredType || '').trim();
 
         const errors: string[] = [];
         const warnings: string[] = [];
@@ -4401,6 +4456,7 @@ export const crmApi = {
           errors.push('Invalid email address format');
         }
         if (!phone) errors.push('Phone is required');
+        if (!requestType) errors.push('Required Type is required');
 
         if (email && existingLeads.some((l) => (l.email || '').toLowerCase() === email)) {
           warnings.push(`Lead with email "${email}" already exists in database`);
@@ -4418,6 +4474,7 @@ export const crmApi = {
           stage,
           source,
           status,
+          requestType,
           valid,
           errors,
           warnings,
@@ -4430,6 +4487,7 @@ export const crmApi = {
             stage,
             source,
             status,
+            requestType,
             value: Number(pickImportField(row, [...LEAD_IMPORT_ALIASES.value]) || 0) || 0,
             city: pickImportField(row, [...LEAD_IMPORT_ALIASES.city]),
             state: pickImportField(row, [...LEAD_IMPORT_ALIASES.state]),
@@ -4498,6 +4556,7 @@ export const crmApi = {
             stage: row.stage || 'New',
             status: row.status || 'New',
             source: row.source || 'Website',
+            requestType: (row.data as Record<string, any>)?.requestType || row.requestType || 'General',
             assignedTo: 'dev-admin',
             value: Number(raw.value || 0),
             address: address || undefined,
@@ -4571,6 +4630,16 @@ export const crmApi = {
     }
   },
 
+  /** Tenant-configured lead activity types (Settings → Leads & Funnels). */
+  getActivityTypes: async (): Promise<ApiResponse<string[]>> => {
+    try {
+      return await request<string[]>('/leads/activity-types', { method: 'GET' });
+    } catch (error) {
+      rethrowUnlessMockFallback(error);
+      return { success: true, data: ['Call', 'Meeting', 'Follow up', 'Other'] };
+    }
+  },
+
   getLeadCustomFields: async (): Promise<ApiResponse<LeadCustomFieldDef[]>> => {
     try {
       return await request<LeadCustomFieldDef[]>('/leads/custom-fields', { method: 'GET' });
@@ -4626,12 +4695,30 @@ export const crmApi = {
     }
   },
 
-  getPipeline: async (): Promise<ApiResponse<{ pipeline_stages: string[] }>> => {
+  /**
+   * Lead pipeline stages, plus the lead-side flags a sales user needs but
+   * cannot read from /settings (that route is settings-manager only).
+   */
+  getPipeline: async (): Promise<
+    ApiResponse<{
+      pipeline_stages: string[];
+      qualification_prompt_on_requirement_save?: boolean;
+    }>
+  > => {
     try {
-      return await request<{ pipeline_stages: string[] }>('/settings/pipeline', { method: 'GET' });
+      return await request<{
+        pipeline_stages: string[];
+        qualification_prompt_on_requirement_save?: boolean;
+      }>('/settings/pipeline', { method: 'GET' });
     } catch (error) {
       rethrowUnlessMockFallback(error);
-      return { success: true, data: { pipeline_stages: PIPELINE_STAGES } };
+      return {
+        success: true,
+        data: {
+          pipeline_stages: PIPELINE_STAGES,
+          qualification_prompt_on_requirement_save: false,
+        },
+      };
     }
   },
 
@@ -5241,6 +5328,111 @@ export const crmApi = {
     }
   },
 
+  /**
+   * Scheduled activities that are missed or about to start.
+   *
+   * `scope: 'team'` is a request, not a guarantee — the server downgrades it to
+   * the caller's own rows for a sales representative.
+   */
+  getActivityReminders: async (
+    options: { scope?: 'mine' | 'team'; windowMinutes?: number } = {}
+  ): Promise<ApiResponse<ActivityReminderFeed>> => {
+    const params = new URLSearchParams();
+    if (options.scope) params.set('scope', options.scope);
+    if (options.windowMinutes) params.set('windowMinutes', String(options.windowMinutes));
+    const query = params.toString();
+    try {
+      return await request<ActivityReminderFeed>(
+        `/lead-activities/reminders${query ? `?${query}` : ''}`,
+        { method: 'GET' }
+      );
+    } catch (error) {
+      rethrowUnlessMockFallback(error);
+      return {
+        success: true,
+        data: {
+          scope: options.scope === 'team' ? 'team' : 'mine',
+          windowMinutes: options.windowMinutes || 60,
+          now: new Date().toISOString(),
+          missed: [],
+          dueSoon: [],
+        },
+      };
+    }
+  },
+
+  /** Portal credentials already issued for a lead, plus why a new one is blocked. */
+  getLeadPortalAccess: async (
+    leadId: string
+  ): Promise<ApiResponse<LeadPortalAccessState>> => {
+    try {
+      return await request<LeadPortalAccessState>(
+        `/leads/${encodeURIComponent(leadId)}/portal-access`,
+        { method: 'GET' }
+      );
+    } catch (error) {
+      rethrowUnlessMockFallback(error);
+      return { success: true, data: { access: [], blockedReason: '' } };
+    }
+  },
+
+  /** Withdraw a lead's portal access; closes its deals to the portal. */
+  revokeLeadPortalAccess: async (
+    leadId: string,
+    accessId: string
+  ): Promise<ApiResponse<{ accessId: string; portalClosedOpportunities: number }>> => {
+    return request<{ accessId: string; portalClosedOpportunities: number }>(
+      `/leads/${encodeURIComponent(leadId)}/portal-access/${encodeURIComponent(accessId)}`,
+      { method: 'DELETE' }
+    );
+  },
+
+  /**
+   * Issue portal credentials straight from the lead and email them over.
+   * Never converts the lead or moves its stage.
+   */
+  inviteLeadPortalAccess: async (
+    leadId: string,
+    body: { email: string; username: string; password: string; phone?: string }
+  ): Promise<ApiResponse<ClientPortalAccess & { emailSent?: boolean; emailError?: string }>> => {
+    return request<ClientPortalAccess & { emailSent?: boolean; emailError?: string }>(
+      `/leads/${encodeURIComponent(leadId)}/portal-access/invite`,
+      { method: 'POST', body: JSON.stringify(body) }
+    );
+  },
+
+  approveLeadPortalAccess: async (
+    leadId: string,
+    accessId: string
+  ): Promise<ApiResponse<ClientPortalAccess & { emailSent?: boolean }>> => {
+    return request<ClientPortalAccess & { emailSent?: boolean }>(
+      `/leads/${encodeURIComponent(leadId)}/portal-access/${encodeURIComponent(accessId)}/approve`,
+      { method: 'POST' }
+    );
+  },
+
+  rejectLeadPortalAccess: async (
+    leadId: string,
+    accessId: string,
+    body: { reason: string }
+  ): Promise<ApiResponse<ClientPortalAccess>> => {
+    return request<ClientPortalAccess>(
+      `/leads/${encodeURIComponent(leadId)}/portal-access/${encodeURIComponent(accessId)}/reject`,
+      { method: 'POST', body: JSON.stringify(body) }
+    );
+  },
+
+  resubmitLeadPortalAccess: async (
+    leadId: string,
+    accessId: string,
+    body: { username?: string; password?: string; phone?: string }
+  ): Promise<ApiResponse<ClientPortalAccess>> => {
+    return request<ClientPortalAccess>(
+      `/leads/${encodeURIComponent(leadId)}/portal-access/${encodeURIComponent(accessId)}/resubmit`,
+      { method: 'POST', body: JSON.stringify(body) }
+    );
+  },
+
   getLeadEvents: async (id: string): Promise<ApiResponse<LeadEvent[]>> => {
     try {
       return await request<LeadEvent[]>(`/leads/${id}/events`, { method: 'GET' });
@@ -5312,12 +5504,180 @@ export const crmApi = {
     }
   },
 
-  completeLeadEvent: async (id: string, eventId: string): Promise<ApiResponse<{ completed: boolean }>> => {
+  acceptLeadEvent: async (
+    id: string,
+    eventId: string,
+    body: { acceptedLocation?: ActivityLocation | null } = {}
+  ): Promise<ApiResponse<LeadEvent>> => {
     try {
-      return await request(`/leads/${id}/events/${eventId}/complete`, { method: 'POST' });
+      return await request(`/leads/${encodeURIComponent(id)}/events/${encodeURIComponent(eventId)}/accept`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
     } catch (error) {
       rethrowUnlessMockFallback(error);
-      return { success: true, data: { completed: true } };
+      return {
+        success: true,
+        data: { _id: eventId, leadId: id, title: '', status: 'Accepted', acceptedLocation: body.acceptedLocation } as LeadEvent,
+      };
+    }
+  },
+
+  completeLeadEvent: async (
+    id: string,
+    eventId: string,
+    body: { completedLocation?: ActivityLocation | null } = {}
+  ): Promise<ApiResponse<LeadEvent>> => {
+    try {
+      return await request(`/leads/${id}/events/${eventId}/complete`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      rethrowUnlessMockFallback(error);
+      return { success: true, data: { _id: eventId, leadId: id, title: '', status: 'Completed' } as LeadEvent };
+    }
+  },
+
+  /** "Interested" on a commercial-requirement activity → create the deal. */
+    getActivity: async (activityId: string): Promise<ApiResponse<LeadEvent>> => {
+    try {
+      return await request<LeadEvent>(`/activities/${encodeURIComponent(activityId)}`);
+    } catch (error: any) {
+      if (error?.status === 404 || error?.status === 405) {
+        try {
+          return await request<LeadEvent>(`/api/activities/${encodeURIComponent(activityId)}`);
+        } catch {
+          // continue
+        }
+      }
+      rethrowUnlessMockFallback(error);
+      return {
+        success: true,
+        data: {
+          _id: activityId,
+          title: 'Activity',
+          eventType: 'Meeting',
+          status: 'Open',
+          eventDate: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          description: '',
+        } as LeadEvent,
+      };
+    }
+  },
+
+  getActivityLocationLogs: async (activityId: string): Promise<ApiResponse<ActivityLocationLog[]>> => {
+    try {
+      return await request<ActivityLocationLog[]>(`/activities/${encodeURIComponent(activityId)}/location-logs`);
+    } catch (error: any) {
+      if (error?.status === 404 || error?.status === 405) {
+        try {
+          return await request<ActivityLocationLog[]>(`/api/activities/${encodeURIComponent(activityId)}/location-logs`);
+        } catch {
+          // continue
+        }
+      }
+      rethrowUnlessMockFallback(error);
+      return { success: true, data: [] };
+    }
+  },
+
+  logActivityLocation: async (
+    activityId: string,
+    payload: { latitude: number; longitude: number; accuracy?: number | null; address?: string }
+  ): Promise<ApiResponse<ActivityLocationLog>> => {
+    try {
+      return await request<ActivityLocationLog>(`/activities/${encodeURIComponent(activityId)}/location-logs`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    } catch (error: any) {
+      if (error?.status === 404 || error?.status === 405) {
+        try {
+          return await request<ActivityLocationLog>(`/api/activities/${encodeURIComponent(activityId)}/location-logs`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
+        } catch {
+          // continue
+        }
+      }
+      rethrowUnlessMockFallback(error);
+      return {
+        success: true,
+        data: {
+          activityId,
+          salesRepId: 'current',
+          latitude: payload.latitude,
+          longitude: payload.longitude,
+          accuracy: payload.accuracy,
+          address: payload.address,
+          loggedAt: new Date().toISOString(),
+        },
+      };
+    }
+  },
+
+  convertLeadEventToOpportunity: async (
+    id: string,
+    eventId: string,
+    body: {
+      items: OpportunityItemDraft[];
+      title?: string;
+      estimatedDealValue?: number;
+      expectedCloseDate?: string;
+      closedAt?: string;
+    }
+  ): Promise<ApiResponse<{ opportunity: OpportunityItem; event: LeadEvent }>> => {
+    try {
+      return await request(`/leads/${id}/events/${eventId}/convert-opportunity`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      rethrowUnlessMockFallback(error);
+      throw error;
+    }
+  },
+
+  /** Item name / description pairs already used on other opportunities. */
+  getLeadEventItemSuggestions: async (
+    id: string,
+    query = ''
+  ): Promise<ApiResponse<OpportunityItemDraft[]>> => {
+    try {
+      const qs = query ? `?q=${encodeURIComponent(query)}` : '';
+      return await request<OpportunityItemDraft[]>(`/leads/${id}/events/item-suggestions${qs}`, {
+        method: 'GET',
+      });
+    } catch (error) {
+      rethrowUnlessMockFallback(error);
+      return { success: true, data: [] };
+    }
+  },
+
+  getActivityLocationReport: async (
+    params: Record<string, string | number | undefined> = {}
+  ): Promise<ApiResponse<ActivityLocationReport>> => {
+    try {
+      const qs = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== '') qs.set(key, String(value));
+      });
+      const suffix = qs.toString() ? `?${qs.toString()}` : '';
+      return await request<ActivityLocationReport>(`/reports/activity-location${suffix}`, {
+        method: 'GET',
+      });
+    } catch (error) {
+      rethrowUnlessMockFallback(error);
+      return {
+        success: true,
+        data: {
+          rows: [],
+          summary: { total: 0, withLocation: 0, withoutLocation: 0, reps: 0, leads: 0 },
+        },
+      };
     }
   },
 
@@ -5328,6 +5688,40 @@ export const crmApi = {
       rethrowUnlessMockFallback(error);
       return { success: true, data: { deleted: true } };
     }
+  },
+
+  getLeadNotes: async (id: string): Promise<ApiResponse<LeadNote[]>> => {
+    try {
+      return await request<LeadNote[]>(`/leads/${id}/notes`, { method: 'GET' });
+    } catch (error) {
+      rethrowUnlessMockFallback(error);
+      return { success: true, data: [] };
+    }
+  },
+
+  createLeadNote: async (id: string, content: string): Promise<ApiResponse<LeadNote>> => {
+    return request<LeadNote>(`/leads/${id}/notes`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+  },
+
+  updateLeadNote: async (
+    id: string,
+    noteId: string,
+    content: string
+  ): Promise<ApiResponse<LeadNote>> => {
+    return request<LeadNote>(`/leads/${id}/notes/${noteId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    });
+  },
+
+  deleteLeadNote: async (
+    id: string,
+    noteId: string
+  ): Promise<ApiResponse<{ deleted: boolean }>> => {
+    return request(`/leads/${id}/notes/${noteId}`, { method: 'DELETE' });
   },
 
   getLeadFollowUps: async (id: string): Promise<ApiResponse<LeadFollowUp[]>> => {
@@ -5497,7 +5891,12 @@ export const crmApi = {
 
   getAuditByRecord: async (recordType: string, recordId: string): Promise<ApiResponse<LeadAuditEntry[]>> => {
     try {
-      return await request<LeadAuditEntry[]>(`/audit?recordType=${recordType}&recordId=${recordId}`, { method: 'GET' });
+      // GET /audit/:module/:recordId — the plain /audit feed ignores record
+      // filters and would return the whole tenant's log.
+      return await request<LeadAuditEntry[]>(
+        `/audit/${encodeURIComponent(recordType)}/${encodeURIComponent(recordId)}`,
+        { method: 'GET' }
+      );
     } catch (error) {
       rethrowUnlessMockFallback(error);
       return {
@@ -7101,6 +7500,92 @@ export const crmApi = {
     await downloadAttachment(url, fileName);
   },
 
+  /**
+   * Read-through extension context for a client: the source lead's extension
+   * bag plus the resolved request type. Gated on `crm.clients.read`, so the
+   * Travel Requirement tab works without lead permissions.
+   */
+  getClientExtensionData: async (id: string): Promise<ApiResponse<ClientExtensionData>> =>
+    request<ClientExtensionData>(`/clients/${encodeURIComponent(id)}/extension-data`, {
+      method: 'GET',
+    }),
+
+  listClientPassports: async (
+    id: string,
+    slot: ClientRecordSlot = {}
+  ): Promise<ApiResponse<ClientPassportList>> =>
+    request<ClientPassportList>(
+      `/clients/${encodeURIComponent(id)}/passports${clientSlotQuery(slot)}`,
+      { method: 'GET' }
+    ),
+
+  /**
+   * Upload one passport image. The server enforces the traveller cap before
+   * storing the file, runs OCR, and appends the record.
+   */
+  uploadClientPassport: async (
+    id: string,
+    file: File,
+    slot: ClientRecordSlot = {}
+  ): Promise<ApiResponse<ClientPassportMutation>> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch(
+      `${API_BASE}/clients/${encodeURIComponent(id)}/passports${clientSlotQuery(slot)}`,
+      { method: 'POST', body: formData, credentials: 'include' }
+    );
+    const payload = await res
+      .json()
+      .catch(() => ({ success: false, error: 'Passport upload failed' }));
+
+    if (!res.ok || !payload.success) {
+      throw new ApiError(
+        payload.error || payload.message || 'Passport upload failed',
+        res.status || 500,
+        typeof payload.code === 'string' ? payload.code : undefined
+      );
+    }
+    return payload as ApiResponse<ClientPassportMutation>;
+  },
+
+  updateClientPassport: async (
+    id: string,
+    passportId: string,
+    body: Partial<
+      Pick<
+        ClientPassport,
+        'fullname' | 'passport_number' | 'Date_of_issue' | 'Date_of_expiry'
+      >
+    >,
+    slot: ClientRecordSlot = {}
+  ): Promise<ApiResponse<ClientPassportMutation>> =>
+    request<ClientPassportMutation>(
+      `/clients/${encodeURIComponent(id)}/passports/${encodeURIComponent(passportId)}${clientSlotQuery(slot)}`,
+      { method: 'PUT', body: JSON.stringify(body) }
+    ),
+
+  deleteClientPassport: async (
+    id: string,
+    passportId: string,
+    slot: ClientRecordSlot = {}
+  ): Promise<ApiResponse<ClientPassportMutation>> =>
+    request<ClientPassportMutation>(
+      `/clients/${encodeURIComponent(id)}/passports/${encodeURIComponent(passportId)}${clientSlotQuery(slot)}`,
+      { method: 'DELETE' }
+    ),
+
+  /** Re-run OCR on an already stored scan (e.g. after the Groq key is set). */
+  rescanClientPassport: async (
+    id: string,
+    passportId: string,
+    slot: ClientRecordSlot = {}
+  ): Promise<ApiResponse<ClientPassportMutation>> =>
+    request<ClientPassportMutation>(
+      `/clients/${encodeURIComponent(id)}/passports/${encodeURIComponent(passportId)}/scan${clientSlotQuery(slot)}`,
+      { method: 'POST' }
+    ),
+
   getClientPortalAccess: async (id: string): Promise<ApiResponse<ClientPortalAccess[]>> => {
     try {
       return await request<ClientPortalAccess[]>(
@@ -7278,6 +7763,47 @@ export const crmApi = {
       saveLocalClientMap(CLIENT_PORTAL_KEY, map);
       return { success: true, data: { deleted: true } };
     }
+  },
+
+  listPendingPortalApprovals: async (): Promise<ApiResponse<ClientPortalAccess[]>> => {
+    try {
+      return await request<ClientPortalAccess[]>('/portal-access/pending', { method: 'GET' });
+    } catch (error) {
+      rethrowUnlessMockFallback(error);
+      return { success: true, data: [] };
+    }
+  },
+
+  approveClientPortalAccess: async (
+    clientId: string,
+    accessId: string
+  ): Promise<ApiResponse<ClientPortalAccess & { emailSent?: boolean }>> => {
+    return request<ClientPortalAccess & { emailSent?: boolean }>(
+      `/clients/${encodeURIComponent(clientId)}/portal-access/${encodeURIComponent(accessId)}/approve`,
+      { method: 'POST' }
+    );
+  },
+
+  rejectClientPortalAccess: async (
+    clientId: string,
+    accessId: string,
+    body: { reason: string }
+  ): Promise<ApiResponse<ClientPortalAccess>> => {
+    return request<ClientPortalAccess>(
+      `/clients/${encodeURIComponent(clientId)}/portal-access/${encodeURIComponent(accessId)}/reject`,
+      { method: 'POST', body: JSON.stringify(body) }
+    );
+  },
+
+  resubmitClientPortalAccess: async (
+    clientId: string,
+    accessId: string,
+    body: { username?: string; password?: string; phone?: string }
+  ): Promise<ApiResponse<ClientPortalAccess>> => {
+    return request<ClientPortalAccess>(
+      `/clients/${encodeURIComponent(clientId)}/portal-access/${encodeURIComponent(accessId)}/resubmit`,
+      { method: 'POST', body: JSON.stringify(body) }
+    );
   },
 
   getClientHealthScore: async (clientId: string): Promise<ApiResponse<ClientHealthScore>> => {
@@ -7486,8 +8012,8 @@ export const crmApi = {
     } catch (error) {
       rethrowUnlessMockFallback(error);
       return mutateLocalQuotation(id, (current) => {
-        if (['Accepted', 'Converted'].includes(String(current.status))) {
-          throw new ApiError('Accepted/converted quotations are locked. Create a revision instead.', 400);
+        if (String(current.status) !== 'Draft') {
+          throw new ApiError(`Only quotations in Draft status can be edited. Current status is "${current.status}". Please create a revision instead.`, 409);
         }
         const merged = { ...current, ...body };
         if (body.lineItems) {
@@ -7562,6 +8088,24 @@ export const crmApi = {
               updatedAt: new Date().toISOString(),
             };
             saveLocalOpportunities(items);
+          }
+        }
+      }
+      const oppLeadId = opportunityId ? getLocalOpportunitiesRaw().find((o) => o._id === opportunityId)?.leadId : null;
+      const targetLeadId = String(quote?.leadId || oppLeadId || '').trim();
+      if (targetLeadId) {
+        const localLeads = getLocalLeads();
+        const lIdx = localLeads.findIndex((l) => l._id === targetLeadId && !l.isDeleted);
+        if (lIdx >= 0) {
+          const lCur = String(localLeads[lIdx].stage || '').trim().toLowerCase();
+          if (lCur !== 'won' && lCur !== 'lost' && !localLeads[lIdx].convertedClientId) {
+            localLeads[lIdx] = {
+              ...localLeads[lIdx],
+              stage: 'Proposal Sent',
+              stageUpdatedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            saveLocalLeads(localLeads);
           }
         }
       }
@@ -7681,13 +8225,28 @@ export const crmApi = {
       rethrowUnlessMockFallback(error);
       if (!body.reason?.trim()) throw new ApiError('Revision reason is required', 400);
       const parent = getLocalQuotationOrThrow(id);
+      if (['Accepted', 'Converted'].includes(String(parent.status))) {
+        throw new ApiError('Accepted quotations are permanently locked and cannot be revised.', 409);
+      }
+      if (String(parent.status) === 'Draft') {
+        throw new ApiError('Draft quotations can be edited directly and cannot be revised.', 409);
+      }
       const items = getLocalFinanceList(QUOTATIONS_STORE_KEY, INITIAL_FINANCE_QUOTATIONS);
       const parentIndex = items.findIndex((entry) => entry._id === id);
       if (parentIndex >= 0) {
         items[parentIndex] = { ...items[parentIndex], isLatestVersion: false };
       }
-      const revNo = Number(parent.revisionNumber || 0) + 1;
-      const baseNo = String(parent.quotationNumber || 'QT').replace(/-R\d+$/, '');
+      const rootId = parent.revisionOf || parent._id;
+      const tree = items.filter((entry) => entry._id === rootId || entry.revisionOf === rootId);
+      const maxRev = Math.max(
+        0,
+        ...(tree || []).map((entry) => {
+          const rec = entry as unknown as Record<string, unknown>;
+          return Number(entry.revisionNumber || (rec.version ? Number(rec.version) - 1 : 0)) || 0;
+        })
+      );
+      const revNo = maxRev + 1;
+      const baseNo = String(parent.quotationNumber || parent.quotationNo || 'QT').replace(/-R\d+$/i, '');
       const lineItems = body.lineItems || parent.lineItems;
       const totals = calculateFinanceTotals({
         lines: lineItems,
@@ -7787,6 +8346,30 @@ export const crmApi = {
       }));
       return { success: true, data: { portalToken: token, portalUrl: `#/quotations/public/${token}` } };
     }
+  },
+
+  /*
+   * Proforma & advance payment on a quotation.
+   *
+   * These need the live backend and a configured gateway, so there is no
+   * demo-mode fallback: a mocked payment would be a lie about money.
+   */
+  createQuotationRazorpayOrder: async (
+    id: string,
+    body: { currency?: string } = {}
+  ): Promise<ApiResponse<RazorpayOrderData>> =>
+    request<RazorpayOrderData>(`/quotations/${encodeURIComponent(id)}/razorpay/order`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** Raise (or fetch) the payment request for a quotation, without paying it. */
+  createQuotationProforma: async (id: string): Promise<ApiResponse<InvoiceItem>> => {
+    const response = await request<InvoiceItem>(
+      `/quotations/${encodeURIComponent(id)}/proforma`,
+      { method: 'POST', body: JSON.stringify({}) }
+    );
+    return { ...response, data: normalizeInvoiceRecord(response.data) };
   },
 
   convertQuotationToInvoice: async (id: string): Promise<ApiResponse<InvoiceItem>> => {
@@ -8110,6 +8693,8 @@ export const crmApi = {
     query.set('limit', String(limit));
     if (params.search) query.set('search', params.search);
     if (params.status) query.set('status', params.status);
+    // Omitted means tax invoices only; 'proforma' and 'all' are opt-in.
+    if (params.documentType) query.set('documentType', params.documentType);
     if (params.ids) query.set('ids', params.ids);
     if (params.clientId) query.set('clientId', params.clientId);
     if (params.projectId) query.set('projectId', params.projectId);
@@ -8136,6 +8721,11 @@ export const crmApi = {
     } catch (error) {
       rethrowUnlessMockFallback(error);
       let items = getLocalFinanceList(INVOICES_STORE_KEY, INITIAL_FINANCE_INVOICES).map(normalizeInvoiceRecord);
+      if (params.documentType === 'proforma') {
+        items = items.filter((item) => item.documentType === 'proforma');
+      } else if (params.documentType !== 'all') {
+        items = items.filter((item) => (item.documentType || 'tax') === 'tax');
+      }
       if (params.search) {
         const term = params.search.toLowerCase();
         items = items.filter((item) =>
@@ -8564,6 +9154,28 @@ export const crmApi = {
         },
       };
     }
+  },
+
+  /**
+   * Turn a paid proforma into the tax invoice.
+   *
+   * Raised by hand: the tax invoice records the supply, so a human decides
+   * when the supply has happened.
+   */
+  convertProformaInvoice: async (
+    id: string
+  ): Promise<ApiResponse<{ invoice: InvoiceItem; movedPayments?: number }>> => {
+    const response = await request<{ invoice: InvoiceItem; movedPayments?: number }>(
+      `/invoices/${encodeURIComponent(id)}/convert-proforma`,
+      { method: 'POST', body: JSON.stringify({}) }
+    );
+    return {
+      ...response,
+      data: {
+        ...response.data,
+        invoice: normalizeInvoiceRecord(response.data?.invoice as InvoiceItem),
+      },
+    };
   },
 
   createPublicInvoiceRazorpayOrder: async (
@@ -9816,8 +10428,8 @@ export const crmApi = {
       });
     } catch (error) {
       rethrowUnlessMockFallback(error);
-      if (!body.courierName?.trim() || !body.trackingNumber?.trim()) {
-        throw new ApiError('Courier and tracking number are required', 400);
+      if (!body.courierName?.trim()) {
+        throw new ApiError('Courier is required', 400);
       }
       if (!body.items?.length) throw new ApiError('Select at least one item to ship', 400);
       const items = getLocalSalesOrders();
@@ -9850,7 +10462,7 @@ export const crmApi = {
         _id: `ship_${Date.now()}`,
         shipmentNumber,
         courierName: body.courierName.trim(),
-        trackingNumber: body.trackingNumber.trim(),
+        trackingNumber: (body.trackingNumber || '').trim(),
         shippingState: order.shippingState,
         weightKg: Number(body.weightKg || 1),
         shippedItems,
@@ -9865,7 +10477,7 @@ export const crmApi = {
         lineItems,
         shipments: [...(order.shipments || []), shipment],
         courierName: body.courierName.trim(),
-        trackingNumber: body.trackingNumber.trim(),
+        trackingNumber: (body.trackingNumber || '').trim(),
         dispatchedAt: order.dispatchedAt || now,
         inventoryDeducted: true,
         inventoryDeductedAt: order.inventoryDeductedAt || now,
@@ -9884,6 +10496,46 @@ export const crmApi = {
       };
       next = recomputeSalesOrderFulfillment(next);
       items[index] = next;
+      saveLocalSalesOrders(items);
+      return { success: true, data: items[index] };
+    }
+  },
+
+  /**
+   * Change a shipment after dispatch — most often to fill in the AWB the
+   * courier handed over later, but also to move its delivery status on.
+   */
+  updateSalesOrderShipment: async (
+    id: string,
+    shipmentId: string,
+    body: SalesOrderShipmentUpdateInput
+  ): Promise<ApiResponse<SalesOrderItem>> => {
+    try {
+      return await request<SalesOrderItem>(
+        `/sales-orders/${encodeURIComponent(id)}/shipments/${encodeURIComponent(shipmentId)}`,
+        { method: 'PATCH', body: JSON.stringify(body) }
+      );
+    } catch (error) {
+      rethrowUnlessMockFallback(error);
+      const items = getLocalSalesOrders();
+      const index = items.findIndex((item) => item._id === id && !item.isDeleted);
+      if (index < 0) throw new ApiError('Sales order not found', 404);
+      const order = items[index];
+      const shipments = [...(order.shipments || [])];
+      const shipIndex = shipments.findIndex((shipment) => shipment._id === shipmentId);
+      if (shipIndex < 0) throw new ApiError('Shipment not found', 404);
+      shipments[shipIndex] = {
+        ...shipments[shipIndex],
+        ...(body.trackingNumber !== undefined
+          ? { trackingNumber: body.trackingNumber.trim() }
+          : {}),
+        ...(body.deliveryStatus ? { deliveryStatus: body.deliveryStatus } : {}),
+        ...(body.proofOfDelivery !== undefined
+          ? { proofOfDelivery: body.proofOfDelivery }
+          : {}),
+        ...(body.notes !== undefined ? { notes: body.notes } : {}),
+      };
+      items[index] = { ...order, shipments, updatedAt: new Date().toISOString() };
       saveLocalSalesOrders(items);
       return { success: true, data: items[index] };
     }
@@ -10277,6 +10929,7 @@ export const crmApi = {
     if (params.page) query.set('page', String(params.page));
     if (params.limit) query.set('limit', String(params.limit || 20));
     if (params.stage) query.set('stage', params.stage);
+    if (params.pipelineId) query.set('pipelineId', params.pipelineId);
     if (params.clientId) query.set('clientId', params.clientId);
     if (params.leadId) query.set('leadId', params.leadId);
     if (params.salesOwner) query.set('salesOwner', params.salesOwner);
@@ -10312,6 +10965,20 @@ export const crmApi = {
         data: items.slice(start, start + limit),
         pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
       };
+    }
+  },
+
+  getOpportunityItemSuggestions: async (
+    query = ''
+  ): Promise<ApiResponse<OpportunityItemDraft[]>> => {
+    try {
+      const qs = query ? `?q=${encodeURIComponent(query)}` : '';
+      return await request<OpportunityItemDraft[]>(`/opportunities/item-suggestions${qs}`, {
+        method: 'GET',
+      });
+    } catch (error) {
+      rethrowUnlessMockFallback(error);
+      return { success: true, data: [] };
     }
   },
 
@@ -10451,6 +11118,17 @@ export const crmApi = {
       saveLocalOpportunities(items);
       return { success: true, data: created, message: 'Opportunity created' };
     }
+  },
+
+  /** Edit a deal: line items, shipping, currency, contact. */
+  updateOpportunity: async (
+    id: string,
+    body: Record<string, unknown>
+  ): Promise<ApiResponse<OpportunityItem & { contactSynced?: boolean }>> => {
+    return request<OpportunityItem & { contactSynced?: boolean }>(`/opportunities/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
   },
 
   changeOpportunityStage: async (
@@ -10751,6 +11429,23 @@ export const crmApi = {
       const items = getLocalOpportunitiesRaw();
       const idx = items.findIndex((o) => o._id === id && !o.isDeleted);
       if (idx < 0) throw new ApiError('Opportunity not found', 404);
+      // Same closed-business guard the server applies, so offline behaves alike.
+      const target = items[idx];
+      if (target.generatedSalesOrderId) {
+        throw new ApiError(
+          'This deal cannot be deleted because a sales order has been generated from it',
+          409
+        );
+      }
+      if (target.acceptedQuotationId) {
+        throw new ApiError(
+          'This deal cannot be deleted because a quotation has been accepted on it',
+          409
+        );
+      }
+      if (isOpportunityWonStage(target.stage, target.stageType)) {
+        throw new ApiError('A Won deal cannot be deleted', 409);
+      }
       items[idx] = {
         ...items[idx],
         isDeleted: true,
@@ -16540,6 +17235,49 @@ export const crmApi = {
     }
   },
 
+  /** Edits a sample request that has not been dispatched yet. */
+  updateSample: async (
+    id: string,
+    body: SampleUpdateInput
+  ): Promise<ApiResponse<SampleItem>> => {
+    try {
+      const response = await request<SampleItem>(`/samples/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
+      return { ...response, data: normalizeSample(response.data as never) };
+    } catch (error) {
+      rethrowUnlessMockFallback(error);
+      if (!body.productName?.trim()) {
+        throw new ApiError('Product name is required', 400);
+      }
+      const updated = updateLocalSample(id, (current) => {
+        if (!canEditSampleRequest(current.status)) {
+          throw new ApiError(
+            'Only sample requests that have not been dispatched can be edited',
+            400
+          );
+        }
+        return {
+          ...current,
+          productName: body.productName.trim(),
+          quantity: body.quantity,
+          unit: body.unit,
+          items: body.items || current.items,
+          urgency: body.urgency,
+          deliveryAddress: body.deliveryAddress ?? current.deliveryAddress,
+          notes: body.notes ?? current.notes,
+          recipientName: body.recipientName || current.recipientName,
+          isChargeable: Boolean(body.isChargeable),
+          chargeAmount: body.isChargeable ? Number(body.chargeAmount) || 0 : 0,
+          currency: body.currency || current.currency,
+          exchangeRate: body.exchangeRate || current.exchangeRate,
+        };
+      });
+      return { success: true, data: updated, message: 'Sample request updated locally' };
+    }
+  },
+
   approveSample: async (
     id: string,
     body: SampleApproveInput
@@ -16583,6 +17321,40 @@ export const crmApi = {
         message: `Sample request ${updated.status.toLowerCase()} successfully`,
       };
     }
+  },
+
+  /**
+   * Call off a sample request. A client may cancel their own; staff may cancel
+   * on their behalf. Refused once the kit has been delivered.
+   */
+  /**
+   * Item names already used on sample requests, for the create form's picker.
+   * Scoped server-side to the caller's own account for a portal user.
+   */
+  getSampleItemSuggestions: async (
+    q?: string
+  ): Promise<ApiResponse<Array<{ name: string; unit?: string }>>> => {
+    const query = q ? `?q=${encodeURIComponent(q)}` : '';
+    try {
+      return await request<Array<{ name: string; unit?: string }>>(
+        `/samples/item-suggestions${query}`,
+        { method: 'GET' }
+      );
+    } catch (error) {
+      rethrowUnlessMockFallback(error);
+      return { success: true, data: [] };
+    }
+  },
+
+  cancelSample: async (
+    id: string,
+    body: { reason?: string } = {}
+  ): Promise<ApiResponse<SampleItem>> => {
+    const response = await request<SampleItem>(
+      `/samples/${encodeURIComponent(id)}/cancel`,
+      { method: 'POST', body: JSON.stringify(body) }
+    );
+    return { ...response, data: normalizeSample(response.data as never) };
   },
 
   updateSampleStockAddress: async (

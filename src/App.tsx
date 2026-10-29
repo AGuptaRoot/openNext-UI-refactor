@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { HashRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
+import { HashRouter, MemoryRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
@@ -13,6 +13,8 @@ import { Guarded } from './components/auth/RequirePermission';
 import { evaluateRouteAccess } from './utils/routeAccess';
 import { DashboardPage } from './pages/dashboard';
 import { LeadsPage, LeadCreatePage, LeadDetailPage } from './pages/leads';
+import { ActivityDetailPage } from './pages/activities';
+import { useActivityLocationTracker } from './hooks/useActivityLocationTracker';
 import { ContactsPage, ContactCreatePage, ContactDetailPage } from './pages/contacts';
 import { ReportsPage } from './pages/reports';
 import { ClientsPage, ClientCreatePage, ClientDetailPage } from './pages/clients';
@@ -37,6 +39,7 @@ import {
   InvoicesPage,
   InvoiceCreatePage,
   InvoiceDetailPage,
+  InvoiceEditPage,
   InvoiceTemplatesPage,
   InvoiceTemplateCreatePage,
 } from './pages/invoices';
@@ -141,14 +144,41 @@ const UnmigratedRouteFallback: React.FC = () => {
   );
 };
 
-export const App: React.FC = () => {
+export interface AppProps {
+  /**
+   * How the CRM keeps its own location.
+   *
+   * `hash` is the standalone build (opened directly, or by an older CMS that
+   * still loads index.html in an iframe). `memory` is for the CMS Mount API:
+   * the host owns the browser URL there, so the CRM navigates in memory and
+   * takes its starting page from the host's active nav item.
+   */
+  router?: 'hash' | 'memory';
+  /** Starting route for the memory router, e.g. `/leads`. */
+  initialPath?: string;
+}
+
+const ActivityTrackerRoot: React.FC = () => {
+  useActivityLocationTracker();
+  return null;
+};
+
+export const App: React.FC<AppProps> = ({ router = 'hash', initialPath = '/' }) => {
+  const Router: React.FC<{ children: React.ReactNode }> =
+    router === 'memory'
+      ? ({ children }) => (
+          <MemoryRouter initialEntries={[initialPath || '/']}>{children}</MemoryRouter>
+        )
+      : ({ children }) => <HashRouter>{children}</HashRouter>;
+
   return (
     <ThemeProvider>
       <AuthProvider>
         <CurrencyProvider>
         <DialogProvider>
           <TimerProvider>
-            <HashRouter>
+            <ActivityTrackerRoot />
+            <Router>
               <Layout>
               <Routes>
               <Route path="/dashboard" element={<Guarded><DashboardPage /></Guarded>} />
@@ -157,6 +187,7 @@ export const App: React.FC = () => {
               <Route path="/leads" element={<Guarded><LeadsPage /></Guarded>} />
               <Route path="/leads/create" element={<Guarded><LeadCreatePage /></Guarded>} />
               <Route path="/leads/:id" element={<Guarded><LeadDetailPage /></Guarded>} />
+              <Route path="/activities/:id" element={<Guarded><ActivityDetailPage /></Guarded>} />
 
               <Route path="/contacts" element={<Guarded><ContactsPage /></Guarded>} />
               <Route path="/contacts/create" element={<Guarded><ContactCreatePage /></Guarded>} />
@@ -188,12 +219,14 @@ export const App: React.FC = () => {
 
               <Route path="/quotations" element={<Guarded><QuotationsPage /></Guarded>} />
               <Route path="/quotations/create" element={<Guarded><QuotationCreatePage /></Guarded>} />
+              <Route path="/quotations/:id/edit" element={<Guarded><QuotationCreatePage /></Guarded>} />
               <Route path="/quotations/:id" element={<Guarded><QuotationDetailPage /></Guarded>} />
               <Route path="/quotation-templates" element={<Guarded><QuotationTemplatesPage /></Guarded>} />
               <Route path="/quotation-templates/create" element={<Guarded><QuotationTemplateCreatePage /></Guarded>} />
 
               <Route path="/invoices" element={<Guarded><InvoicesPage /></Guarded>} />
               <Route path="/invoices/create" element={<Guarded><InvoiceCreatePage /></Guarded>} />
+              <Route path="/invoices/:id/edit" element={<Guarded><InvoiceEditPage /></Guarded>} />
               <Route path="/invoices/:id" element={<Guarded><InvoiceDetailPage /></Guarded>} />
               <Route path="/invoice-templates" element={<Guarded><InvoiceTemplatesPage /></Guarded>} />
               <Route path="/invoice-templates/create" element={<Guarded><InvoiceTemplateCreatePage /></Guarded>} />
@@ -233,7 +266,7 @@ export const App: React.FC = () => {
               <Route path="*" element={<UnmigratedRouteFallback />} />
             </Routes>
               </Layout>
-            </HashRouter>
+            </Router>
           </TimerProvider>
         </DialogProvider>
         </CurrencyProvider>

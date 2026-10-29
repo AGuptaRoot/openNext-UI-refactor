@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { crmApi, isCrmMockModeEnabled } from '../services/api';
-import { CrmRole, UserContext } from '../types/dashboard';
+import { CrmFeatureFlags, CrmRole, UserContext } from '../types/dashboard';
 import { canUseCrmTours, userCanAssignTickets, userHasPermission } from '../utils/permissions';
 import { roleHasPermission } from '../utils/rolePermissions';
 
@@ -11,7 +11,23 @@ interface AuthContextValue {
   /** Resolved CRM role from CMS/session — not switchable. */
   activeRole: CrmRole;
   isClient: boolean;
+  /**
+   * Which portal this login is, when it is one.
+   *
+   * `client` is a real account with the full portal. `lead` is a prospect whose
+   * deal was opened to the portal: their own deal, quotations and samples, and
+   * none of the account-level features (support tickets, satisfaction reviews,
+   * projects, invoices). `null` means this is not a portal login.
+   */
+  portalKind: 'client' | 'lead' | null;
+  /** True for a prospect portal — the narrow case above. */
+  isLeadPortal: boolean;
   isAdmin: boolean;
+  /**
+   * Tenant feature switches, always present — everything is off until the
+   * server says otherwise, so a failed `/me` never exposes a feature.
+   */
+  features: CrmFeatureFlags;
   /** Super Admin / CRM Manager only — Beacon & Module tours. */
   canUseTours: boolean;
   hasPermission: (permission: string) => boolean;
@@ -148,6 +164,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           isClientUser: false,
           isClient: false,
           clientId: null,
+          portalKind: null,
           unlinkedClient: false,
         });
       } else {
@@ -202,6 +219,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const canUseTours = useMemo(() => canUseCrmTours(user, activeRole), [user, activeRole]);
 
+  const features = useMemo<CrmFeatureFlags>(() => {
+    const raw = user?.features;
+    const percent = Number(raw?.defaultAdvancePercent);
+    const proformaAdvance = Boolean(raw?.proformaAdvance);
+    return {
+      proformaAdvance,
+      quotationAutoAcceptOnPayment:
+        proformaAdvance && Boolean(raw?.quotationAutoAcceptOnPayment),
+      defaultAdvancePercent: Number.isFinite(percent) && percent > 0 ? percent : 30,
+    };
+  }, [user?.features]);
+
+  /**
+   * A prospect portal is a client-role login the CRM resolved to a lead with a
+   * portal-enabled deal. It gets the deal, its quotations and its samples —
+   * not the account-level portal.
+   */
+  const portalKind: 'client' | 'lead' | null = useMemo(() => {
+    if (!isClient) return null;
+    const fromApi = user?.portalKind;
+    if (fromApi === 'client' || fromApi === 'lead') return fromApi;
+    return user?.clientId ? 'client' : null;
+  }, [isClient, user?.portalKind, user?.clientId]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -210,7 +251,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         error,
         activeRole,
         isClient,
+        portalKind,
+        isLeadPortal: portalKind === 'lead',
         isAdmin: user?.isAdmin ?? false,
+        features,
         canUseTours,
         hasPermission,
         hasAnyPermission,

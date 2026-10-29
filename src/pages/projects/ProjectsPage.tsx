@@ -471,7 +471,9 @@ export const ProjectsPage: React.FC = () => {
             )}
           </div>
 
-          {!droppedView && (
+          {/* Dropped and archived views are internal housekeeping: a portal
+              user sees their live projects only. */}
+          {!droppedView && !isClient && (
             <>
               <button
                 type="button"
@@ -662,7 +664,7 @@ export const ProjectsPage: React.FC = () => {
             ))}
           </select>
         </label>
-        {!droppedView && (
+        {!droppedView && !isClient && (
           <label data-tour="projects-filter-archive" className="flex flex-col gap-1 min-w-[160px]">
             <span className="text-[11px] font-semibold text-zinc-500 uppercase">Archive</span>
             <select

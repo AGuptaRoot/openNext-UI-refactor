@@ -9,7 +9,8 @@ export type SampleStatus =
   | 'Preparing'
   | 'Dispatched'
   | 'Delivered'
-  | 'Completed';
+  | 'Completed'
+  | 'Cancelled';
 
 export type SampleRoutedDepartment =
   | 'R&D / Technical'
@@ -65,6 +66,9 @@ export interface SampleItem {
   approvedBy?: string | null;
   approvedAt?: string | null;
   rejectionReason?: string | null;
+  cancelledAt?: string | null;
+  cancelledBy?: string;
+  cancellationReason?: string;
   stockLocation?: string;
   courierName?: string;
   trackingNumber?: string;
@@ -110,6 +114,27 @@ export interface SampleQueryParams {
   limit?: number;
 }
 
+/**
+ * Fields a sample request can still be changed on before it leaves the
+ * warehouse. The link to the lead / client / opportunity and the lifecycle
+ * fields are deliberately absent — those are not edits, they are transitions.
+ */
+export interface SampleUpdateInput {
+  productName: string;
+  quantity: number;
+  unit: string;
+  items?: SampleProductItem[];
+  urgency: SampleUrgency | string;
+  deliveryAddress?: string;
+  notes?: string;
+  recipientName?: string;
+  isChargeable?: boolean;
+  chargeAmount?: number;
+  currency?: string;
+  currencyCode?: string;
+  exchangeRate?: number;
+}
+
 export interface SampleApproveInput {
   action: 'approve' | 'reject';
   stockLocation?: string;
@@ -149,7 +174,43 @@ export const SAMPLE_STATUSES: SampleStatus[] = [
   'Delivered',
   'Completed',
   'Rejected',
+  'Cancelled',
 ];
+
+/**
+ * Statuses a sample request can still be called off from.
+ *
+ * Dispatched is deliberately absent: once the kit is with the courier it is on
+ * its way, and "cancelled" would misstate what happened to it.
+ */
+export const CANCELLABLE_SAMPLE_STATUSES: SampleStatus[] = [
+  'Requested',
+  'Approved',
+  'Preparing',
+];
+
+/**
+ * Whether this request can still be cancelled — i.e. before it is handed to
+ * the courier. Mirrors CANCELLABLE_SAMPLE_STATUSES on the server.
+ */
+export function canCancelSampleRequest(status: string): boolean {
+  return CANCELLABLE_SAMPLE_STATUSES.includes(status as SampleStatus);
+}
+
+/**
+ * Statuses in which a sample request is still editable — mirrors
+ * EDITABLE_SAMPLE_STATUSES in the backend sample schema. The window closes at
+ * dispatch, and a rejected request has to be raised again rather than rewritten.
+ */
+export const EDITABLE_SAMPLE_STATUSES: SampleStatus[] = [
+  'Requested',
+  'Approved',
+  'Preparing',
+];
+
+export function canEditSampleRequest(status: SampleStatus | string): boolean {
+  return (EDITABLE_SAMPLE_STATUSES as string[]).includes(String(status));
+}
 
 export const SAMPLE_UNITS = [
   'pcs',
@@ -222,29 +283,30 @@ export const SAMPLE_RATING_LABELS: Record<number, string> = {
 };
 
 export function sampleStatusTone(status: string): string {
-  if (status === 'Requested') return 'bg-amber-50 text-amber-800 border-amber-200';
-  if (status === 'Approved' || status === 'Preparing') return 'bg-sky-50 text-sky-800 border-sky-200';
-  if (status === 'Dispatched') return 'bg-violet-50 text-violet-800 border-violet-200';
+  if (status === 'Requested') return 'border-zinc-300 bg-zinc-50 text-zinc-800';
+  if (status === 'Approved' || status === 'Preparing') return 'border-zinc-400 bg-zinc-100 text-zinc-900 font-semibold';
+  if (status === 'Dispatched') return 'border-zinc-700 bg-zinc-800 text-white font-semibold';
   if (status === 'Delivered' || status === 'Completed') {
-    return 'bg-emerald-50 text-emerald-800 border-emerald-200';
+    return 'border-zinc-950 bg-zinc-950 text-white font-bold';
   }
-  if (status === 'Rejected') return 'bg-red-50 text-red-800 border-red-200';
-  return 'bg-zinc-100 text-zinc-700 border-zinc-200';
+  if (status === 'Rejected') return 'border-zinc-300 bg-zinc-100 text-zinc-600 line-through';
+  if (status === 'Cancelled') return 'border-zinc-300 bg-zinc-50 text-zinc-500 line-through';
+  return 'border-zinc-200 bg-zinc-50 text-zinc-700';
 }
 
 export function sampleUrgencyTone(urgency: string): string {
-  if (urgency === 'Urgent') return 'bg-red-50 text-red-800 border-red-200';
-  if (urgency === 'High') return 'bg-orange-50 text-orange-800 border-orange-200';
-  if (urgency === 'Normal') return 'bg-sky-50 text-sky-800 border-sky-200';
-  return 'bg-emerald-50 text-emerald-800 border-emerald-200';
+  if (urgency === 'Urgent') return 'border-zinc-950 bg-zinc-950 text-white font-bold';
+  if (urgency === 'High') return 'border-zinc-400 bg-zinc-100 text-zinc-900 font-semibold';
+  if (urgency === 'Normal') return 'border-zinc-300 bg-zinc-50 text-zinc-800';
+  return 'border-zinc-200 bg-white text-zinc-600';
 }
 
 /** Tailwind background class for urgency indicator dots (no emoji). */
 export function sampleUrgencyDotClass(urgency: string): string {
-  if (urgency === 'Urgent') return 'bg-red-500';
-  if (urgency === 'High') return 'bg-orange-500';
-  if (urgency === 'Normal') return 'bg-sky-500';
-  return 'bg-emerald-500';
+  if (urgency === 'Urgent') return 'bg-zinc-950 ring-1 ring-zinc-400';
+  if (urgency === 'High') return 'bg-zinc-800';
+  if (urgency === 'Normal') return 'bg-zinc-500';
+  return 'bg-zinc-300';
 }
 
 /** @deprecated Use SampleUrgencyDot or sampleUrgencyDotClass instead */
@@ -303,6 +365,9 @@ export function normalizeSample(raw: Partial<SampleItem> & Record<string, unknow
     approvedBy: (raw.approvedBy as string) || null,
     approvedAt: (raw.approvedAt as string) || null,
     rejectionReason: (raw.rejectionReason as string) || null,
+    cancelledAt: (raw.cancelledAt as string) || null,
+    cancelledBy: String(raw.cancelledBy || ''),
+    cancellationReason: String(raw.cancellationReason || ''),
     stockLocation: String(raw.stockLocation || ''),
     courierName: String(raw.courierName || ''),
     trackingNumber: String(raw.trackingNumber || ''),

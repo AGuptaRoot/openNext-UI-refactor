@@ -56,6 +56,8 @@ export interface OpportunityPipelineStage {
 export interface OpportunityPipeline {
   _id: string;
   name: string;
+  pipelineKey?: string;
+  extensionId?: string;
   description?: string;
   isDefault: boolean;
   isActive: boolean;
