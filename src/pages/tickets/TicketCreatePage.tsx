@@ -5,6 +5,7 @@ import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import type { AssignableUser } from '../../types/leads';
 import type { ProjectItem } from '../../types/projects';
 import {
@@ -119,6 +120,7 @@ function formatSlaPreview(hours: number): string {
 export const TicketCreatePage: React.FC = () => {
   const navigate = useNavigate();
   const { user, isClient, canAssignTickets } = useAuth();
+  const { showProjects } = useActiveExtension();
   const [users, setUsers] = useState<AssignableUser[]>([]);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [meta, setMeta] = useState<TicketMetaStore>(() => loadMeta());
@@ -388,22 +390,24 @@ export const TicketCreatePage: React.FC = () => {
                 </label>
               )}
 
-              <label>
-                <span className={labelClass}>Project</span>
-                <select
-                  id="ticket-select-project"
-                  className={fieldClass}
-                  value={projectId}
-                  onChange={(e) => setProjectId(e.target.value)}
-                >
-                  <option value="">No project</option>
-                  {projects.map((item) => (
-                    <option key={item._id} value={item._id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {showProjects && (
+                <label>
+                  <span className={labelClass}>Project</span>
+                  <select
+                    id="ticket-select-project"
+                    className={fieldClass}
+                    value={projectId}
+                    onChange={(e) => setProjectId(e.target.value)}
+                  >
+                    <option value="">No project</option>
+                    {projects.map((item) => (
+                      <option key={item._id} value={item._id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
               <div>
                 <div className="mb-1.5 flex items-center justify-between gap-2">

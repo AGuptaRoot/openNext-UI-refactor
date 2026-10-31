@@ -98,7 +98,7 @@ function resolveBootstrapRoute(isClientUser = false): string {
 
 /** Intelligent root redirect — falls back to dashboard (or projects for clients). */
 const InitialRouteRedirect: React.FC = () => {
-  const { loading, hasAnyPermission, isClient, activeRole } = useAuth();
+  const { loading, hasAnyPermission, isClient, activeRole, features } = useAuth();
   const targetRoute = useMemo(() => resolveBootstrapRoute(isClient), [isClient]);
 
   if (loading) {
@@ -106,7 +106,7 @@ const InitialRouteRedirect: React.FC = () => {
   }
 
   const fallback = isClient ? resolveClientHomeRoute() : '/dashboard';
-  const { allowed } = evaluateRouteAccess(targetRoute, { hasAnyPermission, isClient, activeRole });
+  const { allowed } = evaluateRouteAccess(targetRoute, { hasAnyPermission, isClient, activeRole, features });
   return <Navigate to={allowed ? targetRoute : fallback} replace />;
 };
 

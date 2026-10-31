@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { INVOICE_CURRENCIES, type InvoiceItem } from '../../types/invoices';
 import type { DiscountType, TaxCalculation } from '../../types/quotations';
 import {
@@ -60,6 +61,7 @@ export const InvoiceEditPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const returnTo = searchParams.get('returnTo');
   const { hasPermission, isClient } = useAuth();
+  const { showProjects } = useActiveExtension();
   const canWriteFinance = hasPermission('crm.finance.write') && !isClient;
   const { clients, projects } = useFinanceOptions();
 
@@ -259,20 +261,22 @@ export const InvoiceEditPage: React.FC = () => {
             <FormField label="Client" required>
               <ClientSelect clients={clients} value={clientId} onChange={setClientId} />
             </FormField>
-            <FormField label="Project">
-              <select
-                className={financeFieldClass}
-                value={projectId}
-                onChange={(event) => setProjectId(event.target.value)}
-              >
-                <option value="">No project</option>
-                {projects.map((project) => (
-                  <option key={project._id} value={project._id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </FormField>
+            {showProjects && (
+              <FormField label="Project">
+                <select
+                  className={financeFieldClass}
+                  value={projectId}
+                  onChange={(event) => setProjectId(event.target.value)}
+                >
+                  <option value="">No project</option>
+                  {projects.map((project) => (
+                    <option key={project._id} value={project._id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+            )}
             <FormField label="Issue date" required>
               <input
                 type="date"

@@ -160,11 +160,19 @@ export interface LeadEvent {
   createdLocation?: ActivityLocation | null;
   acceptedLocation?: ActivityLocation | null;
   completedLocation?: ActivityLocation | null;
+  startingLocation?: ActivityLocation | null;
   goalLocation?: ActivityLocation | null;
+  reachedGoalArea?: boolean;
+  reachedGoalAt?: string | null;
+  latestUserLocation?: ActivityLocation | null;
+  latestDistanceFromGoal?: number | null;
   acceptedAt?: string | null;
   acceptedBy?: string | null;
+  acceptedByName?: string | null;
   completedAt?: string | null;
   completedBy?: string;
+  completedByName?: string;
+  createdByName?: string;
   /** Set once the row has been turned into an opportunity. */
   convertedOpportunityId?: string;
 }
@@ -215,6 +223,8 @@ export interface ActivityLocationLog {
   longitude: number;
   accuracy?: number | null;
   address?: string;
+  distanceFromGoal?: number | null;
+  reachedGoalArea?: boolean;
   loggedAt: string;
 }
 
@@ -463,6 +473,10 @@ export interface ActivityReminderRow {
   minutesUntil?: number;
   /** Only on `missed` rows. */
   minutesLate?: number;
+  hasGoal?: boolean;
+  reachedGoalArea?: boolean;
+  notReachedGoal?: boolean;
+  goalLocation?: ActivityLocation | null;
 }
 
 /**

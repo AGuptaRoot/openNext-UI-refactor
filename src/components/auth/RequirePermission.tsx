@@ -14,14 +14,27 @@ interface RequirePermissionProps {
 }
 
 function AccessDenied({ label, required }: { label: string; required?: string[] }) {
+  const moduleDisabled = label.includes('(Module Disabled)');
+  const notInExtension = label.includes('(Not in Active Extension)');
+  const moduleName = label
+    .replace(' (Module Disabled)', '')
+    .replace(' (Not in Active Extension)', '');
   return (
     <div className="py-24 px-6 text-center flex flex-col items-center justify-center max-w-lg mx-auto">
       <div className="w-14 h-14 rounded-2xl bg-zinc-950 text-white flex items-center justify-center mb-5">
         <LockOutlinedIcon sx={{ fontSize: 28 }} />
       </div>
-      <h2 className="text-2xl font-bold text-zinc-950 mb-2 tracking-tight">Access denied</h2>
+      <h2 className="text-2xl font-bold text-zinc-950 mb-2 tracking-tight">
+        {moduleDisabled || notInExtension ? 'Module Disabled' : 'Access denied'}
+      </h2>
       <p className="text-sm text-zinc-500 mb-2 leading-relaxed">
-        You do not have permission to open <strong>{label}</strong>.
+        {moduleDisabled ? (
+          <><strong>{moduleName}</strong> has been turned off by your administrator. You can re-enable it in Settings &rarr; Modules &amp; Features.</>
+        ) : notInExtension ? (
+          <><strong>{moduleName}</strong> is not part of the active CRM extension. An administrator can switch extensions in Settings &rarr; Extensions.</>
+        ) : (
+          <>You do not have permission to open <strong>{label}</strong>.</>
+        )}
       </p>
       {required && required.length > 0 && (
         <p className="text-xs text-zinc-400 mb-8 m-0">
@@ -51,7 +64,7 @@ export const RequirePermission: React.FC<RequirePermissionProps> = ({
   label,
 }) => {
   const location = useLocation();
-  const { loading, hasAnyPermission, isClient, activeRole } = useAuth();
+  const { loading, hasAnyPermission, isClient, activeRole, features } = useAuth();
 
   if (loading) {
     return (
@@ -78,6 +91,7 @@ export const RequirePermission: React.FC<RequirePermissionProps> = ({
       hasAnyPermission,
       isClient,
       activeRole,
+      features,
     });
     allowed = result.allowed;
     rule = result.rule;

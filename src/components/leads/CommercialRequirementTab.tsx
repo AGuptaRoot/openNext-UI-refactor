@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { MessageCircle, Sparkles } from 'lucide-react';
+import { Lock, MessageCircle, Sparkles } from 'lucide-react';
 import { DynamicFormRenderer } from '../form-builder/DynamicFormRenderer';
 import { useAuth } from '../../context/AuthContext';
 import { crmApi } from '../../services/api';
@@ -16,6 +16,8 @@ import {
 } from '../../utils/qualificationMatchScore';
 import { getDefaultCurrencySymbol } from '../../utils/currency';
 import { isProductRequestType } from '../../utils/isProductRequestType';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
+import { isInactiveExtensionRequestType } from '../../types/extensions';
 
 function scoreTone(score: number | null | undefined): string {
   if (score == null || Number.isNaN(score)) return 'bg-zinc-100 text-zinc-700 border-zinc-200';
@@ -236,11 +238,50 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
     lead.commercialRequirement?.kind,
   ]);
 
+  /*
+   * The active CRM extension (Settings → Extensions) fixes the Request Type.
+   * Types owned by the other extension are hidden unless this lead already
+   * uses one, so older leads still open with the form they were captured in.
+   */
+  const { extension: activeExtension, requestTypeKey: fixedKey } = useActiveExtension();
+  const fixedType = useMemo(
+    () =>
+      requestTypes.find(
+        (rt) => String(rt.key || '').trim().toLowerCase() === String(fixedKey || '').trim().toLowerCase()
+      ) || null,
+    [requestTypes, fixedKey]
+  );
   const selectableTypes = useMemo(() => {
-    return requestTypes.filter(
-      (rt) => rt.isEnabled || rt._id === selectedId || rt._id === lead.requestTypeId
-    );
-  }, [requestTypes, selectedId, lead.requestTypeId]);
+    if (fixedType) {
+      // Fixed option only, plus the type this lead was captured with (if different).
+      const current = requestTypes.find(
+        (rt) => rt._id === selectedId || rt._id === lead.requestTypeId
+      );
+      return current && current._id !== fixedType._id ? [fixedType, current] : [fixedType];
+    }
+    return requestTypes.filter((rt) => {
+      if (rt._id === selectedId || rt._id === lead.requestTypeId) return true;
+      if (isInactiveExtensionRequestType(rt.key, fixedKey)) return false;
+      return rt.isEnabled;
+    });
+  }, [requestTypes, selectedId, lead.requestTypeId, fixedKey, fixedType]);
+  /*
+   * Locked when the fixed type is selected (or it is the only choice). A lead
+   * captured under another type stays readable and may be moved to the fixed
+   * type, but never to anything else.
+   */
+  const requestTypeLocked = fixedType
+    ? !selectedId || selectedId === fixedType._id
+    : selectableTypes.length <= 1;
+
+  useEffect(() => {
+    if (loadingTypes || selectedId) return;
+    if (fixedType) {
+      setSelectedId(fixedType._id);
+      return;
+    }
+    if (selectableTypes.length === 1) setSelectedId(selectableTypes[0]._id);
+  }, [loadingTypes, selectedId, selectableTypes, fixedType]);
 
   const handleSelectType = (id: string) => {
     setSelectedId(id);
@@ -466,10 +507,17 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
         </div>
 
         <label className="mb-4 block max-w-md">
-          <span className="mb-1.5 block text-xs font-semibold text-zinc-700">Request Type</span>
+          <span className="mb-1.5 flex items-center justify-between text-xs font-semibold text-zinc-700">
+            <span>Request Type</span>
+            {!loadingTypes && (fixedType || requestTypeLocked) && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                <Lock className="h-3 w-3" aria-hidden /> Fixed by {activeExtension.name}
+              </span>
+            )}
+          </span>
           <select
             className="h-9 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-400 disabled:bg-zinc-50"
-            disabled={readOnly || loadingTypes}
+            disabled={readOnly || loadingTypes || requestTypeLocked}
             value={selectedId}
             onChange={(e) => handleSelectType(e.target.value)}
           >
@@ -481,6 +529,12 @@ export const CommercialRequirementTab: React.FC<CommercialRequirementTabProps> =
               </option>
             ))}
           </select>
+          {fixedType && selectedId && selectedId !== fixedType._id && !loadingTypes && (
+            <span className="mt-1.5 block text-[11px] text-amber-700">
+              This lead was captured as “{selectedType?.name || 'another type'}”. The active extension
+              fixes new leads to “{fixedType.name}”; you may switch this lead to it.
+            </span>
+          )}
         </label>
 
         {/* Product only: checkbox appears immediately when Request Type is Product */}

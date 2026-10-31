@@ -20,6 +20,8 @@ import { OcrLeadImportModal } from '../../components/leads/OcrLeadImportModal';
 import { AddCustomFieldModal } from '../../components/common/AddCustomFieldModal';
 import { CompanyDiscrepancyModal } from '../../components/common/CompanyDiscrepancyModal';
 import { useCompanyDiscrepancyCheck } from '../../hooks/useCompanyDiscrepancyCheck';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
+import { Lock } from 'lucide-react';
 import {
   ContactFormFields,
   ContactFormValues,
@@ -79,6 +81,8 @@ const localDateInputValue = (): string => {
 export const LeadCreatePage: React.FC = () => {
   const navigate = useNavigate();
   const { hasPermission, user, isClient, activeRole } = useAuth();
+  const { extension: activeExtension } = useActiveExtension();
+  const fixedRequestTypeKey = String(activeExtension.requestTypeKey || '').trim().toLowerCase();
   const { confirm } = useDialog();
   const {
     createFieldsForRequestType,
@@ -270,26 +274,16 @@ export const LeadCreatePage: React.FC = () => {
           setStage((prev) => prev || (stages.includes('New') ? 'New' : stages[0]));
         }
         if (statuses.length) setStatus((prev) => prev || statuses[0]);
-        setRequestTypeId((prev) => {
-          if (prev) return prev;
-          const software =
-            nextRequestTypes.find((rt) => String(rt.key || '').toLowerCase() === 'project_software') ||
-            nextRequestTypes.find((rt) => {
-              const name = String(rt.name || '').toLowerCase();
-              return name.includes('software') || name === 'project (software)';
-            });
-          return software?._id || '';
-        });
-        setRequestType((prev) => {
-          if (prev) return prev;
-          const software =
-            nextRequestTypes.find((rt) => String(rt.key || '').toLowerCase() === 'project_software') ||
-            nextRequestTypes.find((rt) => {
-              const name = String(rt.name || '').toLowerCase();
-              return name.includes('software') || name === 'project (software)';
-            });
-          return software?.name || '';
-        });
+        // Default = the Request Type fixed by the active CRM extension.
+        const extensionDefault =
+          nextRequestTypes.find((rt) => String(rt.key || '').toLowerCase() === fixedRequestTypeKey) ||
+          nextRequestTypes.find((rt) => String(rt.key || '').toLowerCase() === 'project_software') ||
+          nextRequestTypes.find((rt) => {
+            const name = String(rt.name || '').toLowerCase();
+            return name.includes('software') || name === 'project (software)';
+          });
+        setRequestTypeId((prev) => prev || extensionDefault?._id || '');
+        setRequestType((prev) => prev || extensionDefault?.name || '');
         // Managers may leave owner unassigned; sales reps are forced to self above.
       } catch (err) {
         console.warn('Failed to load form metadata:', err);
@@ -391,6 +385,27 @@ export const LeadCreatePage: React.FC = () => {
       cancelled = true;
     };
   }, [extensionSummary]);
+
+  /*
+   * The active CRM extension (Settings → Extensions) fixes the Request Type.
+   * The API already returns only that type (plus any contributed by a CMS
+   * extension such as crm-travel), so with a single option the field is
+   * shown read-only and selected automatically.
+   */
+  const fixedRequestType = useMemo(
+    () =>
+      requestTypes.find((rt) => String(rt.key || '').trim().toLowerCase() === fixedRequestTypeKey) ||
+      (requestTypes.length === 1 ? requestTypes[0] : null),
+    [requestTypes, fixedRequestTypeKey]
+  );
+  const requestTypeLocked = Boolean(fixedRequestType) || requestTypes.length <= 1;
+  useEffect(() => {
+    if (!fixedRequestType) return;
+    if (requestTypeId !== fixedRequestType._id) {
+      setRequestTypeId(fixedRequestType._id);
+      setRequestType(fixedRequestType.name);
+    }
+  }, [fixedRequestType, requestTypeId]);
 
   /** Workspace fields (Settings) + this-create-only session fields, no duplicate keys. */
   const activeCustomFieldDefs = useMemo(() => {
@@ -865,7 +880,7 @@ export const LeadCreatePage: React.FC = () => {
       );
     }
 
-    {
+    if (!fixedRequestType) {
       const matched =
         (guessedRequestTypeId &&
           requestTypes.find((rt) => rt._id === guessedRequestTypeId)) ||
@@ -1412,24 +1427,43 @@ export const LeadCreatePage: React.FC = () => {
 
             <div data-tour="leads-field-request" className="sm:col-span-3">
               <label className={labelCls}>Request Type *</label>
-              <select
-                required
-                value={requestTypeId}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  const rt = requestTypes.find((item) => item._id === id);
-                  setRequestTypeId(id);
-                  setRequestType(rt?.name || '');
-                }}
-                className={inputCls}
-              >
-                <option value="">Select request type…</option>
-                {requestTypes.map((rt) => (
-                  <option key={rt._id} value={rt._id}>
-                    {rt.name}
-                  </option>
-                ))}
-              </select>
+              {requestTypeLocked ? (
+                <>
+                  <div
+                    className={`${inputCls} flex items-center justify-between gap-2 bg-zinc-50 text-zinc-900`}
+                    aria-readonly="true"
+                  >
+                    <span className="truncate font-semibold">
+                      {fixedRequestType?.name || requestType || activeExtension.requestTypeName}
+                    </span>
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                      <Lock className="h-3 w-3" aria-hidden /> {activeExtension.name}
+                    </span>
+                  </div>
+                  <p className="mt-1.5 mb-0 text-[11px] text-zinc-500">
+                    Fixed by the active extension. Admins change it in Settings → Extensions.
+                  </p>
+                </>
+              ) : (
+                <select
+                  required
+                  value={requestTypeId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    const rt = requestTypes.find((item) => item._id === id);
+                    setRequestTypeId(id);
+                    setRequestType(rt?.name || '');
+                  }}
+                  className={inputCls}
+                >
+                  <option value="">Select request type…</option>
+                  {requestTypes.map((rt) => (
+                    <option key={rt._id} value={rt._id}>
+                      {rt.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               {(() => {
                 const selectedRt = requestTypes.find((rt) => rt._id === requestTypeId);
                 const groups = createFieldsForRequestType({

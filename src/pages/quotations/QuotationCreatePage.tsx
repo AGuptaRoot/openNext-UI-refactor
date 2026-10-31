@@ -30,6 +30,8 @@ import {
   normalizeTaxCalculationValue,
 } from '../../utils/financePdfScanDraft';
 import { normalizeCurrencyCode, useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import type { QuotationPaymentType, QuotationAdvanceMode } from '../../types/quotations';
+import { computeQuotationPayable } from '../../utils/quotationPayment';
 
 function safeReturnPath(raw: string | null): string {
   const value = String(raw || '').trim();
@@ -81,10 +83,26 @@ export const QuotationCreatePage: React.FC = () => {
   const fromScan = searchParams.get('fromScan') === '1';
   const { clients, leads, opportunities } = useFinanceOptions();
   const { alert, prompt } = useDialog();
-  const { hasAnyPermission, isClient } = useAuth();
+  const { hasAnyPermission, isClient, features } = useAuth();
+  const [paymentType, setPaymentType] = useState<QuotationPaymentType>('full');
+  const [advanceMode, setAdvanceMode] = useState<QuotationAdvanceMode>('percent');
+  const [advanceValue, setAdvanceValue] = useState<number>(features.defaultAdvancePercent || 30);
+  const [proformaEnabled, setProformaEnabled] = useState(features.proformaAdvance);
   const canWriteFinance = hasAnyPermission('crm.quotes.write', 'crm.finance.write') && !isClient;
   const settingsCurrency = useDefaultCurrency();
   const currencyLockedRef = useRef(false);
+
+  useEffect(() => {
+    setProformaEnabled(features.proformaAdvance);
+    crmApi.getSettings().then((res) => {
+      if (res.data?.proforma_advance_enabled !== undefined) {
+        setProformaEnabled(Boolean(res.data.proforma_advance_enabled));
+        if (res.data.default_advance_percent) {
+          setAdvanceValue((prev) => prev || Number(res.data.default_advance_percent) || 30);
+        }
+      }
+    }).catch(() => {});
+  }, [features.proformaAdvance]);
 
   const [loadingEdit, setLoadingEdit] = useState(isEdit);
   const [editQuotationNo, setEditQuotationNo] = useState('');
@@ -165,6 +183,15 @@ export const QuotationCreatePage: React.FC = () => {
         const resolvedNotes = String(quote.recipientNotes || rawQuote.notes || '');
         if (resolvedNotes) {
           setRecipientNotes(resolvedNotes);
+        }
+        if (rawQuote.paymentType || quote.paymentType) {
+          setPaymentType((quote.paymentType || rawQuote.paymentType) === 'advance' ? 'advance' : 'full');
+        }
+        if (rawQuote.advanceMode || quote.advanceMode) {
+          setAdvanceMode((quote.advanceMode || rawQuote.advanceMode) === 'amount' ? 'amount' : 'percent');
+        }
+        if (quote.advanceValue !== undefined || rawQuote.advanceValue !== undefined) {
+          setAdvanceValue(Number(quote.advanceValue ?? rawQuote.advanceValue) || 0);
         }
         setDiscountType((quote.discountType as DiscountType) || 'percent');
         setDiscountValue(Number(quote.discountValue ?? quote.discountPercent) || 0);
@@ -295,6 +322,15 @@ export const QuotationCreatePage: React.FC = () => {
   const cgst = gstMode === 'intra' ? totals.taxTotal / 2 : 0;
   const sgst = gstMode === 'intra' ? totals.taxTotal / 2 : 0;
   const igst = gstMode === 'inter' ? totals.taxTotal : 0;
+
+  const payableNow = useMemo(
+    () =>
+      computeQuotationPayable(
+        { grandTotal: totals.grandTotal, paymentType, advanceMode, advanceValue },
+        features.defaultAdvancePercent || 30
+      ),
+    [totals.grandTotal, paymentType, advanceMode, advanceValue, features.defaultAdvancePercent]
+  );
 
   const loadTemplate = async (id: string) => {
     setTemplateId(id);
@@ -463,6 +499,13 @@ export const QuotationCreatePage: React.FC = () => {
         discountValue: clampDiscountValue(discountType, discountValue),
         shippingCharge,
         recipientNotes: recipientNotes.trim(),
+        ...(proformaEnabled
+          ? {
+              paymentType,
+              advanceMode: paymentType === 'advance' ? advanceMode : 'percent',
+              advanceValue: paymentType === 'advance' ? Number(advanceValue) || 0 : 0,
+            }
+          : {}),
       };
 
       if (isEdit && editId) {
@@ -806,6 +849,93 @@ export const QuotationCreatePage: React.FC = () => {
         <div data-tour="quotations-create-lines" className="bg-white border border-zinc-300 rounded-xl p-4">
           <LineItemsEditor lines={lines} setLines={setLines} showFileUrl />
         </div>
+
+        {proformaEnabled && (
+          <div data-tour="quotations-create-payment-terms" className="bg-white border border-zinc-300 rounded-xl p-5">
+            <h2 className="m-0 mb-1 text-sm font-semibold text-zinc-950">Payment Terms &amp; Advance Payment</h2>
+            <p className="m-0 mb-3 text-xs text-zinc-500">
+              Select whether this quotation requires full payment or an initial advance. A proforma invoice will be raised accordingly.
+            </p>
+
+            <div className="flex flex-wrap gap-2 mb-3">
+              {[
+                { value: 'full' as QuotationPaymentType, label: 'Full Payment' },
+                { value: 'advance' as QuotationPaymentType, label: 'Advance Payment' },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setPaymentType(option.value)}
+                  className={`h-8 rounded-lg border px-3 text-xs font-semibold cursor-pointer transition-colors ${
+                    paymentType === option.value
+                      ? 'border-zinc-900 bg-zinc-900 text-white shadow-xs'
+                      : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            {paymentType === 'advance' && (
+              <div className="mt-3 flex flex-wrap items-end gap-3">
+                <div className="inline-flex rounded-lg border border-zinc-200 bg-zinc-50 p-0.5">
+                  {[
+                    { value: 'percent' as QuotationAdvanceMode, label: 'Percentage (%)' },
+                    { value: 'amount' as QuotationAdvanceMode, label: 'Fixed Amount' },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setAdvanceMode(option.value)}
+                      className={`h-7 rounded-md border-0 px-3 text-xs font-semibold cursor-pointer transition-colors ${
+                        advanceMode === option.value
+                          ? 'bg-zinc-950 text-white shadow-xs'
+                          : 'bg-transparent text-zinc-600 hover:text-zinc-900'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] font-semibold uppercase text-zinc-500">
+                    {advanceMode === 'percent' ? 'Advance %' : `Advance (${currency})`}
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={advanceMode === 'percent' ? 100 : undefined}
+                    value={advanceValue}
+                    onChange={(event) => setAdvanceValue(Number(event.target.value) || 0)}
+                    className="h-9 w-40 rounded-lg border border-zinc-200 px-3 text-sm outline-none focus:border-zinc-400"
+                  />
+                </label>
+              </div>
+            )}
+
+            <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs">
+              {payableNow.error ? (
+                <p className="m-0 font-semibold text-amber-800">{payableNow.error}</p>
+              ) : (
+                <>
+                  <p className="m-0 text-zinc-700">
+                    Payable now:{' '}
+                    <strong className="text-zinc-950">
+                      {formatFinanceMoney(payableNow.amount, currency)}
+                    </strong>{' '}
+                    of {formatFinanceMoney(payableNow.total, currency)}
+                  </p>
+                  {payableNow.isAdvance && (
+                    <p className="m-0 mt-0.5 text-zinc-500">
+                      Remaining balance {formatFinanceMoney(payableNow.balance, currency)} will be invoiced with the final Tax Invoice upon delivery/completion.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <FormSection title="Recipient notes">

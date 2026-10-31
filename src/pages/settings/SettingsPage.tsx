@@ -52,6 +52,11 @@ import { SettingsTabIcon } from '../../components/icons/SettingsTabIcon';
 import { ExtensionIframe } from '../../components/extensions/ExtensionIframe';
 import { useExtensions } from '../../hooks/useExtensions';
 import {
+  Megaphone,
+  ShieldCheck,
+  CheckCircle2,
+  XCircle,
+  Sliders,
   CalendarClock,
   Compass,
   FolderKanban,
@@ -74,7 +79,12 @@ import {
   Navigation,
   Plane,
   Luggage,
+  HeartHandshake,
+  Blocks,
 } from 'lucide-react';
+import { ExtensionsPanel } from '../../components/settings/ExtensionsPanel';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
+import { CRM_UI_VERSION } from '../../buildInfo';
 
 const inputClass =
   'h-9 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-400';
@@ -907,6 +917,18 @@ const SETTINGS_TAB_GROUPS: SettingsTabGroup[] = [
         keywords: 'company name tax gst state address office branch unit of measure uom pcs kg litre',
       },
       {
+        id: 'modules',
+        label: 'Modules & Features',
+        subtitle: 'Toggle optional CRM modules on or off',
+        keywords: 'modules optional features toggle expense marketing customer success data quality activate disable sidebar route',
+      },
+      {
+        id: 'extensions',
+        label: 'Extensions',
+        subtitle: 'Product Sales or Project Delivery workspace',
+        keywords: 'extensions product project plugin workspace mode request type pipeline upload enable disable sales orders projects tasks',
+      },
+      {
         id: 'shipping',
         label: 'Shipping & Logistics',
         subtitle: 'Origin state & regional freight tariffs',
@@ -989,12 +1011,29 @@ const SETTINGS_TAB_GROUPS: SettingsTabGroup[] = [
 ];
 
 export const SettingsPage: React.FC = () => {
-  const { hasPermission, loading: authLoading } = useAuth();
-  const canManageSettings = hasPermission('crm.settings.manage');
+  const { hasPermission, loading: authLoading, refreshAuth } = useAuth();
+  const canManageSettings = useMemo(() => hasPermission('crm.settings.manage'), [hasPermission]);
   const { settingsTabs } = useExtensions();
+  /*
+   * The active CRM extension (Settings → Extensions) decides which settings
+   * tabs make sense: Product Sales has no Projects/Tasks/Time Logs, so the
+   * project tabs go; Project Delivery has no Sales Orders or shipments, so
+   * Shipping & Logistics goes.
+   */
+  const { extension: activeExtension, showProjects, showSalesOrders } = useActiveExtension();
+  const hiddenSettingsTabs = useMemo(() => {
+    const hidden = new Set<string>();
+    if (!showProjects) {
+      hidden.add('projects');
+      hidden.add('project-statuses');
+    }
+    if (!showSalesOrders) hidden.add('shipping');
+    return hidden;
+  }, [showProjects, showSalesOrders]);
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab') as SettingsTabId | null;
-  const knownCoreTabs = SETTINGS_TABS.some((tab) => tab.id === tabParam);
+  const knownCoreTabs =
+    SETTINGS_TABS.some((tab) => tab.id === tabParam) && !hiddenSettingsTabs.has(String(tabParam));
   const knownExtTab = settingsTabs.some(
     (tab) => tab.tabId === tabParam || (tab.key === 'travel' && tabParam === 'travel')
   );
@@ -1155,9 +1194,17 @@ export const SettingsPage: React.FC = () => {
           }
         : null;
 
-    const base = extensionGroup
+    const allGroups = extensionGroup
       ? [...SETTINGS_TAB_GROUPS, extensionGroup]
       : SETTINGS_TAB_GROUPS;
+
+    // Drop the tabs the active CRM extension has no use for, then empty groups.
+    const base = allGroups
+      .map((group) => ({
+        ...group,
+        tabs: group.tabs.filter((t) => !hiddenSettingsTabs.has(String(t.id))),
+      }))
+      .filter((group) => group.tabs.length > 0);
 
     if (!query) return base;
     return base
@@ -1171,7 +1218,7 @@ export const SettingsPage: React.FC = () => {
         ),
       }))
       .filter((group) => group.tabs.length > 0);
-  }, [tabFilter, settingsTabs]);
+  }, [tabFilter, settingsTabs, hiddenSettingsTabs]);
 
   const filteredTabsCount = useMemo(() => {
     return filteredTabGroups.reduce((acc, g) => acc + g.tabs.length, 0);
@@ -1235,6 +1282,7 @@ export const SettingsPage: React.FC = () => {
   }, [setTab]);
 
   const load = useCallback(async () => {
+    if (authLoading) return;
     if (!canManageSettings) {
       setLoading(false);
       return;
@@ -1265,7 +1313,7 @@ export const SettingsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [canManageSettings]);
+  }, [authLoading, canManageSettings]);
 
   useEffect(() => {
     void load();
@@ -1298,7 +1346,15 @@ export const SettingsPage: React.FC = () => {
 
     const payload: Partial<CrmSettings> = {};
 
-    if (activeTab === 'general') {
+    if (activeTab === 'modules') {
+      const raw = settings.enabled_modules || {};
+      payload.enabled_modules = {
+        expenses: Boolean(raw.expenses),
+        marketing: Boolean(raw.marketing),
+        customer_success: Boolean(raw.customer_success || raw.customerSuccess),
+        data_quality: Boolean(raw.data_quality || raw.dataQuality),
+      };
+    } else if (activeTab === 'general') {
       const companyName = settings.company_name.trim();
       const companyState = settings.company_state.trim();
       // Prefer the Select value when not CUSTOM so USD/EUR is never lost on save.
@@ -1330,12 +1386,21 @@ export const SettingsPage: React.FC = () => {
       // Currency + tax live on General tab UI — must persist here (not only Finance).
       payload.default_currency = currency || 'INR';
       payload.tax_rate = Number(settings.tax_rate);
+      payload.proforma_advance_enabled = Boolean(settings.proforma_advance_enabled);
+      payload.quotation_auto_accept_on_payment = Boolean(settings.quotation_auto_accept_on_payment);
+      payload.auto_convert_proforma_on_delivery = Boolean(settings.auto_convert_proforma_on_delivery);
+      payload.proforma_prefix = String(settings.proforma_prefix || 'PI-').trim();
+      payload.default_advance_percent = Number(settings.default_advance_percent) || 30;
       payload.sample_units_of_measure = (settings.sample_units_of_measure || [])
         .map((u) => String(u || '').trim())
         .filter(Boolean);
       payload.courier_carriers = (settings.courier_carriers || [])
         .map((c) => String(c || '').trim())
         .filter(Boolean);
+      payload.proforma_advance_enabled = Boolean(settings.proforma_advance_enabled);
+      payload.quotation_auto_accept_on_payment = Boolean(settings.quotation_auto_accept_on_payment);
+      payload.proforma_prefix = (settings.proforma_prefix || 'PI-').trim();
+      payload.default_advance_percent = Math.max(1, Math.min(100, Number(settings.default_advance_percent) || 30));
     } else if (activeTab === 'shipping') {
       payload.state_shipping_rates = settings.state_shipping_rates || {};
       payload.free_shipping_threshold = Number(settings.free_shipping_threshold) || 0;
@@ -1407,6 +1472,11 @@ export const SettingsPage: React.FC = () => {
       const refreshed = await crmApi.getSettings();
       const data = refreshed.data;
       setSettings(data);
+      try {
+        await refreshAuth?.();
+      } catch {
+        /* non-blocking */
+      }
       if (data?.default_currency) {
         const code = String(data.default_currency).trim().toUpperCase();
         const known = SETTINGS_CURRENCIES.some((item) => item.code === code);
@@ -1530,7 +1600,9 @@ export const SettingsPage: React.FC = () => {
   // Not a <form>: nested panels (Pipelines, Request Types) have their own
   // saves. A wrapping form steals Enter/submit and never creates the pipeline.
   const hideGlobalSave =
-    activeTab === 'opportunities' || activeTab === 'qualification-match';
+    activeTab === 'opportunities' ||
+    activeTab === 'qualification-match' ||
+    activeTab === 'extensions';
 
   return (
     <div
@@ -1549,6 +1621,17 @@ export const SettingsPage: React.FC = () => {
         </div>
         <div data-tour="settings-header-actions" className="flex flex-wrap items-center gap-2">
           <TourButton moduleId="settings" />
+          {/* Which CRM extension shapes this workspace — and which UI build is loaded. */}
+          <button
+            type="button"
+            onClick={() => setTab('extensions')}
+            title={`Active extension · UI build ${CRM_UI_VERSION}. Click to manage extensions.`}
+            className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800 cursor-pointer hover:bg-blue-100"
+          >
+            <Blocks className="h-3.5 w-3.5" aria-hidden />
+            {activeExtension.name}
+            <span className="font-mono text-[10px] font-medium text-blue-500">v{CRM_UI_VERSION}</span>
+          </button>
           <span
             className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
               dirty
@@ -1789,6 +1872,319 @@ export const SettingsPage: React.FC = () => {
             )}
           </div>
 
+      {activeTab === 'extensions' && (
+        <ExtensionsPanel
+          onChanged={() => {
+            void refreshAuth();
+            void load();
+          }}
+        />
+      )}
+
+      {activeTab === 'modules' && (() => {
+        const isExpEnabled = Boolean(settings.enabled_modules?.expenses);
+        const isMktEnabled = Boolean(settings.enabled_modules?.marketing);
+        const isCsEnabled = Boolean(
+          settings.enabled_modules?.customer_success || settings.enabled_modules?.customerSuccess
+        );
+        const isDqEnabled = Boolean(settings.enabled_modules?.data_quality || settings.enabled_modules?.dataQuality);
+
+        const setMod = (k: 'expenses' | 'marketing' | 'customer_success' | 'data_quality', val: boolean) => {
+          setSettings((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              enabled_modules: {
+                ...(prev.enabled_modules || {}),
+                [k]: val,
+                ...(k === 'data_quality' ? { dataQuality: val } : {}),
+                ...(k === 'customer_success' ? { customerSuccess: val } : {}),
+              },
+            };
+          });
+          setDirty(true);
+        };
+
+        return (
+          <section className={cardClass}>
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 border-b border-zinc-100 pb-4 mb-6">
+              <div>
+                <h2 className="mt-0 text-base font-bold text-zinc-950 flex items-center gap-2">
+                  <Sliders className="h-5 w-5 text-blue-600" />
+                  <span>Optional Modules & System Features</span>
+                </h2>
+                <p className="mt-1 text-xs text-zinc-500 leading-relaxed max-w-2xl">
+                  Enable or disable optional CRM modules for your workspace. Optional modules are disabled by default. When a module is turned off, its navigation link is automatically hidden from the sidebar menu, and its URL route is secured so unauthorized or disabled access is blocked.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                  Live Dynamic Sync
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {/* 1. Expenses Module */}
+              <div className={`p-5 rounded-2xl border transition-all ${
+                isExpEnabled
+                  ? 'border-blue-300 bg-blue-50/20 shadow-xs'
+                  : 'border-zinc-200 bg-zinc-50/60'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div className="flex items-start gap-4">
+                    <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ${
+                      isExpEnabled
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-zinc-200 text-zinc-500'
+                    }`}>
+                      <Receipt className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-bold text-zinc-950 m-0">Expense Management & Approvals</h3>
+                        {isExpEnabled ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            <CheckCircle2 className="h-3 w-3" /> Enabled
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-zinc-200 text-zinc-700 border border-zinc-300">
+                            <XCircle className="h-3 w-3" /> Disabled
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs text-zinc-500 leading-relaxed mb-0">
+                        Record employee travel expenses, multi-level management approvals, billable client costs, and expense claims.
+                      </p>
+                      <div className="mt-2 text-[11px] text-zinc-400 font-mono">
+                        Route: <span className="font-semibold text-zinc-600">/expenses</span> &middot; Sidebar: <span className="font-semibold text-zinc-600">Expenses</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 p-1 rounded-xl border border-zinc-200 bg-white shadow-xs shrink-0 self-end sm:self-center">
+                    <button
+                      type="button"
+                      onClick={() => setMod('expenses', true)}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        isExpEnabled
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 bg-transparent'
+                      }`}
+                    >
+                      Enable
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMod('expenses', false)}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        !isExpEnabled
+                          ? 'bg-zinc-800 text-white shadow-xs'
+                          : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 bg-transparent'
+                      }`}
+                    >
+                      Disable
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Marketing Automation */}
+              <div className={`p-5 rounded-2xl border transition-all ${
+                isMktEnabled
+                  ? 'border-purple-300 bg-purple-50/20 shadow-xs'
+                  : 'border-zinc-200 bg-zinc-50/60'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div className="flex items-start gap-4">
+                    <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ${
+                      isMktEnabled
+                        ? 'bg-purple-600 text-white shadow-sm'
+                        : 'bg-zinc-200 text-zinc-500'
+                    }`}>
+                      <Megaphone className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-bold text-zinc-950 m-0">Marketing Automation</h3>
+                        {isMktEnabled ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            <CheckCircle2 className="h-3 w-3" /> Enabled
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-zinc-200 text-zinc-700 border border-zinc-300">
+                            <XCircle className="h-3 w-3" /> Disabled
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs text-zinc-500 leading-relaxed mb-0">
+                        Email marketing campaigns, audience segments, outbound broadcasts, and lead nurture workflows.
+                      </p>
+                      <div className="mt-2 text-[11px] text-zinc-400 font-mono">
+                        Route: <span className="font-semibold text-zinc-600">/marketing</span> &middot; Sidebar: <span className="font-semibold text-zinc-600">Marketing</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 p-1 rounded-xl border border-zinc-200 bg-white shadow-xs shrink-0 self-end sm:self-center">
+                    <button
+                      type="button"
+                      onClick={() => setMod('marketing', true)}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        isMktEnabled
+                          ? 'bg-purple-600 text-white shadow-xs'
+                          : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 bg-transparent'
+                      }`}
+                    >
+                      Enable
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMod('marketing', false)}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        !isMktEnabled
+                          ? 'bg-zinc-800 text-white shadow-xs'
+                          : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 bg-transparent'
+                      }`}
+                    >
+                      Disable
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Customer Success */}
+              <div className={`p-5 rounded-2xl border transition-all ${
+                isCsEnabled
+                  ? 'border-rose-300 bg-rose-50/20 shadow-xs'
+                  : 'border-zinc-200 bg-zinc-50/60'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div className="flex items-start gap-4">
+                    <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ${
+                      isCsEnabled
+                        ? 'bg-rose-600 text-white shadow-sm'
+                        : 'bg-zinc-200 text-zinc-500'
+                    }`}>
+                      <HeartHandshake className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-bold text-zinc-950 m-0">Customer Success</h3>
+                        {isCsEnabled ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            <CheckCircle2 className="h-3 w-3" /> Enabled
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-zinc-200 text-zinc-700 border border-zinc-300">
+                            <XCircle className="h-3 w-3" /> Disabled
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs text-zinc-500 leading-relaxed mb-0">
+                        Client health scores, churn-risk warnings, satisfaction reviews and renewal follow-ups.
+                      </p>
+                      <div className="mt-2 text-[11px] text-zinc-400 font-mono">
+                        Route: <span className="font-semibold text-zinc-600">/customer-success</span> &middot; Sidebar: <span className="font-semibold text-zinc-600">Customer Success</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 p-1 rounded-xl border border-zinc-200 bg-white shadow-xs shrink-0 self-end sm:self-center">
+                    <button
+                      type="button"
+                      onClick={() => setMod('customer_success', true)}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        isCsEnabled
+                          ? 'bg-rose-600 text-white shadow-xs'
+                          : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 bg-transparent'
+                      }`}
+                    >
+                      Enable
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMod('customer_success', false)}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        !isCsEnabled
+                          ? 'bg-zinc-800 text-white shadow-xs'
+                          : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 bg-transparent'
+                      }`}
+                    >
+                      Disable
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Data Quality & Deduplication */}
+              <div className={`p-5 rounded-2xl border transition-all ${
+                isDqEnabled
+                  ? 'border-emerald-300 bg-emerald-50/20 shadow-xs'
+                  : 'border-zinc-200 bg-zinc-50/60'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div className="flex items-start gap-4">
+                    <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ${
+                      isDqEnabled
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'bg-zinc-200 text-zinc-500'
+                    }`}>
+                      <ShieldCheck className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-bold text-zinc-950 m-0">Data Quality &amp; Hygiene</h3>
+                        {isDqEnabled ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            <CheckCircle2 className="h-3 w-3" /> Enabled
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-zinc-200 text-zinc-700 border border-zinc-300">
+                            <XCircle className="h-3 w-3" /> Disabled
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs text-zinc-500 leading-relaxed mb-0">
+                        Automated lead and client record completeness scoring, field validation hygiene, and duplicate detection.
+                      </p>
+                      <div className="mt-2 text-[11px] text-zinc-400 font-mono">
+                        Route: <span className="font-semibold text-zinc-600">/data-quality</span> &middot; Sidebar: <span className="font-semibold text-zinc-600">Data Quality</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 p-1 rounded-xl border border-zinc-200 bg-white shadow-xs shrink-0 self-end sm:self-center">
+                    <button
+                      type="button"
+                      onClick={() => setMod('data_quality', true)}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        isDqEnabled
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 bg-transparent'
+                      }`}
+                    >
+                      Enable
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMod('data_quality', false)}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        !isDqEnabled
+                          ? 'bg-zinc-800 text-white shadow-xs'
+                          : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 bg-transparent'
+                      }`}
+                    >
+                      Disable
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        );
+      })()}
+
       {activeTab === 'general' && (
         <section data-tour="settings-general-profile" className={cardClass}>
           <h2 className="mt-0 text-base font-bold text-zinc-950">General & Company Profile</h2>
@@ -1799,14 +2195,8 @@ export const SettingsPage: React.FC = () => {
             blocks new proformas, and keeps everything already recorded.
           */}
           <section className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-            <label className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
-                checked={Boolean(settings.proforma_advance_enabled)}
-                onChange={(e) => update('proforma_advance_enabled', e.target.checked)}
-              />
-              <span>
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+              <div className="flex-1">
                 <span className="block text-sm font-semibold text-zinc-950">
                   Enable Proforma &amp; Advance Payment
                 </span>
@@ -1816,19 +2206,39 @@ export const SettingsPage: React.FC = () => {
                   invoice for the full value with the advance carried across. Existing proformas
                   and payments are never deleted when this is switched off.
                 </span>
-              </span>
-            </label>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 rounded-lg border border-zinc-200 bg-white p-1">
+                <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer transition-colors ${
+                  settings.proforma_advance_enabled ? 'bg-blue-600 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
+                }`}>
+                  <input
+                    type="radio"
+                    name="proforma_advance_enabled"
+                    className="sr-only"
+                    checked={Boolean(settings.proforma_advance_enabled)}
+                    onChange={() => update('proforma_advance_enabled', true)}
+                  />
+                  <span>ON</span>
+                </label>
+                <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer transition-colors ${
+                  !settings.proforma_advance_enabled ? 'bg-zinc-800 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
+                }`}>
+                  <input
+                    type="radio"
+                    name="proforma_advance_enabled"
+                    className="sr-only"
+                    checked={!settings.proforma_advance_enabled}
+                    onChange={() => update('proforma_advance_enabled', false)}
+                  />
+                  <span>OFF</span>
+                </label>
+              </div>
+            </div>
 
             {settings.proforma_advance_enabled ? (
               <div className="mt-4 space-y-4 border-t border-zinc-200 pt-4">
-                <label className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
-                    checked={Boolean(settings.quotation_auto_accept_on_payment)}
-                    onChange={(e) => update('quotation_auto_accept_on_payment', e.target.checked)}
-                  />
-                  <span>
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 rounded-lg border border-zinc-200 bg-white p-3">
+                  <div className="flex-1">
                     <span className="block text-sm font-semibold text-zinc-950">
                       Auto-accept quotation on successful payment
                     </span>
@@ -1837,25 +2247,71 @@ export const SettingsPage: React.FC = () => {
                       Won and locks the deal. Leave this off to take the money and accept the
                       quotation as a separate, deliberate step.
                     </span>
-                  </span>
-                </label>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 rounded-lg border border-zinc-200 bg-zinc-50 p-1">
+                    <label className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold cursor-pointer transition-colors ${
+                      settings.quotation_auto_accept_on_payment ? 'bg-blue-600 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
+                    }`}>
+                      <input
+                        type="radio"
+                        name="quotation_auto_accept_on_payment"
+                        className="sr-only"
+                        checked={Boolean(settings.quotation_auto_accept_on_payment)}
+                        onChange={() => update('quotation_auto_accept_on_payment', true)}
+                      />
+                      <span>ON</span>
+                    </label>
+                    <label className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold cursor-pointer transition-colors ${
+                      !settings.quotation_auto_accept_on_payment ? 'bg-zinc-800 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
+                    }`}>
+                      <input
+                        type="radio"
+                        name="quotation_auto_accept_on_payment"
+                        className="sr-only"
+                        checked={!settings.quotation_auto_accept_on_payment}
+                        onChange={() => update('quotation_auto_accept_on_payment', false)}
+                      />
+                      <span>OFF</span>
+                    </label>
+                  </div>
+                </div>
 
-                <label className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
-                    checked={Boolean(settings.auto_convert_proforma_on_delivery)}
-                    onChange={(e) => update('auto_convert_proforma_on_delivery', e.target.checked)}
-                  />
-                  <span>
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 rounded-lg border border-zinc-200 bg-white p-3">
+                  <div className="flex-1">
                     <span className="block text-sm font-semibold text-zinc-950">
                       Auto convert Proforma to Tax Invoice when Sales Order is marked Delivered
                     </span>
                     <span className="mt-0.5 block text-xs text-zinc-600">
                       When all shipments on the sales order are delivered, automatically convert the eligible proforma into a final tax invoice and carry advance payments across. Leave this off to convert manually.
                     </span>
-                  </span>
-                </label>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 rounded-lg border border-zinc-200 bg-zinc-50 p-1">
+                    <label className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold cursor-pointer transition-colors ${
+                      settings.auto_convert_proforma_on_delivery ? 'bg-blue-600 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
+                    }`}>
+                      <input
+                        type="radio"
+                        name="auto_convert_proforma_on_delivery"
+                        className="sr-only"
+                        checked={Boolean(settings.auto_convert_proforma_on_delivery)}
+                        onChange={() => update('auto_convert_proforma_on_delivery', true)}
+                      />
+                      <span>ON</span>
+                    </label>
+                    <label className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold cursor-pointer transition-colors ${
+                      !settings.auto_convert_proforma_on_delivery ? 'bg-zinc-800 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
+                    }`}>
+                      <input
+                        type="radio"
+                        name="auto_convert_proforma_on_delivery"
+                        className="sr-only"
+                        checked={!settings.auto_convert_proforma_on_delivery}
+                        onChange={() => update('auto_convert_proforma_on_delivery', false)}
+                      />
+                      <span>OFF</span>
+                    </label>
+                  </div>
+                </div>
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <label>
@@ -2177,7 +2633,8 @@ export const SettingsPage: React.FC = () => {
               {(
                 [
                   ['quotation_prefix', 'Quotation Prefix *'],
-                  ['sales_order_prefix', 'Sales Order Prefix'],
+                  // Sales Orders exist only under the Product Sales extension.
+                  ...(showSalesOrders ? [['sales_order_prefix', 'Sales Order Prefix']] : []),
                   ['invoice_prefix', 'Invoice Prefix *'],
                   ['payment_prefix', 'Payment Receipt Prefix *'],
                   ['expense_prefix', 'Expense Voucher Prefix *'],
@@ -2206,17 +2663,20 @@ export const SettingsPage: React.FC = () => {
                   onChange={(e) => update('quotation_valid_days', Number(e.target.value))}
                 />
               </label>
-              <label>
-                <span className={labelClass}>Default Billable Hourly Rate</span>
-                <input
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  className={inputClass}
-                  value={settings.default_hourly_rate}
-                  onChange={(e) => update('default_hourly_rate', Number(e.target.value))}
-                />
-              </label>
+              {/* Billable hours belong to Time Logs, a Project Delivery module. */}
+              {showProjects && (
+                <label>
+                  <span className={labelClass}>Default Billable Hourly Rate</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    className={inputClass}
+                    value={settings.default_hourly_rate}
+                    onChange={(e) => update('default_hourly_rate', Number(e.target.value))}
+                  />
+                </label>
+              )}
             </div>
           </section>
           <div data-tour="settings-finance-categories">
@@ -2248,6 +2708,8 @@ export const SettingsPage: React.FC = () => {
               : ''}
           </div>
           <div className="mt-4 space-y-4">
+            {/* Task reminders belong to Tasks, a Project Delivery module. */}
+            {showProjects && (
             <div data-tour="settings-email-reminders" className="space-y-4">
               <label className="flex items-center gap-2 text-sm font-semibold text-zinc-700">
                 <input
@@ -2285,6 +2747,7 @@ export const SettingsPage: React.FC = () => {
                 />
               </div>
             </div>
+            )}
             <div
               data-tour="settings-email-templates"
               className="grid grid-cols-1 gap-4 lg:grid-cols-2"

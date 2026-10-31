@@ -3,6 +3,8 @@
  * Used by RequirePermission so typing a URL cannot open modules the user cannot access.
  */
 
+import type { CrmFeatureFlags } from '../types/dashboard';
+
 export interface RouteAccessRule {
   /** User needs at least one of these permissions. */
   anyOf: string[];
@@ -149,6 +151,14 @@ const PREFIX_RULES: Array<{ prefix: string; rule: RouteAccessRule }> = [
 
 const PROJECT_EDIT_RE = /^\/projects\/[^/]+\/edit$/;
 
+/** Labels for the core modules a CRM extension can hide. */
+const EXTENSION_MODULE_LABELS: Record<string, string> = {
+  projects: 'Projects',
+  tasks: 'Tasks',
+  'time-logs': 'Time Logs',
+  'sales-orders': 'Sales Orders',
+};
+
 export function normalizeRoutePath(pathname: string): string {
   const clean = String(pathname || '')
     .replace(/^#/, '')
@@ -180,8 +190,46 @@ export function evaluateRouteAccess(
     hasAnyPermission: (...permissions: string[]) => boolean;
     isClient: boolean;
     activeRole?: string | null;
+    features?: CrmFeatureFlags;
   }
 ): { allowed: boolean; rule: RouteAccessRule | null } {
+  const path = normalizeRoutePath(pathname);
+
+  // Check optional module toggles: block route when module is disabled (or not explicitly enabled)
+  const modules = opts.features?.modules;
+  if (!modules?.expenses && (path === '/expenses' || path.startsWith('/expenses/'))) {
+    return { allowed: false, rule: { anyOf: [], label: 'Expenses (Module Disabled)' } };
+  }
+  if (!modules?.marketing && (path === '/marketing' || path.startsWith('/marketing/'))) {
+    return { allowed: false, rule: { anyOf: [], label: 'Marketing Automation (Module Disabled)' } };
+  }
+  if (!modules?.customerSuccess && (path === '/customer-success' || path.startsWith('/customer-success/'))) {
+    return { allowed: false, rule: { anyOf: [], label: 'Customer Success (Module Disabled)' } };
+  }
+  if (!modules?.dataQuality && (path === '/data-quality' || path.startsWith('/data-quality/'))) {
+    return { allowed: false, rule: { anyOf: [], label: 'Data Quality (Module Disabled)' } };
+  }
+
+  /*
+   * Core modules hidden by the active CRM extension (Settings → Extensions):
+   * Product Sales hides Projects/Tasks/Time Logs, Project Delivery hides
+   * Sales Orders. Typing the URL must not reopen them.
+   */
+  const hiddenByExtension = opts.features?.activeExtension?.hiddenModules || [];
+  for (const routeId of hiddenByExtension) {
+    const prefix = `/${routeId}`;
+    if (path === prefix || path.startsWith(`${prefix}/`)) {
+      const label = EXTENSION_MODULE_LABELS[routeId] || routeId;
+      return {
+        allowed: false,
+        rule: {
+          anyOf: [],
+          label: `${label} (Not in Active Extension)`,
+        },
+      };
+    }
+  }
+
   const rule = getRouteAccessRule(pathname);
   if (!rule) return { allowed: true, rule: null };
   if (rule.denyClient && opts.isClient) return { allowed: false, rule };

@@ -7,11 +7,12 @@ export const ACTIVE_ACTIVITY_STORAGE_KEY = 'openext_crm_active_activity_id';
 const TRACKING_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
 export function useActivityLocationTracker() {
-  const { user } = useAuth();
+  const { user, activeRole } = useAuth();
   const lastLoggedRef = useRef<number>(0);
 
   useEffect(() => {
-    if (!user?.userId) return;
+    // Background tracking is strictly restricted to sales representatives only
+    if (!user?.userId || activeRole !== 'sales-representative') return;
 
     const performLocationLog = async () => {
       let activeActivityId: string | null = null;
@@ -79,5 +80,5 @@ export function useActivityLocationTracker() {
       clearTimeout(initTimer);
       clearInterval(interval);
     };
-  }, [user?.userId]);
+  }, [user?.userId, activeRole]);
 }

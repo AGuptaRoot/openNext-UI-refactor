@@ -5,6 +5,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CloseIcon from '@mui/icons-material/Close';
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { DocumentUploadControl } from '../../components/common/DocumentUploadControl';
 import type { AssignableUser } from '../../types/leads';
 import {
@@ -61,6 +62,7 @@ function userId(user: AssignableUser): string {
 export const TicketDetailPage: React.FC = () => {
   const { id = '' } = useParams();
   const { isClient, canAssignTickets, hasPermission } = useAuth();
+  const { showProjects } = useActiveExtension();
   const canManageStatus = hasPermission('crm.tickets.write') && !isClient;
   const canResolve = hasPermission('crm.tickets.resolve') && !isClient;
 
@@ -661,10 +663,12 @@ export const TicketDetailPage: React.FC = () => {
                 <dt className="text-xs text-zinc-500">Channel</dt>
                 <dd className="m-0 mt-1 text-zinc-700">{ticket.channelName}</dd>
               </div>
-              <div>
-                <dt className="text-xs text-zinc-500">Project</dt>
-                <dd className="m-0 mt-1 text-zinc-700">{displayLabel(ticket.projectName)}</dd>
-              </div>
+              {showProjects && (
+                <div>
+                  <dt className="text-xs text-zinc-500">Project</dt>
+                  <dd className="m-0 mt-1 text-zinc-700">{displayLabel(ticket.projectName)}</dd>
+                </div>
+              )}
               <div>
                 <dt className="text-xs text-zinc-500">Created</dt>
                 <dd className="m-0 mt-1 text-zinc-700">{formatDateTime(ticket.createdAt)}</dd>

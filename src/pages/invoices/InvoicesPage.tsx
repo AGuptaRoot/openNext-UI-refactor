@@ -28,6 +28,7 @@ import {
 import { triggerFileDownload } from '../../utils/fileDownload';
 import { displayLabel } from '../../utils/displayLabels';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 
 type MainTab = 'invoices' | 'recurring';
 
@@ -82,6 +83,7 @@ export const InvoicesPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasPermission, isClient, features } = useAuth();
+  const { showProjects } = useActiveExtension();
   const { confirm } = useDialog();
   const canWriteFinance = hasPermission('crm.finance.write') && !isClient;
   const { clients, projects } = useFinanceOptions();
@@ -1054,23 +1056,25 @@ export const InvoicesPage: React.FC = () => {
                   onChange={(nextId) => setScheduleForm((f) => ({ ...f, clientId: nextId }))}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-[11px] font-semibold uppercase text-zinc-500">
-                Project
-                <select
-                  className={fieldClass}
-                  value={scheduleForm.projectId || ''}
-                  onChange={(e) => setScheduleForm((f) => ({ ...f, projectId: e.target.value }))}
-                >
-                  <option value="">None</option>
-                  {projects
-                    .filter((project) => !scheduleForm.clientId || project.clientId === scheduleForm.clientId)
-                    .map((project) => (
-                      <option key={project._id} value={project._id}>
-                        {project.name}
-                      </option>
-                    ))}
-                </select>
-              </label>
+              {showProjects && (
+                <label className="flex flex-col gap-1 text-[11px] font-semibold uppercase text-zinc-500">
+                  Project
+                  <select
+                    className={fieldClass}
+                    value={scheduleForm.projectId || ''}
+                    onChange={(e) => setScheduleForm((f) => ({ ...f, projectId: e.target.value }))}
+                  >
+                    <option value="">None</option>
+                    {projects
+                      .filter((project) => !scheduleForm.clientId || project.clientId === scheduleForm.clientId)
+                      .map((project) => (
+                        <option key={project._id} value={project._id}>
+                          {project.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              )}
               <label className="flex flex-col gap-1 text-[11px] font-semibold uppercase text-zinc-500">
                 Frequency
                 <select

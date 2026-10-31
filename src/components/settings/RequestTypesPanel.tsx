@@ -1,22 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
-import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
-import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined';
 import { DynamicFormBuilder } from '../form-builder/DynamicFormBuilder';
 import { crmApi } from '../../services/api';
 import {
-  emptyRequestTypeDraft,
   ensureBudgetField,
   slugifyFieldKey,
   type RequestType,
   type RequestTypeField,
 } from '../../types/request-types';
 import { getDefaultCurrencySymbol } from '../../utils/currency';
-import { AlertTriangle, Ruler } from 'lucide-react';
+import { AlertTriangle, Lock, Ruler } from 'lucide-react';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
+import { isInactiveExtensionRequestType } from '../../types/extensions';
 
 const inputClass =
   'h-9 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-400';
@@ -37,7 +35,14 @@ type Draft = {
 
 export function RequestTypesPanel() {
   const currencySym = getDefaultCurrencySymbol();
+  /*
+   * The active CRM extension (Settings → Extensions) fixes the Request Type.
+   * Admins still edit the fixed type's fields, options and budget bounds, but
+   * cannot add, delete or switch types here — the extension does that.
+   */
+  const { extension: activeExtension, requestTypeKey: fixedKey } = useActiveExtension();
   const [items, setItems] = useState<RequestType[]>([]);
+  const visibleItems = items.filter((rt) => !isInactiveExtensionRequestType(rt.key, fixedKey));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
@@ -64,16 +69,6 @@ export function RequestTypesPanel() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  const openCreate = () => {
-    const empty = emptyRequestTypeDraft();
-    setMode('create');
-    setDraft({
-      ...empty,
-      fields: ensureBudgetField(empty.fields, empty.minBudget, empty.maxBudget),
-    });
-    setMessage(null);
-  };
 
   const openEdit = (item: RequestType) => {
     setMode('edit');
@@ -170,25 +165,6 @@ export function RequestTypesPanel() {
     }
   };
 
-  const toggleEnabled = async (item: RequestType) => {
-    setSaving(true);
-    try {
-      await crmApi.updateRequestType(item._id, { isEnabled: !item.isEnabled });
-      setMessage({
-        kind: 'success',
-        text: `"${item.name}" ${item.isEnabled ? 'disabled' : 'enabled'}.`,
-      });
-      await load();
-    } catch (reason) {
-      setMessage({
-        kind: 'error',
-        text: reason instanceof Error ? reason.message : 'Failed to update status',
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     if ((deleteTarget.leadCount || 0) > 0) {
@@ -268,14 +244,10 @@ export function RequestTypesPanel() {
                     placeholder="e.g. Custom Software"
                   />
                 </label>
-                <label className="inline-flex items-end gap-2 pb-1 text-xs font-semibold text-zinc-700">
-                  <input
-                    type="checkbox"
-                    checked={draft.isEnabled}
-                    onChange={(e) => setDraft({ ...draft, isEnabled: e.target.checked })}
-                  />
-                  Enabled (available on new leads)
-                </label>
+                <div className="inline-flex items-end gap-2 pb-1 text-xs font-semibold text-zinc-500">
+                  <Lock className="h-4 w-4 shrink-0" aria-hidden />
+                  Fixed by the {activeExtension.name} extension
+                </div>
                 <label className="block md:col-span-2">
                   <span className={labelClass}>Description</span>
                   <input
@@ -422,11 +394,12 @@ export function RequestTypesPanel() {
               Request Types
             </div>
             <h2 className="m-0 text-xl font-bold tracking-tight text-zinc-950">
-              Dynamic Request Type Builder
+              Commercial Requirement Form
             </h2>
             <p className="mb-0 mt-2 max-w-2xl text-sm leading-relaxed text-zinc-500">
-              Create request types with custom commercial forms. Only enabled types appear on new
-              leads. Configure Qualification Match catalogs per request type.
+              The request type is fixed by the active extension. Edit its form fields, allowed
+              values and budget bounds here; they drive the Commercial Requirement tab and the
+              Qualification Match score on every lead.
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
@@ -438,14 +411,23 @@ export function RequestTypesPanel() {
             >
               <RefreshIcon sx={{ fontSize: 16 }} /> Refresh
             </button>
-            <button
-              type="button"
-              onClick={openCreate}
-              className="inline-flex h-9 items-center gap-1 rounded-lg border-0 bg-zinc-950 px-4 text-xs font-semibold text-white"
-            >
-              <AddIcon sx={{ fontSize: 16 }} /> New Request Type
-            </button>
           </div>
+        </div>
+
+        <div className="flex flex-col gap-2 rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-2 text-xs text-blue-900">
+            <Lock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            <span>
+              <strong className="font-semibold">{activeExtension.requestTypeName}</strong> is the
+              request type for every new lead while{' '}
+              <strong className="font-semibold">{activeExtension.name}</strong> is the active
+              extension. Users cannot pick a different type on Create Lead or the Commercial
+              Requirement tab.
+            </span>
+          </div>
+          <span className="shrink-0 text-[11px] font-semibold text-blue-700">
+            Change it in Settings → Extensions
+          </span>
         </div>
 
         {message && (
@@ -476,7 +458,7 @@ export function RequestTypesPanel() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {visibleItems.map((item) => (
                   <tr key={item._id} className="border-b border-zinc-100 last:border-0">
                     <td className="px-4 py-3">
                       <button
@@ -548,36 +530,10 @@ export function RequestTypesPanel() {
                         </button>
                         <button
                           type="button"
-                          disabled={saving}
-                          onClick={() => void toggleEnabled(item)}
-                          className="inline-flex h-8 items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2.5 text-[11px] font-semibold text-zinc-700"
-                        >
-                          <PowerSettingsNewIcon sx={{ fontSize: 14 }} />
-                          {item.isEnabled ? 'Disable' : 'Enable'}
-                        </button>
-                        <button
-                          type="button"
                           onClick={() => openEdit(item)}
                           className="inline-flex h-8 items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2.5 text-[11px] font-semibold text-zinc-700"
                         >
-                          <EditOutlinedIcon sx={{ fontSize: 14 }} /> Edit
-                        </button>
-                        <button
-                          type="button"
-                          disabled={saving}
-                          onClick={() => {
-                            if ((item.leadCount || 0) > 0) {
-                              setMessage({
-                                kind: 'error',
-                                text: `Cannot delete "${item.name}" — leads are using it. Disable instead.`,
-                              });
-                              return;
-                            }
-                            setDeleteTarget(item);
-                          }}
-                          className="inline-flex h-8 items-center gap-1 rounded-lg border border-red-100 bg-white px-2.5 text-[11px] font-semibold text-red-600"
-                        >
-                          <DeleteOutlineIcon sx={{ fontSize: 14 }} /> Delete
+                          <EditOutlinedIcon sx={{ fontSize: 14 }} /> Edit fields
                         </button>
                       </div>
                     </td>

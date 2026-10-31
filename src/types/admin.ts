@@ -101,10 +101,22 @@ export interface CrmSettings {
     destination: string[];
   };
   travel_services?: string[];
+  enabled_modules?: {
+    expenses?: boolean;
+    marketing?: boolean;
+    customer_success?: boolean;
+    customerSuccess?: boolean;
+    data_quality?: boolean;
+    dataQuality?: boolean;
+  };
+  /** Active CRM extension id (Settings → Extensions). Read-only here; changed via /crm-extensions. */
+  active_extension?: string;
 }
 
 export type SettingsTabId =
   | 'general'
+  | 'modules'
+  | 'extensions'
   | 'travel'
   | 'shipping'
   | 'finance'
@@ -169,6 +181,8 @@ export interface SettingsAuditHint {
 
 export const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string }> = [
   { id: 'general', label: 'General' },
+  { id: 'modules', label: 'Modules & Features' },
+  { id: 'extensions', label: 'Extensions' },
   { id: 'shipping', label: 'Shipping' },
   { id: 'finance', label: 'Finance' },
   { id: 'email', label: 'Email' },

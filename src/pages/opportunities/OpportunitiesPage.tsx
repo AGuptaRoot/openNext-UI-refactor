@@ -6,6 +6,8 @@ import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import RequestQuoteOutlinedIcon from '@mui/icons-material/RequestQuoteOutlined';
 import ShoppingCartOutlinedIcon from '@mui/icons-material/ShoppingCartOutlined';
+import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 
 import { useAuth } from '../../context/AuthContext';
@@ -48,8 +50,15 @@ export const OpportunitiesPage: React.FC = () => {
   /** A representative sees the stage but cannot move the deal themselves. */
   const canChangeStage =
     canWrite && canChangeOpportunityStage({ isAdmin, isClient, activeRole });
-  const canViewSalesOrders = hasPermission('crm.orders.read') && !isClient;
-  const canCreateSalesOrders = hasPermission('crm.orders.write') && !isClient;
+  /*
+   * The active CRM extension decides what a won deal becomes: a Sales Order
+   * (Product Sales) or an Invoice straight away (Project Delivery).
+   */
+  const { canConvertToSalesOrder, canConvertToInvoice, showSalesOrders } = useActiveExtension();
+  const canViewSalesOrders = hasPermission('crm.orders.read') && !isClient && showSalesOrders;
+  const canCreateSalesOrders =
+    hasPermission('crm.orders.write') && !isClient && canConvertToSalesOrder;
+  const canCreateInvoices = hasPermission('crm.finance.write') && !isClient && canConvertToInvoice;
   const opportunityStages = useOpportunityStages();
   const settingsCurrency = useDefaultCurrency();
 
@@ -718,6 +727,21 @@ export const OpportunitiesPage: React.FC = () => {
                               >
                                 <ShoppingCartOutlinedIcon sx={{ fontSize: 14 }} />
                                 Create Sales Order
+                              </button>
+                            )}
+                          {isOpportunityWonStage(item.stage, item.stageType) &&
+                            canCreateInvoices && (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() =>
+                                  navigate(`/invoices/create?opportunityId=${encodeURIComponent(item._id)}`)
+                                }
+                                title="Create Invoice from this won deal"
+                                className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-[11px] font-semibold text-indigo-900 cursor-pointer disabled:opacity-50"
+                              >
+                                <ReceiptLongOutlinedIcon sx={{ fontSize: 14 }} />
+                                Create Invoice
                               </button>
                             )}
                           {isOpportunityWonStage(item.stage, item.stageType) &&

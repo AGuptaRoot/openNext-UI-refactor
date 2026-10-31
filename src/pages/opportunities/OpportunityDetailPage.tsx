@@ -6,8 +6,10 @@ import RequestQuoteOutlinedIcon from '@mui/icons-material/RequestQuoteOutlined';
 import ShoppingCartOutlinedIcon from '@mui/icons-material/ShoppingCartOutlined';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
 
 import { useAuth } from '../../context/AuthContext';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { useDialog } from '../../context/DialogContext';
 import { ApiError, crmApi } from '../../services/api';
 import { LeadPortalAccessButton } from '../../components/leads/LeadPortalAccess';
@@ -81,8 +83,15 @@ export const OpportunityDetailPage: React.FC = () => {
   const canWrite =
     (hasPermission('crm.opportunities.write') || hasPermission('crm.leads.write')) && !isClient;
   const canDelete = hasPermission('crm.opportunities.delete') && !isClient;
-  const canViewSalesOrders = hasPermission('crm.orders.read') && !isClient;
-  const canCreateSalesOrders = hasPermission('crm.orders.write') && !isClient;
+  /*
+   * The active CRM extension decides what a won deal becomes: a Sales Order
+   * (Product Sales) or an Invoice straight away (Project Delivery).
+   */
+  const { canConvertToSalesOrder, canConvertToInvoice, showSalesOrders } = useActiveExtension();
+  const canViewSalesOrders = hasPermission('crm.orders.read') && !isClient && showSalesOrders;
+  const canCreateSalesOrders =
+    hasPermission('crm.orders.write') && !isClient && canConvertToSalesOrder;
+  const canCreateInvoices = hasPermission('crm.finance.write') && !isClient && canConvertToInvoice;
   const canRequestSample =
     (hasPermission('crm.samples.write') ||
       hasPermission('crm.opportunities.write') ||
@@ -499,6 +508,17 @@ export const OpportunityDetailPage: React.FC = () => {
               Create Sales Order
             </button>
           )}
+          {isOpportunityWonStage(item.stage, item.stageType) && canCreateInvoices && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => navigate(`/invoices/create?opportunityId=${encodeURIComponent(item._id)}`)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold text-indigo-900 cursor-pointer disabled:opacity-50 hover:bg-indigo-100"
+            >
+              <ReceiptLongOutlinedIcon sx={{ fontSize: 15 }} />
+              Create Invoice
+            </button>
+          )}
           {isOpportunityWonStage(item.stage, item.stageType) &&
             item.generatedSalesOrderId &&
             item.generatedSalesOrderId !== 'converted' &&
@@ -876,24 +896,34 @@ export const OpportunityDetailPage: React.FC = () => {
                 'None yet — more quotes allowed'
               )}
             </InfoRow>
-            <InfoRow label="Sales order">
-              {item.generatedSalesOrderId && item.generatedSalesOrderId !== 'converted' ? (
-                canViewSalesOrders ? (
-                  <Link
-                    to={`/sales-orders/${item.generatedSalesOrderId}`}
-                    className="font-semibold text-zinc-950 no-underline hover:underline"
-                  >
-                    {item.generatedSalesOrderNo || 'Open Sales Order'}
-                  </Link>
+            {showSalesOrders ? (
+              <InfoRow label="Sales order">
+                {item.generatedSalesOrderId && item.generatedSalesOrderId !== 'converted' ? (
+                  canViewSalesOrders ? (
+                    <Link
+                      to={`/sales-orders/${item.generatedSalesOrderId}`}
+                      className="font-semibold text-zinc-950 no-underline hover:underline"
+                    >
+                      {item.generatedSalesOrderNo || 'Open Sales Order'}
+                    </Link>
+                  ) : (
+                    item.generatedSalesOrderNo || 'Linked'
+                  )
+                ) : isOpportunityWonStage(item.stage, item.stageType) && canCreateSalesOrders ? (
+                  'Not created yet — use Create Sales Order'
                 ) : (
-                  item.generatedSalesOrderNo || 'Linked'
-                )
-              ) : isOpportunityWonStage(item.stage, item.stageType) && canCreateSalesOrders ? (
-                'Not created yet — use Create Sales Order'
-              ) : (
-                'Not generated'
-              )}
-            </InfoRow>
+                  'Not generated'
+                )}
+              </InfoRow>
+            ) : (
+              <InfoRow label="Invoicing">
+                {isOpportunityWonStage(item.stage, item.stageType)
+                  ? canCreateInvoices
+                    ? 'Won — use Create Invoice to bill this deal directly'
+                    : 'Won — invoiced directly by the finance team'
+                  : 'Invoiced directly once the deal is won'}
+              </InfoRow>
+            )}
             <InfoRow label="Created">{formatDateTime(item.createdAt)}</InfoRow>
             <InfoRow label="Updated">{formatDateTime(item.updatedAt)}</InfoRow>
           </div>

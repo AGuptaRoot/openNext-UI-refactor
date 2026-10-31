@@ -22,6 +22,7 @@ import { ClientSelect } from '../../components/clients/ClientSelect';
 import { DocumentUploadControl } from '../../components/common/DocumentUploadControl';
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
 import { useFinanceOptions } from '../../components/finance/useFinanceOptions';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { calculateFinanceTotals, clampDiscountValue } from '../../utils/financeTotals';
 import {
   consumeFinancePdfScanDraft,
@@ -89,7 +90,10 @@ export const InvoiceCreatePage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const returnTo = searchParams.get('returnTo');
   const fromScan = searchParams.get('fromScan') === '1';
+  /** Project Delivery: a won opportunity is billed directly, so the form is prefilled from it. */
+  const opportunityIdParam = searchParams.get('opportunityId') || '';
   const { clients, projects } = useFinanceOptions();
+  const { showProjects, showSalesOrders } = useActiveExtension();
   const { alert, prompt } = useDialog();
   const settingsCurrency = useDefaultCurrency();
   const currencyLockedRef = useRef(false);
@@ -169,19 +173,86 @@ export const InvoiceCreatePage: React.FC = () => {
       crmApi.getNextInvoiceNumber().then((result) => setInvoiceNo(result.data.invoiceNo)).catch(() => setInvoiceNo(''));
     }
     crmApi.listQuotations({ limit: 200, status: 'Converted' }).then((r) => setQuotations(r.data || [])).catch(() => setQuotations([]));
-    crmApi.listSalesOrders({ limit: 200 }).then((r) => setSalesOrders(r.data || [])).catch(() => setSalesOrders([]));
+    if (showSalesOrders) {
+      crmApi.listSalesOrders({ limit: 200 }).then((r) => setSalesOrders(r.data || [])).catch(() => setSalesOrders([]));
+    } else {
+      setSalesOrders([]);
+    }
     crmApi.listInvoiceTemplates().then((r) => setTemplates(r.data || [])).catch(() => setTemplates([]));
     crmApi
       .listCatalogProducts()
       .then((r) => setCatalog(r.data || []))
       .catch(() => setCatalog([]))
       .finally(() => setCatalogReady(true));
-  }, [fromScan]);
+  }, [fromScan, showSalesOrders]);
 
   useEffect(() => {
     if (currencyLockedRef.current) return;
     setCurrency(settingsCurrency);
   }, [settingsCurrency]);
+
+  /*
+   * Create Invoice from a won opportunity (Project Delivery). Client, currency
+   * and the deal's product lines are copied in; the user reviews and saves.
+   */
+  const opportunityAppliedRef = useRef('');
+  useEffect(() => {
+    if (!opportunityIdParam || opportunityAppliedRef.current === opportunityIdParam) return;
+    opportunityAppliedRef.current = opportunityIdParam;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const deal = (await crmApi.getOpportunity(opportunityIdParam)).data;
+        if (cancelled || !deal) return;
+        if (deal.clientId) setClientId(deal.clientId);
+        const dealCurrency = String(deal.currency || deal.currencyCode || '').trim().toUpperCase();
+        if (/^[A-Z]{3}$/.test(dealCurrency)) {
+          currencyLockedRef.current = true;
+          setCurrency(normalizeCurrencyCode(dealCurrency, settingsCurrency));
+        }
+        if (Number.isFinite(Number(deal.exchangeRate)) && Number(deal.exchangeRate) > 0) {
+          setExchangeRate(Number(deal.exchangeRate));
+        }
+        if (Number(deal.shippingCharge) > 0) setShippingCharge(Number(deal.shippingCharge));
+        const products = Array.isArray(deal.products) ? deal.products : [];
+        if (products.length) {
+          setLines(
+            linesFromSource(
+              products.map((line) => ({
+                name: line.productName,
+                description: line.description || '',
+                qty: line.quantity,
+                rate: line.unitPrice,
+                tax: line.tax,
+              }))
+            )
+          );
+        } else if (Number(deal.estimatedDealValue || deal.expectedRevenue || deal.value) > 0) {
+          setLines([
+            {
+              ...newEditableLine(),
+              name: deal.title || 'Project delivery',
+              qty: 1,
+              rate: Number(deal.estimatedDealValue || deal.expectedRevenue || deal.value) || 0,
+            },
+          ]);
+        }
+        setNotes((prev) =>
+          prev || `Invoice for won opportunity ${deal.opportunityNumber || deal.title || opportunityIdParam}.`
+        );
+        setScanNotice(
+          `Prefilled from opportunity ${deal.opportunityNumber || deal.title}. Review the lines, then save.`
+        );
+      } catch (reason) {
+        if (!cancelled) {
+          setError(reason instanceof Error ? reason.message : 'Failed to load the opportunity');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [opportunityIdParam, settingsCurrency]);
 
   useEffect(() => {
     if (!fromScan || !catalogReady || scanAppliedRef.current) return;
@@ -556,22 +627,24 @@ export const InvoiceCreatePage: React.FC = () => {
             ))
           )}
         </select>
-        <select
-          className={`${financeFieldClass} lg:max-w-xs`}
-          value={salesOrderId}
-          onChange={(event) => importSalesOrder(event.target.value)}
-        >
-          <option value="">Import from Sales Order (Dispatched only)…</option>
-          {dispatchedSalesOrders.length === 0 ? (
-            <option disabled value="">No dispatched sales orders available</option>
-          ) : (
-            dispatchedSalesOrders.map((item) => (
-              <option key={item._id} value={item._id}>
-                {item.orderNumber} · {displayLabel(item.clientName)}
-              </option>
-            ))
-          )}
-        </select>
+        {showSalesOrders && (
+          <select
+            className={`${financeFieldClass} lg:max-w-xs`}
+            value={salesOrderId}
+            onChange={(event) => importSalesOrder(event.target.value)}
+          >
+            <option value="">Import from Sales Order (Dispatched only)…</option>
+            {dispatchedSalesOrders.length === 0 ? (
+              <option disabled value="">No dispatched sales orders available</option>
+            ) : (
+              dispatchedSalesOrders.map((item) => (
+                <option key={item._id} value={item._id}>
+                  {item.orderNumber} · {displayLabel(item.clientName)}
+                </option>
+              ))
+            )}
+          </select>
+        )}
         <button
           type="button"
           onClick={importExpenses}
@@ -678,18 +751,20 @@ export const InvoiceCreatePage: React.FC = () => {
                 onChange={(nextId) => setClientId(nextId)}
               />
             </FormField>
-            <FormField label="Project">
-              <select className={financeFieldClass} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-                <option value="">None</option>
-                {projects
-                  .filter((project) => !clientId || project.clientId === clientId)
-                  .map((project) => (
-                    <option key={project._id} value={project._id}>
-                      {project.name}
-                    </option>
-                  ))}
-              </select>
-            </FormField>
+            {showProjects && (
+              <FormField label="Project">
+                <select className={financeFieldClass} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                  <option value="">None</option>
+                  {projects
+                    .filter((project) => !clientId || project.clientId === clientId)
+                    .map((project) => (
+                      <option key={project._id} value={project._id}>
+                        {project.name}
+                      </option>
+                    ))}
+                </select>
+              </FormField>
+            )}
             <FormField label="Payment details" wide>
               <textarea
                 className={financeTextAreaClass}

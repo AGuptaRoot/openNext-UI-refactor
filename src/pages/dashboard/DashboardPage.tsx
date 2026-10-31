@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 
 import { useAuth } from '../../context/AuthContext';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { crmApi } from '../../services/api';
 import {
   CrmRole,
@@ -223,9 +224,13 @@ const DEFAULT_ROLE_SECTIONS: Record<CrmRole, string[]> = {
 
 const STORAGE_PREFIX = 'opennext_crm_widgets_';
 
+/** Dashboard widgets that only make sense with Projects, Tasks and Time Logs enabled. */
+const PROJECT_SECTIONS = new Set(['my_tasks', 'time_log_report', 'blocked_client_tasks', 'watched_tasks']);
+
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const { activeRole, isClient } = useAuth();
+  const { showProjects, isModuleVisible } = useActiveExtension();
 
   const [period, setPeriod] = useState<DashboardPeriod>('month');
   const [data, setData] = useState<DashboardData | null>(null);
@@ -241,11 +246,19 @@ export const DashboardPage: React.FC = () => {
 
   const allowedSections = React.useMemo(() => {
     const roleDefault = DEFAULT_ROLE_SECTIONS[activeRole] || DEFAULT_ROLE_SECTIONS['crm-manager'];
+    let sections = roleDefault;
     if (isClient) {
-      return roleDefault.filter((s) => !['sales_pipeline', 'performance_analytics', 'expenses_approvals', 'recent_activity'].includes(s));
+      sections = sections.filter((s) => !['sales_pipeline', 'performance_analytics', 'expenses_approvals', 'recent_activity'].includes(s));
     }
-    return roleDefault;
-  }, [activeRole, isClient]);
+    // Task and time widgets belong to the Project Delivery extension.
+    if (!showProjects) {
+      sections = sections.filter((s) => !PROJECT_SECTIONS.has(s));
+    }
+    if (!isModuleVisible('expenses')) {
+      sections = sections.filter((s) => s !== 'expenses_approvals');
+    }
+    return sections;
+  }, [activeRole, isClient, showProjects, isModuleVisible]);
 
   const [enabledSections, setEnabledSections] = useState<string[]>(allowedSections);
 

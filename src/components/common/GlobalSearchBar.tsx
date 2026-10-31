@@ -29,6 +29,7 @@ import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import CircularProgress from '@mui/material/CircularProgress';
 
 import { useAuth } from '../../context/AuthContext';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { crmApi } from '../../services/api';
 import { formatCrmMoney } from '../../utils/currency';
 import { canFullyManageTasks } from '../../utils/permissions';
@@ -386,6 +387,7 @@ const ALL_ACTIONS: ActionDefinition[] = [
 
 export const GlobalSearchBar: React.FC = () => {
   const { hasPermission, hasAnyPermission, isClient, activeRole } = useAuth();
+  const { isModuleVisible } = useActiveExtension();
   const navigate = useNavigate();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -401,11 +403,13 @@ export const GlobalSearchBar: React.FC = () => {
   const permittedModules = useMemo(() => {
     return ALL_MODULES.filter((mod) => {
       if (isClient && !mod.allowClient) return false;
+      // Hidden by the active CRM extension or an optional-module switch.
+      if (!isModuleVisible(mod.id)) return false;
       if (mod.anyOf?.length) return hasAnyPermission(...mod.anyOf);
       if (!mod.permission) return true;
       return hasPermission(mod.permission);
     });
-  }, [hasPermission, hasAnyPermission, isClient]);
+  }, [hasPermission, hasAnyPermission, isClient, isModuleVisible]);
 
   // 2. RBAC Filtered Actions
   const permittedActions = useMemo(() => {

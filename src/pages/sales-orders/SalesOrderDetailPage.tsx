@@ -14,6 +14,7 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import WorkOutlineIcon from '@mui/icons-material/WorkOutline';
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { useDialog } from '../../context/DialogContext';
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
 import {
@@ -102,6 +103,7 @@ export const SalesOrderDetailPage: React.FC = () => {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const { hasPermission, isClient, isAdmin, activeRole } = useAuth();
+  const { showProjects } = useActiveExtension();
   const { confirm } = useDialog();
   const canWriteOrders = hasPermission('crm.orders.write') && !isClient;
   const canDeleteOrders = hasPermission('crm.orders.delete') && !isClient;
@@ -529,7 +531,7 @@ export const SalesOrderDetailPage: React.FC = () => {
           </div>
           <p className="text-sm text-zinc-500 m-0 mt-1">
             {displayLabel(order.clientName)}
-            {order.projectName ? ` · ${order.projectName}` : ''}
+            {showProjects && order.projectName ? ` · ${order.projectName}` : ''}
             {' · '}Issued {formatDate(order.issueDate)}
             {order.deliveryTargetDate ? ` · Target ${formatDate(order.deliveryTargetDate)}` : ''}
           </p>

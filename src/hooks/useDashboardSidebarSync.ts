@@ -72,64 +72,93 @@ export function hideParentSidebarRoutes(
   pluginId = PLUGIN_ID,
   labels: string[] = []
 ): void {
-  if (typeof window === 'undefined' || window.parent === window) return;
+  if (typeof window === 'undefined') return;
   const hideSet = new Set(routeIds.map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
   const labelSet = new Set(
     labels.map((l) => String(l || '').trim().toLowerCase()).filter(Boolean)
   );
   if (!hideSet.size && !labelSet.size) return;
 
+  const targetDocs: Document[] = [];
   try {
-    const parentDoc = window.parent.document;
-    if (!parentDoc) return;
-    const runtimePath = `/dashboard/plugins/runtime/${pluginId}`;
-    const anchors = parentDoc.querySelectorAll<HTMLAnchorElement>(`a[href*="${runtimePath}"]`);
-
-    anchors.forEach((anchor) => {
-      const href = anchor.getAttribute('href') || '';
-      const anchorRoute = (extractRouteIdFromHref(href, pluginId) || DASHBOARD_ROUTE_ID).toLowerCase();
-      const label = String(anchor.textContent || '')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .toLowerCase();
-      const row =
-        anchor.closest<HTMLElement>('button') ||
-        anchor.closest<HTMLElement>('[class*="justify-start"]') ||
-        anchor.closest<HTMLElement>('li') ||
-        anchor;
-
-      // Never hide the Travel requirement extension module for Admin/Managers
-      const isTravelRequirement =
-        label === 'travel requirement' ||
-        anchorRoute === 'travel-requirement' ||
-        href.includes('/ext/crm-travel/travel-requirement') ||
-        href.includes('travel-requirement');
-
-      if (isTravelRequirement && !hideSet.has('travel-requirement') && !labelSet.has('travel requirement')) {
-        row.style.display = '';
-        row.removeAttribute('data-crm-nav-hidden');
-        row.removeAttribute('aria-hidden');
-        return;
-      }
-
-      const hideByRoute = hideSet.has(anchorRoute);
-      const hideByLabel =
-        labelSet.has(label) ||
-        [...labelSet].some((want) => label === want);
-
-      if (hideByRoute || hideByLabel) {
-        row.style.display = 'none';
-        row.setAttribute('data-crm-nav-hidden', '1');
-        row.setAttribute('aria-hidden', 'true');
-      } else if (row.getAttribute('data-crm-nav-hidden') === '1') {
-        row.style.display = '';
-        row.removeAttribute('data-crm-nav-hidden');
-        row.removeAttribute('aria-hidden');
-      }
-    });
+    if (typeof document !== 'undefined') targetDocs.push(document);
   } catch {
-    // Cross-origin boundary — ignore
+    // ignore
   }
+  try {
+    if (window.parent && window.parent !== window && window.parent.document) {
+      targetDocs.push(window.parent.document);
+    }
+  } catch {
+    // ignore
+  }
+
+  targetDocs.forEach((parentDoc) => {
+    try {
+      const anchors = parentDoc.querySelectorAll<HTMLAnchorElement>(
+        `a[href*="${pluginId}"], a[href*="/plugins/"], a[href*="/runtime/"], nav a, aside a, [role="navigation"] a, [class*="sidebar"] a`
+      );
+
+      anchors.forEach((anchor) => {
+        const href = anchor.getAttribute('href') || '';
+        const hrefLower = href.toLowerCase();
+        const extracted = extractRouteIdFromHref(href, pluginId);
+        const anchorRoute = extracted ? extracted.toLowerCase() : '';
+
+        // Match href segments e.g. /expenses, ?view=expenses, etc.
+        const hasRouteInHref = [...hideSet].some(
+          (id) => hrefLower.includes(`/${id}`) || hrefLower.endsWith(`/${id}`) || hrefLower.includes(`view=${id}`)
+        );
+
+        const rawText = String(anchor.textContent || '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toLowerCase();
+        const cleanText = rawText.replace(/\s+\d+$/, '').trim();
+
+        const row =
+          anchor.closest<HTMLElement>('li') ||
+          anchor.closest<HTMLElement>('[role="menuitem"]') ||
+          anchor.closest<HTMLElement>('button') ||
+          anchor.closest<HTMLElement>('[class*="justify-start"]') ||
+          anchor.closest<HTMLElement>('[class*="nav-item"]') ||
+          anchor;
+
+        // Never hide the Travel requirement extension module for Admin/Managers
+        const isTravelRequirement =
+          rawText === 'travel requirement' ||
+          cleanText === 'travel requirement' ||
+          anchorRoute === 'travel-requirement' ||
+          hrefLower.includes('/ext/crm-travel/travel-requirement') ||
+          hrefLower.includes('travel-requirement');
+
+        if (isTravelRequirement && !hideSet.has('travel-requirement') && !labelSet.has('travel requirement')) {
+          row.style.display = '';
+          row.removeAttribute('data-crm-nav-hidden');
+          row.removeAttribute('aria-hidden');
+          return;
+        }
+
+        const hideByRoute = (anchorRoute && hideSet.has(anchorRoute)) || hasRouteInHref;
+        const hideByLabel =
+          labelSet.has(rawText) ||
+          labelSet.has(cleanText) ||
+          [...labelSet].some((want) => rawText === want || cleanText === want || rawText.startsWith(want));
+
+        if (hideByRoute || hideByLabel) {
+          row.style.display = 'none';
+          row.setAttribute('data-crm-nav-hidden', '1');
+          row.setAttribute('aria-hidden', 'true');
+        } else if (row.getAttribute('data-crm-nav-hidden') === '1') {
+          row.style.display = '';
+          row.removeAttribute('data-crm-nav-hidden');
+          row.removeAttribute('aria-hidden');
+        }
+      });
+    } catch {
+      // Cross-origin boundary — ignore
+    }
+  });
 }
 
 /**
@@ -167,8 +196,8 @@ export const useSidebarSync = (
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
 
-  // Safe check if running inside an iframe
-  const isEmbedded = typeof window !== 'undefined' && window.parent !== window;
+  // Safe check if running in a browser environment (iframe or direct mount mode)
+  const isEmbedded = typeof window !== 'undefined';
 
   /**
    * Safely highlight the active module's nav item in the parent OpenNext CMS sidebar
@@ -178,43 +207,49 @@ export const useSidebarSync = (
       if (!isEmbedded) return;
 
       try {
-        const parentDoc = window.parent.document;
-        if (!parentDoc) return;
+        const targetDocs: Document[] = [];
+        if (typeof document !== 'undefined') targetDocs.push(document);
+        if (window.parent && window.parent !== window && window.parent.document) {
+          targetDocs.push(window.parent.document);
+        }
 
         const runtimePath = `/dashboard/plugins/runtime/${pluginId}`;
-        const anchors = parentDoc.querySelectorAll<HTMLAnchorElement>(`a[href*="${runtimePath}"]`);
 
-        anchors.forEach((anchor) => {
-          const href = anchor.getAttribute('href') || '';
-          const anchorRoute = extractRouteIdFromHref(href, pluginId) || defaultRouteId;
-          const isCurrent = anchorRoute.toLowerCase() === targetRouteId.toLowerCase();
+        targetDocs.forEach((doc) => {
+          const anchors = doc.querySelectorAll<HTMLAnchorElement>(`a[href*="${runtimePath}"]`);
 
-          const row =
-            anchor.closest<HTMLElement>('button') ||
-            anchor.closest<HTMLElement>('[class*="justify-start"]') ||
-            anchor;
+          anchors.forEach((anchor) => {
+            const href = anchor.getAttribute('href') || '';
+            const anchorRoute = extractRouteIdFromHref(href, pluginId) || defaultRouteId;
+            const isCurrent = anchorRoute.toLowerCase() === targetRouteId.toLowerCase();
 
-          if (isCurrent) {
-            anchor.classList.add('active', 'is-active');
-            row.classList.add('active', 'is-active');
-            row.setAttribute('data-crm-nav-active', '1');
-            row.style.backgroundColor = 'hsl(var(--secondary))';
-            row.style.color = 'hsl(var(--secondary-foreground))';
-            row.style.fontWeight = '500';
-            const icon = row.querySelector<SVGElement>('svg');
-            if (icon) icon.style.color = 'hsl(var(--primary))';
-          } else {
-            anchor.classList.remove('active', 'is-active');
-            row.classList.remove('active', 'is-active');
-            if (row.getAttribute('data-crm-nav-active') === '1') {
-              row.removeAttribute('data-crm-nav-active');
-              row.style.backgroundColor = '';
-              row.style.color = '';
-              row.style.fontWeight = '';
+            const row =
+              anchor.closest<HTMLElement>('button') ||
+              anchor.closest<HTMLElement>('[class*="justify-start"]') ||
+              anchor;
+
+            if (isCurrent) {
+              anchor.classList.add('active', 'is-active');
+              row.classList.add('active', 'is-active');
+              row.setAttribute('data-crm-nav-active', '1');
+              row.style.backgroundColor = 'hsl(var(--secondary))';
+              row.style.color = 'hsl(var(--secondary-foreground))';
+              row.style.fontWeight = '500';
               const icon = row.querySelector<SVGElement>('svg');
-              if (icon) icon.style.color = '';
+              if (icon) icon.style.color = 'hsl(var(--primary))';
+            } else {
+              anchor.classList.remove('active', 'is-active');
+              row.classList.remove('active', 'is-active');
+              if (row.getAttribute('data-crm-nav-active') === '1') {
+                row.removeAttribute('data-crm-nav-active');
+                row.style.backgroundColor = '';
+                row.style.color = '';
+                row.style.fontWeight = '';
+                const icon = row.querySelector<SVGElement>('svg');
+                if (icon) icon.style.color = '';
+              }
             }
-          }
+          });
         });
       } catch {
         // Cross-origin security boundary handled safely

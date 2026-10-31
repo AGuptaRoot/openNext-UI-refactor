@@ -11,8 +11,9 @@ import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined';
 import { SwapDropGrid } from '../dndkit';
-import { Briefcase } from 'lucide-react';
+import { Briefcase, Lock } from 'lucide-react';
 import { crmApi } from '../../services/api';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import {
   DEFAULT_STAGE_CATALOG,
   STAGE_TYPE_LABELS,
@@ -69,6 +70,7 @@ function fromPipeline(pipeline: OpportunityPipeline): EditorState {
 }
 
 export function OpportunityPipelinesPanel() {
+  const { extension: activeExtension } = useActiveExtension();
   const [pipelines, setPipelines] = useState<OpportunityPipeline[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -683,6 +685,24 @@ export function OpportunityPipelinesPanel() {
             </button>
           </div>
         </div>
+
+        {(() => {
+          const extPipeline = pipelines.find((p) => p.pipelineKey === activeExtension.pipelineKey);
+          return (
+            <div className="flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 text-xs text-blue-900">
+              <Lock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              <span>
+                The active extension <strong className="font-semibold">{activeExtension.name}</strong>{' '}
+                sets{' '}
+                <strong className="font-semibold">
+                  {extPipeline?.name || 'its own pipeline'}
+                </strong>{' '}
+                as the deal pipeline. Enabling another extension in Settings → Extensions switches
+                it automatically. Stages and probabilities remain editable below.
+              </span>
+            </div>
+          );
+        })()}
 
         {message && (
           <div

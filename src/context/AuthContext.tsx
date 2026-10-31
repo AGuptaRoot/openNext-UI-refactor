@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { crmApi, isCrmMockModeEnabled } from '../services/api';
 import { CrmFeatureFlags, CrmRole, UserContext } from '../types/dashboard';
+import { normalizeActiveExtension } from '../types/extensions';
 import { canUseCrmTours, userCanAssignTickets, userHasPermission } from '../utils/permissions';
 import { roleHasPermission } from '../utils/rolePermissions';
 
@@ -138,8 +139,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const fetchUserContext = useCallback(async () => {
-    setLoading(true);
+  const fetchUserContext = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const response = await crmApi.getMe();
@@ -171,12 +174,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(null);
       }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
+  const refreshAuth = useCallback(async () => {
+    await fetchUserContext(true);
+  }, [fetchUserContext]);
+
   useEffect(() => {
-    fetchUserContext();
+    void fetchUserContext();
   }, [fetchUserContext]);
 
   const activeRole = resolveOpenNextRole(user);
@@ -223,11 +232,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const raw = user?.features;
     const percent = Number(raw?.defaultAdvancePercent);
     const proformaAdvance = Boolean(raw?.proformaAdvance);
+    const rawModules = (raw?.modules || {}) as {
+      expenses?: boolean;
+      marketing?: boolean;
+      customerSuccess?: boolean;
+      customer_success?: boolean;
+      dataQuality?: boolean;
+      data_quality?: boolean;
+    };
     return {
       proformaAdvance,
       quotationAutoAcceptOnPayment:
         proformaAdvance && Boolean(raw?.quotationAutoAcceptOnPayment),
       defaultAdvancePercent: Number.isFinite(percent) && percent > 0 ? percent : 30,
+      modules: {
+        expenses: Boolean(rawModules.expenses),
+        marketing: Boolean(rawModules.marketing),
+        customerSuccess: Boolean(rawModules.customerSuccess || rawModules.customer_success),
+        dataQuality: Boolean(rawModules.dataQuality || rawModules.data_quality),
+      },
+      activeExtension: normalizeActiveExtension(raw?.activeExtension),
     };
   }, [user?.features]);
 
@@ -259,7 +283,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         hasPermission,
         hasAnyPermission,
         canAssignTickets,
-        refreshAuth: fetchUserContext,
+        refreshAuth,
       }}
     >
       {children}

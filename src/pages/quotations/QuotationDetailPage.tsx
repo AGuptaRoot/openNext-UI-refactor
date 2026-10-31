@@ -17,6 +17,7 @@ import CreditCardIcon from '@mui/icons-material/CreditCard';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { useDialog } from '../../context/DialogContext';
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
 import {
@@ -55,11 +56,19 @@ export const QuotationDetailPage: React.FC = () => {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const { alert, confirm } = useDialog();
-  const { hasPermission, hasAnyPermission, isClient, features } = useAuth();
+  const { hasPermission, hasAnyPermission, isClient, features, activeRole, isAdmin } = useAuth();
+  const { canConvertToSalesOrder, showSalesOrders } = useActiveExtension();
   const canWriteQuotes =
     hasAnyPermission('crm.quotes.write', 'crm.finance.write') && !isClient;
   const canWriteFinance = hasPermission('crm.finance.write') && !isClient;
   const canWriteOrders = hasPermission('crm.orders.write') && !isClient;
+  const isSalesRepresentative = activeRole === 'sales-representative';
+  const canConvertOrdersRole =
+    (isAdmin || ['crm-manager', 'sales-manager'].includes(activeRole)) &&
+    !isSalesRepresentative;
+  const canConvertFinanceRole =
+    (isAdmin || ['crm-manager', 'sales-manager', 'finance-manager'].includes(activeRole)) &&
+    !isSalesRepresentative;
   const proformaEnabled = features.proformaAdvance;
   const defaultAdvancePercent = features.defaultAdvancePercent;
   const [quote, setQuote] = useState<QuotationItem | null>(null);
@@ -505,14 +514,16 @@ export const QuotationDetailPage: React.FC = () => {
   const canReject = canDecideQuote && quote.status === 'Sent' && !locked;
   const canRevise = canWriteQuotes && !locked && ['Rejected', 'Sent', 'Expired'].includes(quote.status);
   const canConvertInvoice =
+    (quote.status === 'Accepted' || (quote.status === 'Converted' && !quote.convertedInvoiceId)) &&
     canWriteFinance &&
-    ['Accepted', 'Sent'].includes(quote.status) &&
-    !quote.convertedInvoiceId &&
-    !quote.convertedSalesOrderId;
+    canConvertFinanceRole &&
+    !quote.convertedInvoiceId;
+  // Project Delivery has no Sales Orders: a quotation converts straight to an invoice.
   const canConvertSalesOrder =
+    canConvertToSalesOrder &&
+    (quote.status === 'Accepted' || (quote.status === 'Converted' && !quote.convertedSalesOrderId)) &&
     canWriteOrders &&
-    ['Accepted', 'Sent'].includes(quote.status) &&
-    !quote.convertedInvoiceId &&
+    canConvertOrdersRole &&
     !quote.convertedSalesOrderId;
 
   /* ------------------------------------------- proforma & advance payment */
@@ -778,7 +789,7 @@ export const QuotationDetailPage: React.FC = () => {
               Open converted invoice →
             </Link>
           )}
-          {quote.convertedSalesOrderId && (
+          {quote.convertedSalesOrderId && showSalesOrders && (
             <Link
               to={`/sales-orders/${quote.convertedSalesOrderId}`}
               className="font-semibold no-underline text-indigo-900"

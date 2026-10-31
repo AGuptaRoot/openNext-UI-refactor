@@ -20,6 +20,7 @@ import { isLeadConvertibleStage, resolveWonStage } from '../../utils/leadPipelin
 import { LeadListView } from '../../components/leads/LeadListView';
 import { LeadKanbanView } from '../../components/leads/LeadKanbanView';
 import { LeadReportView } from '../../components/leads/LeadReportView';
+import { LeadActivityView } from '../../components/leads/LeadActivityView';
 import {
   PIPELINE_STAGES as DEFAULT_PIPELINE_STAGES,
   LEAD_STATUSES as DEFAULT_LEAD_STATUSES,
@@ -38,6 +39,7 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import CloseIcon from '@mui/icons-material/Close';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import {
+  CalendarCheck2,
   ClipboardList,
   FileJson,
   FileText,
@@ -50,7 +52,7 @@ import {
   Upload,
 } from 'lucide-react';
 
-type ViewMode = 'list' | 'kanban' | 'report';
+type ViewMode = 'list' | 'kanban' | 'activity' | 'report';
 
 const ROLE_SUBTITLES: Record<string, string> = {
   'crm-manager': 'Executive sales pipeline intelligence, lead conversion velocity, and team performance.',
@@ -77,7 +79,7 @@ export const LeadsPage: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewMode>(() => {
     try {
       const saved = sessionStorage.getItem('crm-leads-view');
-      if (saved === 'kanban' || saved === 'report' || saved === 'list') return saved;
+      if (saved === 'kanban' || saved === 'report' || saved === 'list' || saved === 'activity') return saved;
     } catch {}
     return 'list';
   });
@@ -240,6 +242,10 @@ export const LeadsPage: React.FC = () => {
 
   // Load Leads
   const loadLeads = useCallback(async () => {
+    if (currentView === 'activity') {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const res = await crmApi.getLeads({
@@ -329,7 +335,7 @@ export const LeadsPage: React.FC = () => {
   useEffect(() => {
     const onTourView = (e: Event) => {
       const view = (e as CustomEvent<{ view?: ViewMode }>).detail?.view;
-      if (view === 'list' || view === 'kanban' || view === 'report') {
+      if (view === 'list' || view === 'kanban' || view === 'report' || view === 'activity') {
         handleSwitchView(view);
       }
     };
@@ -727,6 +733,21 @@ export const LeadsPage: React.FC = () => {
 
         <button
           type="button"
+          data-tour="leads-tab-activity"
+          onClick={() => handleSwitchView('activity')}
+          className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer border ${
+            currentView === 'activity'
+              ? 'bg-zinc-950 text-white border-zinc-950'
+              : 'bg-transparent text-zinc-600 border-transparent hover:text-zinc-950'
+          }`}
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <CalendarCheck2 className="h-4 w-4 shrink-0" aria-hidden /> Activity
+          </span>
+        </button>
+
+        <button
+          type="button"
           data-tour="leads-tab-report"
           onClick={() => handleSwitchView('report')}
           className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer border ${
@@ -742,6 +763,7 @@ export const LeadsPage: React.FC = () => {
       </div>
 
       {/* 3. Filter Toolbar */}
+      {currentView !== 'activity' && (
       <div data-tour="leads-filters" className="bg-white border border-zinc-300 rounded-xl p-3.5 flex flex-wrap items-end gap-3">
         {/* Preset filter */}
         <div id="lead-saved-filter-wrap" className="flex flex-col gap-1">
@@ -983,9 +1005,12 @@ export const LeadsPage: React.FC = () => {
           </button>
         </div>
       </div>
+      )}
 
       {/* 4. Main View Content */}
-      {loading && leads.length === 0 ? (
+      {currentView === 'activity' ? (
+        <LeadActivityView assignableUsers={assignableUsers} />
+      ) : loading && leads.length === 0 ? (
         <div className="bg-white border border-zinc-300 rounded-xl p-12 text-center text-xs text-zinc-500 animate-pulse">
           Loading sales leads…
         </div>

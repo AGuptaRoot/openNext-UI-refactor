@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { ActiveExtensionInfo } from './extensions';
 
 export type CrmRole =
   | 'crm-manager'
@@ -23,6 +24,18 @@ export interface CrmFeatureFlags {
   /** Only ever true while `proformaAdvance` is on. */
   quotationAutoAcceptOnPayment: boolean;
   defaultAdvancePercent: number;
+  /** Optional module toggles (Settings -> Modules). */
+  modules?: {
+    expenses?: boolean;
+    marketing?: boolean;
+    customerSuccess?: boolean;
+    dataQuality?: boolean;
+  };
+  /**
+   * The CRM extension fixing the workspace mode (Settings -> Extensions):
+   * hidden core modules, the fixed lead Request Type and the deal pipeline.
+   */
+  activeExtension?: ActiveExtensionInfo;
 }
 
 export interface UserContext {

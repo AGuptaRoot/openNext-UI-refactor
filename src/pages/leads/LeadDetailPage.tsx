@@ -1522,7 +1522,7 @@ export const LeadDetailPage: React.FC = () => {
 
   const handleAddActivity = async (e: React.FormEvent) => {
     e.preventDefault();
-    await submitActivity('logged');
+    await submitActivity(activityCreationMode === 'scheduled' ? 'scheduled' : 'logged');
   };
 
   const handleReassignActivity = async (eventId: string, assignedTo: string) => {
@@ -1541,14 +1541,17 @@ export const LeadDetailPage: React.FC = () => {
     if (!id) return;
     setAcceptingActivityId(eventId);
     try {
-      // Accepting location is not captured
-      await crmApi.acceptLeadEvent(id, eventId, {});
+      const acceptedLocation = await captureActivityLocation();
+      await crmApi.acceptLeadEvent(id, eventId, {
+        acceptedLocation,
+        location: acceptedLocation,
+      });
       try {
         localStorage.setItem('openext_crm_active_activity_id', eventId);
       } catch {}
       const res = await crmApi.getLeadEvents(id);
       setEvents(res.data || []);
-      showToast('Activity accepted!');
+      showToast('Activity accepted! Location tracking is active.');
     } catch (err: any) {
       showToast(err.message || 'Failed to accept activity', 'error');
     } finally {

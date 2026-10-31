@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
+  AlertTriangle,
   ArrowLeft,
   Calendar,
   CheckCircle2,
@@ -11,22 +12,52 @@ import {
   Lock,
   MapPin,
   Navigation,
+  Pencil,
+  Plus,
   RefreshCw,
   ShieldAlert,
+  Target,
   User,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { crmApi } from '../../services/api';
 import type { LeadEvent, ActivityLocation, ActivityLocationLog, LeadItem } from '../../types/crm';
-import { captureActivityLocation, mapsLinkFor, describeLocation } from '../../utils/captureActivityLocation';
+import {
+  captureActivityLocation,
+  mapsLinkFor,
+  describeLocation,
+  calculateDistanceMeters,
+  formatDistance,
+} from '../../utils/captureActivityLocation';
 import { reverseGeocode } from '../../utils/reverseGeocode';
-import { activityDisplayStatus, activityStatusClass } from '../../utils/activityStatus';
+import { activityDisplayStatus, activityStatusClass, isMissedActivity } from '../../utils/activityStatus';
 import { ACTIVE_ACTIVITY_STORAGE_KEY } from '../../hooks/useActivityLocationTracker';
+
+const GOAL_THRESHOLD_METERS = 200; // Geofence threshold in meters for goal area detection
 
 function formatDateTime(val?: string | null): string {
   if (!val) return '—';
   const d = new Date(val);
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
+}
+
+function formatTimeOnly(val?: string | null): string {
+  if (!val) return '—';
+  const d = new Date(val);
+  return Number.isNaN(d.getTime())
+    ? '—'
+    : d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+function cleanUserLabel(val?: string | null, fallback: string = '—'): string {
+  if (!val) return fallback;
+  const s = String(val).trim();
+  // Strip 24-character hexadecimal MongoDB ObjectIds so raw database keys are never exposed in UI
+  if (/^[0-9a-fA-F]{24}$/.test(s) || /^[0-9a-fA-F]{32}$/.test(s)) {
+    return fallback;
+  }
+  return s;
 }
 
 function hasCoords(loc?: ActivityLocation | null): loc is ActivityLocation & { latitude: number; longitude: number } {
@@ -143,6 +174,18 @@ const LocationTrailMap: React.FC<{
           maxZoom: 19,
         }).addTo(map);
 
+        // Draw 200m geofence area around goal location
+        if (hasCoords(goalLocation)) {
+          L.circle([goalLocation.latitude, goalLocation.longitude], {
+            radius: GOAL_THRESHOLD_METERS,
+            color: '#10b981',
+            fillColor: '#10b981',
+            fillOpacity: 0.14,
+            weight: 2,
+            dashArray: '6, 6',
+          }).addTo(map);
+        }
+
         // Plot polyline for the breadcrumb trail (start -> periodic logs -> finish)
         const trailPoints: [number, number][] = [];
         if (hasCoords(startingLocation)) {
@@ -169,7 +212,13 @@ const LocationTrailMap: React.FC<{
         // Add markers
         pointsWithCoords.forEach((pt) => {
           const marker = L.marker([pt.lat, pt.lng]).addTo(map);
-          marker.bindPopup(`<b>${pt.label}</b><br/>Lat: ${pt.lat.toFixed(5)}, Lng: ${pt.lng.toFixed(5)}`);
+          if (pt.kind === 'goal') {
+            marker.bindPopup(
+              `<b>🎯 Target Goal Destination</b><br/>${pt.label}<br/>Lat: ${pt.lat.toFixed(5)}, Lng: ${pt.lng.toFixed(5)}<br/><span style="color:#059669;font-weight:600;">${GOAL_THRESHOLD_METERS}m Goal Perimeter</span>`
+            );
+          } else {
+            marker.bindPopup(`<b>${pt.label}</b><br/>Lat: ${pt.lat.toFixed(5)}, Lng: ${pt.lng.toFixed(5)}`);
+          }
         });
 
         // Fit bounds
@@ -177,7 +226,6 @@ const LocationTrailMap: React.FC<{
           const bounds = L.latLngBounds(pointsWithCoords.map((p) => [p.lat, p.lng]));
           map.fitBounds(bounds, { padding: [40, 40] });
         }
-
       } catch (err) {
         console.warn('Could not initialize Leaflet map, using fallback', err);
         setLoadError(true);
@@ -244,7 +292,15 @@ export const ActivityDetailPage: React.FC = () => {
   // Action busy states
   const [accepting, setAccepting] = useState(false);
   const [completing, setCompleting] = useState(false);
-  const [loggingLocation, setLoggingLocation] = useState(false);
+  const [checkingLocation, setCheckingLocation] = useState(false);
+
+  // Goal Location Modal state
+  const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
+  const [goalAddress, setGoalAddress] = useState('');
+  const [goalLat, setGoalLat] = useState('');
+  const [goalLng, setGoalLng] = useState('');
+  const [savingGoal, setSavingGoal] = useState(false);
+  const [detectingGoalLoc, setDetectingGoalLoc] = useState(false);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMsg({ text, type });
@@ -315,13 +371,22 @@ export const ActivityDetailPage: React.FC = () => {
     if (!activity || !activity.leadId || !id) return;
     setAccepting(true);
     try {
-      // Accepting location is strictly NOT captured
-      await crmApi.acceptLeadEvent(activity.leadId, id, {});
-      try {
-        localStorage.setItem(ACTIVE_ACTIVITY_STORAGE_KEY, id);
-      } catch {}
+      const acceptedLocation = await captureActivityLocation();
+      await crmApi.acceptLeadEvent(activity.leadId, id, {
+        acceptedLocation,
+        location: acceptedLocation,
+      });
+      if (activeRole === 'sales-representative') {
+        try {
+          localStorage.setItem(ACTIVE_ACTIVITY_STORAGE_KEY, id);
+        } catch {}
+      }
       await loadData();
-      showToast('Activity accepted! Periodic location tracking is now active.');
+      showToast(
+        activeRole === 'sales-representative'
+          ? 'Activity accepted! Periodic location tracking is now active.'
+          : 'Activity accepted successfully.'
+      );
     } catch (err: any) {
       showToast(err?.message || 'Failed to accept activity', 'error');
     } finally {
@@ -353,13 +418,16 @@ export const ActivityDetailPage: React.FC = () => {
     }
   };
 
-  const handleLogCurrentLocationNow = async () => {
+  // Immediate GPS Capture & Verification against Goal
+  const handleCheckCurrentLocationNow = async () => {
     if (!id) return;
-    setLoggingLocation(true);
+    setCheckingLocation(true);
     try {
       if (typeof navigator === 'undefined' || !navigator.geolocation) {
         throw new Error('Geolocation is not supported by your browser');
       }
+
+      let capturedData: { latitude: number; longitude: number; accuracy: number | null; address: string } | null = null;
 
       await new Promise<void>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(
@@ -374,23 +442,131 @@ export const ActivityDetailPage: React.FC = () => {
                 address = (geo.addressLine || geo.displayName || '').slice(0, 400);
               } catch {}
 
+              capturedData = { latitude, longitude, accuracy, address };
+
               await crmApi.logActivityLocation(id, { latitude, longitude, accuracy, address });
               resolve();
             } catch (err) {
               reject(err);
             }
           },
-          (err) => reject(new Error(err.message || 'Location permission denied')),
-          { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+          (err) => reject(new Error(err?.message || 'Location permission denied')),
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
         );
       });
 
-      await loadData();
-      showToast('Current location logged to breadcrumb trail!');
+      // Synchronize with target goal if set
+      if (activity && hasCoords(activity.goalLocation) && capturedData) {
+        const { latitude, longitude, accuracy, address } = capturedData;
+        const dist = calculateDistanceMeters(latitude, longitude, activity.goalLocation.latitude, activity.goalLocation.longitude);
+        const isReached = dist != null && dist <= GOAL_THRESHOLD_METERS;
+
+        if (activity.leadId) {
+          try {
+            await crmApi.updateLeadEvent(activity.leadId, id, {
+              latestUserLocation: { latitude, longitude, accuracy, address, capturedAt: new Date().toISOString() },
+              latestDistanceFromGoal: dist,
+              reachedGoalArea: Boolean(activity.reachedGoalArea || isReached),
+              reachedGoalAt: (activity.reachedGoalArea || isReached) ? (activity.reachedGoalAt || new Date().toISOString()) : null,
+            });
+          } catch {
+            // background sync failure non-blocking
+          }
+        }
+
+        await loadData();
+
+        if (isReached) {
+          showToast(`📍 Reached Goal Area! You are ${dist} m from the target destination.`, 'success');
+        } else {
+          showToast(`📍 Current location logged: ${formatDistance(dist)} from target goal.`, 'success');
+        }
+      } else {
+        await loadData();
+        showToast('📍 Current location logged successfully!', 'success');
+      }
     } catch (err: any) {
-      showToast(err?.message || 'Could not log current location', 'error');
+      showToast(err?.message || 'Could not verify current location', 'error');
     } finally {
-      setLoggingLocation(false);
+      setCheckingLocation(false);
+    }
+  };
+
+  const openGoalModal = () => {
+    if (activity?.goalLocation) {
+      setGoalAddress(activity.goalLocation.address || '');
+      setGoalLat(activity.goalLocation.latitude != null ? String(activity.goalLocation.latitude) : '');
+      setGoalLng(activity.goalLocation.longitude != null ? String(activity.goalLocation.longitude) : '');
+    } else {
+      setGoalAddress('');
+      setGoalLat('');
+      setGoalLng('');
+    }
+    setIsGoalModalOpen(true);
+  };
+
+  const handleDetectGoalFromCurrentGps = async () => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      showToast('Geolocation is not supported by your browser', 'error');
+      return;
+    }
+    setDetectingGoalLoc(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const lat = Number(pos.coords.latitude.toFixed(6));
+          const lng = Number(pos.coords.longitude.toFixed(6));
+          setGoalLat(String(lat));
+          setGoalLng(String(lng));
+          try {
+            const geo = await reverseGeocode(lat, lng);
+            const addr = (geo.addressLine || geo.displayName || '').slice(0, 400);
+            if (addr) setGoalAddress(addr);
+          } catch {}
+          showToast('Coordinates captured from your GPS device!');
+        } finally {
+          setDetectingGoalLoc(false);
+        }
+      },
+      (err) => {
+        setDetectingGoalLoc(false);
+        showToast(err?.message || 'Could not access GPS location', 'error');
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+    );
+  };
+
+  const handleSaveGoalLocation = async () => {
+    if (!activity || !activity.leadId || !id) return;
+    const lat = parseFloat(goalLat);
+    const lng = parseFloat(goalLng);
+
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+      showToast('Please enter a valid latitude (-90 to 90)', 'error');
+      return;
+    }
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+      showToast('Please enter a valid longitude (-180 to 180)', 'error');
+      return;
+    }
+
+    setSavingGoal(true);
+    try {
+      const goalLocation: ActivityLocation = {
+        latitude: Number(lat.toFixed(6)),
+        longitude: Number(lng.toFixed(6)),
+        address: goalAddress.trim(),
+        capturedAt: new Date().toISOString(),
+      };
+
+      await crmApi.updateLeadEvent(activity.leadId, id, { goalLocation });
+      await loadData();
+      setIsGoalModalOpen(false);
+      showToast('Goal location updated successfully!');
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to save goal location', 'error');
+    } finally {
+      setSavingGoal(false);
     }
   };
 
@@ -454,12 +630,127 @@ export const ActivityDetailPage: React.FC = () => {
   }
 
   const displayStatus = activityDisplayStatus(activity);
-  const startingLocation = activity.acceptedLocation || activity.createdLocation;
+  const isMissed = Boolean(isMissedActivity(activity) || (activity as any)?.isMissed || (activity as any)?.locationReport?.isMissed || displayStatus === 'Missed');
+  const startingLocation: ActivityLocation | null = hasCoords(activity.acceptedLocation)
+    ? activity.acceptedLocation
+    : (hasCoords(activity.createdLocation)
+        ? activity.createdLocation
+        : (hasCoords(activity.startingLocation)
+            ? activity.startingLocation
+            : (locationLogs.length > 0 && hasCoords(locationLogs[0] as any)
+                ? {
+                    latitude: locationLogs[0].latitude!,
+                    longitude: locationLogs[0].longitude!,
+                    accuracy: locationLogs[0].accuracy,
+                    address: locationLogs[0].address || '',
+                    capturedAt: locationLogs[0].loggedAt,
+                  }
+                : (activity.acceptedLocation || activity.createdLocation || activity.startingLocation || null))));
   const isPendingAcceptance = activity.status === 'Assigned' || (activity.status === 'Open' && activity.assignedTo);
   const canAccept = isPendingAcceptance && (isAssignedRep || isAdmin || isSalesManager);
   const canComplete = activity.status !== 'Completed' && (isAssignedRep || isAdmin || isSalesManager);
   const isCurrentlyTracking =
-    typeof window !== 'undefined' && localStorage.getItem(ACTIVE_ACTIVITY_STORAGE_KEY) === activity._id;
+    activeRole === 'sales-representative' &&
+    typeof window !== 'undefined' &&
+    localStorage.getItem(ACTIVE_ACTIVITY_STORAGE_KEY) === activity._id;
+
+  // Compute Latest User Location
+  const latestLog = locationLogs.length > 0 ? locationLogs[locationLogs.length - 1] : null;
+
+  let latestUserLocation: {
+    latitude: number;
+    longitude: number;
+    accuracy?: number | null;
+    address?: string;
+    timestamp: string | null;
+  } | null = null;
+
+  if (latestLog && latestLog.latitude != null && latestLog.longitude != null) {
+    latestUserLocation = {
+      latitude: latestLog.latitude,
+      longitude: latestLog.longitude,
+      accuracy: latestLog.accuracy,
+      address: latestLog.address,
+      timestamp: latestLog.loggedAt,
+    };
+  } else if (hasCoords(activity.completedLocation)) {
+    latestUserLocation = {
+      latitude: activity.completedLocation.latitude,
+      longitude: activity.completedLocation.longitude,
+      accuracy: activity.completedLocation.accuracy,
+      address: activity.completedLocation.address,
+      timestamp: activity.completedAt || activity.completedLocation.capturedAt || null,
+    };
+  } else if (hasCoords(activity.acceptedLocation)) {
+    latestUserLocation = {
+      latitude: activity.acceptedLocation.latitude,
+      longitude: activity.acceptedLocation.longitude,
+      accuracy: activity.acceptedLocation.accuracy,
+      address: activity.acceptedLocation.address,
+      timestamp: activity.acceptedAt || activity.acceptedLocation.capturedAt || null,
+    };
+  } else if (hasCoords(activity.createdLocation)) {
+    latestUserLocation = {
+      latitude: activity.createdLocation.latitude,
+      longitude: activity.createdLocation.longitude,
+      accuracy: activity.createdLocation.accuracy,
+      address: activity.createdLocation.address,
+      timestamp: activity.createdAt || activity.createdLocation.capturedAt || null,
+    };
+  }
+
+  // Distance from Goal
+  const calculatedDistance =
+    hasCoords(activity.goalLocation) && latestUserLocation
+      ? calculateDistanceMeters(
+          latestUserLocation.latitude,
+          latestUserLocation.longitude,
+          activity.goalLocation.latitude,
+          activity.goalLocation.longitude
+        )
+      : null;
+
+  const distanceFromGoal = calculatedDistance != null ? calculatedDistance : (activity.latestDistanceFromGoal != null ? activity.latestDistanceFromGoal : null);
+
+  // Check Reached Goal Area & Reached At timestamp
+  let reachedAtTimestamp: string | null = activity.reachedGoalAt || null;
+
+  if (!reachedAtTimestamp && hasCoords(activity.goalLocation)) {
+    const goalLat = activity.goalLocation.latitude;
+    const goalLng = activity.goalLocation.longitude;
+
+    if (hasCoords(startingLocation)) {
+      const d = calculateDistanceMeters(startingLocation.latitude, startingLocation.longitude, goalLat, goalLng);
+      if (d != null && d <= GOAL_THRESHOLD_METERS) {
+        reachedAtTimestamp = activity.acceptedAt || startingLocation.capturedAt || activity.createdAt || null;
+      }
+    }
+
+    if (!reachedAtTimestamp) {
+      for (const log of locationLogs) {
+        if (log.latitude != null && log.longitude != null) {
+          const d = calculateDistanceMeters(log.latitude, log.longitude, goalLat, goalLng);
+          if (d != null && d <= GOAL_THRESHOLD_METERS) {
+            reachedAtTimestamp = log.loggedAt;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!reachedAtTimestamp && hasCoords(activity.completedLocation)) {
+      const d = calculateDistanceMeters(activity.completedLocation.latitude, activity.completedLocation.longitude, goalLat, goalLng);
+      if (d != null && d <= GOAL_THRESHOLD_METERS) {
+        reachedAtTimestamp = activity.completedAt || activity.completedLocation.capturedAt || null;
+      }
+    }
+  }
+
+  const reachedGoalArea = Boolean(
+    activity.reachedGoalArea ||
+    reachedAtTimestamp ||
+    (distanceFromGoal !== null && distanceFromGoal <= GOAL_THRESHOLD_METERS)
+  );
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -495,11 +786,17 @@ export const ActivityDetailPage: React.FC = () => {
               </span>
               <span
                 className={`px-2.5 py-0.5 rounded-lg text-xs font-bold border ${activityStatusClass(
-                  displayStatus
+                  isMissed ? 'Missed' : displayStatus
                 )}`}
               >
-                {displayStatus}
+                {isMissed ? 'Missed' : displayStatus}
               </span>
+              {isMissed && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 border border-rose-300">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Time Over · Missed Deadline
+                </span>
+              )}
               {activity.kind === 'scheduled' && (
                 <span className="px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
                   Scheduled
@@ -559,14 +856,258 @@ export const ActivityDetailPage: React.FC = () => {
           )}
 
           <button
-            onClick={handleLogCurrentLocationNow}
-            disabled={loggingLocation}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors shadow-sm cursor-pointer disabled:opacity-50"
-            title="Immediately send a location breadcrumb to the activity trail"
+            onClick={handleCheckCurrentLocationNow}
+            disabled={checkingLocation}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+            title="Immediately capture GPS and check against target destination"
           >
-            <Navigation className={`h-4 w-4 text-blue-600 ${loggingLocation ? 'animate-spin' : ''}`} />
-            {loggingLocation ? 'Logging…' : 'Log Current Location Now'}
+            <Navigation className={`h-4 w-4 text-blue-600 ${checkingLocation ? 'animate-spin' : ''}`} />
+            {checkingLocation ? 'Checking Location…' : '📍 Check Current Location Now'}
           </button>
+        </div>
+      </div>
+
+      {/* ACTIVITY GOAL LOCATION REPORT - Hero Telemetry Card */}
+      <div className="bg-white rounded-2xl border border-[#e2e8f0] p-6 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-100 pb-4 mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+              <Target className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 tracking-tight m-0">
+                ACTIVITY GOAL LOCATION REPORT
+              </h2>
+              <p className="text-xs text-slate-500 m-0 mt-0.5">
+                Real-time distance tracking, goal verification, and GPS proximity analysis.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCheckCurrentLocationNow}
+              disabled={checkingLocation}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+              title="Check current GPS location and verify against target goal"
+            >
+              <Navigation className={`h-4 w-4 ${checkingLocation ? 'animate-spin' : ''}`} />
+              {checkingLocation ? 'Checking Location…' : '📍 Check Current Location Now'}
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* 1. Goal Location */}
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                  <Target className="h-3.5 w-3.5 text-blue-600" />
+                  Goal Location
+                </span>
+                {hasCoords(activity.goalLocation) ? (
+                  <button
+                    onClick={openGoalModal}
+                    className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 underline inline-flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    Edit
+                  </button>
+                ) : null}
+              </div>
+
+              {hasCoords(activity.goalLocation) ? (
+                <div>
+                  <div
+                    className="text-sm font-bold text-slate-900 mb-1 line-clamp-2"
+                    title={activity.goalLocation.address || 'Target Location'}
+                  >
+                    {activity.goalLocation.address || 'Target Location'}
+                  </div>
+                  <div className="font-mono text-xs text-slate-600 flex items-center gap-1.5">
+                    <span>
+                      Lat: {activity.goalLocation.latitude.toFixed(5)}, Lng:{' '}
+                      {activity.goalLocation.longitude.toFixed(5)}
+                    </span>
+                    {mapsLinkFor(activity.goalLocation) && (
+                      <a
+                        href={mapsLinkFor(activity.goalLocation)!}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="text-blue-600 hover:text-blue-800 inline-flex items-center"
+                        title="Open in Google Maps"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="py-2">
+                  <p className="text-xs text-slate-500 italic mb-3">No Goal Location Set</p>
+                  <button
+                    onClick={openGoalModal}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-blue-200 text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer shadow-xs"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add Goal Location
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="mt-3 pt-2.5 border-t border-slate-200/60 text-[11px] text-slate-400">
+              Geofence threshold: {GOAL_THRESHOLD_METERS} m
+            </div>
+          </div>
+
+          {/* 2. Latest User Location */}
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                  <MapPin className="h-3.5 w-3.5 text-emerald-600" />
+                  Latest User Location
+                </span>
+                {latestUserLocation && mapsLinkFor(latestUserLocation) && (
+                  <a
+                    href={mapsLinkFor(latestUserLocation)!}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-800 underline inline-flex items-center gap-0.5"
+                  >
+                    Open Map
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
+              </div>
+
+              {latestUserLocation ? (
+                <div>
+                  <div
+                    className="text-sm font-bold text-slate-900 mb-1 line-clamp-2"
+                    title={latestUserLocation.address || 'GPS Fix captured'}
+                  >
+                    {latestUserLocation.address || 'Address not captured'}
+                  </div>
+                  <div className="font-mono text-xs text-slate-600">
+                    Lat: {latestUserLocation.latitude.toFixed(5)}, Lng: {latestUserLocation.longitude.toFixed(5)}
+                    {latestUserLocation.accuracy != null ? ` (±${latestUserLocation.accuracy}m)` : ''}
+                  </div>
+                </div>
+              ) : (
+                <div className="py-2">
+                  <p className="text-xs text-slate-500 italic mb-1">Awaiting location log</p>
+                  <p className="text-[11px] text-slate-400">
+                    Click &ldquo;Check Current Location Now&rdquo; to capture GPS.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 pt-2.5 border-t border-slate-200/60 text-[11px] font-medium text-slate-500 flex items-center gap-1">
+              <Clock className="h-3 w-3 text-slate-400 shrink-0" />
+              {latestUserLocation?.timestamp
+                ? `Logged at ${formatTimeOnly(latestUserLocation.timestamp)}`
+                : 'Awaiting location log'}
+            </div>
+          </div>
+
+          {/* 3. Distance from Goal */}
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col justify-between">
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-2 flex items-center gap-1.5">
+                <Compass className="h-3.5 w-3.5 text-indigo-600" />
+                Distance from Goal
+              </span>
+
+              <div className="my-1">
+                <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight font-mono">
+                  {distanceFromGoal != null ? formatDistance(distanceFromGoal) : 'N/A'}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 pt-2.5 border-t border-slate-200/60 flex items-center gap-1.5">
+              {distanceFromGoal != null ? (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                  Straight-line distance
+                </span>
+              ) : (
+                <span className="text-[11px] text-slate-400 italic">
+                  {!hasCoords(activity.goalLocation) ? 'Requires goal coordinates' : 'Requires user coordinates'}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* 4. Reached Goal Area & Reached At */}
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col justify-between">
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-2">
+                Goal Verification Status
+              </span>
+
+              <div className="space-y-2 my-1">
+                <div>
+                  <span className="text-[11px] text-slate-500 block mb-1">Reached Goal Area:</span>
+                  {!hasCoords(activity.goalLocation) ? (
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                      No Goal Set
+                    </span>
+                  ) : reachedGoalArea ? (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#dcfce7] text-[#15803d] border border-emerald-300 shadow-xs">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Yes · Reached Goal Area
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#fef3c7] text-[#b45309] border border-amber-300 shadow-xs">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      No · Not Reached Goal Area
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <span className="text-[11px] text-slate-500 block mb-1">Schedule & Deadline:</span>
+                  {isMissed ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-[#fee2e2] text-[#b91c1c] border border-red-300 shadow-xs">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      Time Over · Missed Deadline
+                    </span>
+                  ) : (activity.status === 'Completed' || displayStatus === 'Completed') ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-[#dcfce7] text-[#15803d] border border-emerald-300 shadow-xs">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Completed
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-xs">
+                      <Clock className="h-3.5 w-3.5" />
+                      On Schedule
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 pt-2.5 border-t border-slate-200/60 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600">
+              <div>
+                <span className="font-semibold text-slate-700">Scheduled: </span>
+                <span>{formatDateTime(activity.eventDate || activity.date)}</span>
+                {isMissed && (
+                  <span className="ml-1 text-rose-600 font-bold"> (Overdue)</span>
+                )}
+              </div>
+              <div>
+                <span className="font-semibold text-slate-700">Reached At: </span>
+                {reachedAtTimestamp ? (
+                  <span className="font-semibold text-emerald-700">{formatDateTime(reachedAtTimestamp)}</span>
+                ) : (
+                  <span className="text-slate-400 italic">Not reached yet</span>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -593,7 +1134,7 @@ export const ActivityDetailPage: React.FC = () => {
             </span>
             <span className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
               <User className="h-4 w-4 text-slate-500" />
-              {activity.assignedToName || activity.assignedToLabel || activity.assignedTo || 'Unassigned'}
+              {activity.assignedToName || activity.assignedToLabel || cleanUserLabel(activity.assignedTo, 'Unassigned')}
             </span>
           </div>
 
@@ -605,6 +1146,12 @@ export const ActivityDetailPage: React.FC = () => {
               <Calendar className="h-4 w-4 text-slate-500" />
               {formatDateTime(activity.eventDate || activity.date)}
             </span>
+            {isMissed && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-600 mt-1">
+                <AlertTriangle className="h-3 w-3" />
+                Time Over (Deadline Missed)
+              </span>
+            )}
           </div>
 
           <div>
@@ -613,7 +1160,7 @@ export const ActivityDetailPage: React.FC = () => {
             </span>
             <span className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
               <Clock className="h-4 w-4 text-slate-500" />
-              {activity.createdBy || 'System'} ({formatDateTime(activity.createdAt)})
+              {activity.createdByName || cleanUserLabel(activity.createdBy, 'System')} ({formatDateTime(activity.createdAt)})
             </span>
           </div>
         </div>
@@ -632,7 +1179,7 @@ export const ActivityDetailPage: React.FC = () => {
               </div>
               <div>
                 <span className="font-semibold text-slate-700">Accepted By:</span>{' '}
-                {activity.acceptedBy || activity.assignedToName || (activity.status === 'Accepted' ? 'Assigned Rep' : '—')}
+                {activity.acceptedByName || activity.assignedToName || cleanUserLabel(activity.acceptedBy, (activity.status === 'Accepted' || activity.status === 'Completed') ? 'Assigned Representative' : '—')}
               </div>
             </div>
           </div>
@@ -649,7 +1196,7 @@ export const ActivityDetailPage: React.FC = () => {
               </div>
               <div>
                 <span className="font-semibold text-slate-700">Completed By:</span>{' '}
-                {activity.completedBy || (activity.status === 'Completed' ? 'Assigned Rep' : '—')}
+                {activity.completedByName || activity.assignedToName || cleanUserLabel(activity.completedBy, activity.status === 'Completed' ? 'Assigned Representative' : '—')}
               </div>
             </div>
           </div>
@@ -713,8 +1260,15 @@ export const ActivityDetailPage: React.FC = () => {
               />
             ) : (
               <div className="h-44 rounded-xl bg-slate-50 border border-slate-200 flex flex-col items-center justify-center p-4 text-center mt-2">
-                <MapPin className="h-6 w-6 text-slate-400 mb-1" />
-                <span className="text-xs text-slate-500">No destination goal pinned for this activity</span>
+                <Target className="h-6 w-6 text-slate-400 mb-1" />
+                <span className="text-xs text-slate-500 mb-2">No destination goal pinned for this activity</span>
+                <button
+                  onClick={openGoalModal}
+                  className="inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
+                >
+                  <Plus className="h-3 w-3" />
+                  Set Goal Location
+                </button>
               </div>
             )}
           </div>
@@ -759,7 +1313,10 @@ export const ActivityDetailPage: React.FC = () => {
               <div className="h-44 rounded-xl bg-slate-50 border border-slate-200 flex flex-col items-center justify-center p-4 text-center mt-2">
                 <MapPin className="h-6 w-6 text-slate-400 mb-1" />
                 <span className="text-xs text-slate-500">
-                  {activity.acceptedLocation?.unavailableReason || 'Accepted without initial location'}
+                  {activity.acceptedLocation?.unavailableReason ||
+                    activity.createdLocation?.unavailableReason ||
+                    activity.startingLocation?.unavailableReason ||
+                    'Accepted without initial location'}
                 </span>
               </div>
             )}
@@ -860,7 +1417,7 @@ export const ActivityDetailPage: React.FC = () => {
         {locationLogs.length === 0 ? (
           <div className="p-8 text-center text-xs text-slate-400">
             No periodic location logs have been captured yet for this activity. Logs are transmitted automatically
-            every 30 minutes once accepted, or when you click "Log Current Location Now".
+            every 30 minutes once accepted, or when you click "📍 Check Current Location Now".
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -872,6 +1429,8 @@ export const ActivityDetailPage: React.FC = () => {
                   <th className="py-2.5 px-4 font-semibold">Coordinates</th>
                   <th className="py-2.5 px-4 font-semibold">Accuracy</th>
                   <th className="py-2.5 px-4 font-semibold">Address / Fix Location</th>
+                  <th className="py-2.5 px-4 font-semibold">Distance from Goal</th>
+                  <th className="py-2.5 px-4 font-semibold">Goal Status</th>
                   <th className="py-2.5 px-4 font-semibold">Sales Rep</th>
                   <th className="py-2.5 px-4 font-semibold text-right">Map Link</th>
                 </tr>
@@ -879,27 +1438,68 @@ export const ActivityDetailPage: React.FC = () => {
               <tbody className="divide-y divide-slate-100">
                 {locationLogs.map((log, index) => {
                   const mapLink = `https://www.google.com/maps/search/?api=1&query=${log.latitude},${log.longitude}`;
+                  const logDist =
+                    log.distanceFromGoal != null
+                      ? log.distanceFromGoal
+                      : hasCoords(activity.goalLocation) && log.latitude != null && log.longitude != null
+                      ? calculateDistanceMeters(
+                          log.latitude,
+                          log.longitude,
+                          activity.goalLocation.latitude,
+                          activity.goalLocation.longitude
+                        )
+                      : null;
+                  const isReached =
+                    log.reachedGoalArea != null
+                      ? log.reachedGoalArea
+                      : logDist != null && logDist <= GOAL_THRESHOLD_METERS;
+
                   return (
                     <tr key={log._id || index} className="hover:bg-slate-50 transition-colors">
                       <td className="py-3 px-4 text-center font-bold text-blue-600">
                         {index + 1}
                       </td>
-                      <td className="py-3 px-4 text-slate-700 font-medium">
+                      <td className="py-3 px-4 text-slate-700 font-medium whitespace-nowrap">
                         {formatDateTime(log.loggedAt)}
                       </td>
-                      <td className="py-3 px-4 font-mono text-slate-800">
+                      <td className="py-3 px-4 font-mono text-slate-800 whitespace-nowrap">
                         {log.latitude.toFixed(5)}, {log.longitude.toFixed(5)}
                       </td>
-                      <td className="py-3 px-4 text-slate-600">
+                      <td className="py-3 px-4 text-slate-600 whitespace-nowrap">
                         {log.accuracy != null ? `±${log.accuracy} m` : '—'}
                       </td>
                       <td className="py-3 px-4 text-slate-700 max-w-xs truncate" title={log.address || '—'}>
                         {log.address || '—'}
                       </td>
-                      <td className="py-3 px-4 text-slate-700 font-medium">
-                        {log.salesRepName || activity.assignedToName || 'Assigned Rep'}
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        {logDist != null ? (
+                          <span className="font-semibold text-slate-800 font-mono text-xs">
+                            {formatDistance(logDist)}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
                       </td>
-                      <td className="py-3 px-4 text-right">
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        {hasCoords(activity.goalLocation) && logDist != null ? (
+                          isReached ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-[#dcfce7] text-[#15803d] border border-emerald-200">
+                              <CheckCircle2 className="h-3 w-3" />
+                              Reached
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-[#fef3c7] text-[#b45309] border border-amber-200">
+                              Not Reached
+                            </span>
+                          )
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-slate-700 font-medium whitespace-nowrap">
+                        {cleanUserLabel(log.salesRepName || activity.assignedToName, 'Assigned Rep')}
+                      </td>
+                      <td className="py-3 px-4 text-right whitespace-nowrap">
                         <a
                           href={mapLink}
                           target="_blank"
@@ -918,7 +1518,103 @@ export const ActivityDetailPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Set / Edit Goal Location Modal */}
+      {isGoalModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Target className="h-4 w-4" />
+                </div>
+                <h3 className="text-base font-bold text-slate-900 m-0">Set Target Goal Location</h3>
+              </div>
+              <button
+                onClick={() => setIsGoalModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Address / Target Destination Label
+                </label>
+                <input
+                  type="text"
+                  value={goalAddress}
+                  onChange={(e) => setGoalAddress(e.target.value)}
+                  placeholder="e.g. DLF Cyber City, Tower B, Gurugram"
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Latitude
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={goalLat}
+                    onChange={(e) => setGoalLat(e.target.value)}
+                    placeholder="e.g. 28.49502"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Longitude
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={goalLng}
+                    onChange={(e) => setGoalLng(e.target.value)}
+                    placeholder="e.g. 77.08954"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleDetectGoalFromCurrentGps}
+                disabled={detectingGoalLoc}
+                className="w-full py-2 px-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Navigation className={`h-3.5 w-3.5 text-blue-600 ${detectingGoalLoc ? 'animate-spin' : ''}`} />
+                {detectingGoalLoc ? 'Detecting GPS…' : '📍 Use My Current Location as Goal'}
+              </button>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsGoalModalOpen(false)}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveGoalLocation}
+                disabled={savingGoal}
+                className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                {savingGoal ? 'Saving…' : 'Save Goal Location'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
 export default ActivityDetailPage;

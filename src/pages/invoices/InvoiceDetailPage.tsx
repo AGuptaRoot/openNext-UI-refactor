@@ -12,6 +12,7 @@ import MoneyOffIcon from '@mui/icons-material/MoneyOff';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { useDialog } from '../../context/DialogContext';
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
 import type { InvoiceItem, InvoicePaymentRecord } from '../../types/invoices';
@@ -40,6 +41,7 @@ export const InvoiceDetailPage: React.FC = () => {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const { hasPermission, isClient, user, activeRole } = useAuth();
+  const { showProjects } = useActiveExtension();
   const { alert, confirm } = useDialog();
   const canWriteFinance = hasPermission('crm.finance.write') && !isClient;
   const [invoice, setInvoice] = useState<InvoiceItem | null>(null);
@@ -398,7 +400,7 @@ export const InvoiceDetailPage: React.FC = () => {
           </div>
           <p className="text-sm text-zinc-500 m-0 mt-1">
             {displayLabel(invoice.clientName)}
-            {invoice.projectName ? ` · ${invoice.projectName}` : ''}
+            {showProjects && invoice.projectName ? ` · ${invoice.projectName}` : ''}
           </p>
         </div>
         <div data-tour="invoices-detail-actions" className="flex flex-wrap gap-2">

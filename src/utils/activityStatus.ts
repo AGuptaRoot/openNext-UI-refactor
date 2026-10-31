@@ -11,16 +11,31 @@ export type ActivityDisplayStatus = 'Missed' | 'Completed' | 'Assigned' | 'Accep
  * alone rather than retroactively marked missed.
  */
 export function isMissedActivity(
-  event: Pick<LeadEvent, 'kind' | 'status' | 'eventDate' | 'date'> | null | undefined,
+  event: any,
   now: number = Date.now()
 ): boolean {
   if (!event) return false;
-  if (String(event.kind || 'logged') !== 'scheduled') return false;
-  const status = String(event.status || '');
-  if (status === 'Completed') return false;
-  const raw = event.eventDate || event.date;
+  const raw = event.eventDate || event.dueDate || event.date;
   const due = raw ? new Date(raw).getTime() : NaN;
   if (!Number.isFinite(due)) return false;
+
+  const status = String(event.status || '');
+  if (['Cancelled'].includes(status)) return false;
+  if (status === 'Missed') return true;
+
+  const hasGoal = Boolean(
+    event.goalLocation &&
+    (event.goalLocation.latitude != null || event.goalLatitude != null)
+  );
+
+  // If activity has a goal location that was not reached and scheduled time is over:
+  if (hasGoal && !event.reachedGoalArea && due < now) {
+    return true;
+  }
+
+  if (String(event.kind || 'logged') !== 'scheduled') return false;
+  if (status === 'Completed') return false;
+
   return due < now;
 }
 

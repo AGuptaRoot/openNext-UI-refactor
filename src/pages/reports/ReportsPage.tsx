@@ -7,6 +7,10 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CircularProgress from '@mui/material/CircularProgress';
 
 import { useAuth } from '../../context/AuthContext';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
+
+/** Report tabs that only make sense with Projects, Tasks and Time Logs enabled. */
+const PROJECT_REPORT_TABS = new Set(['projects', 'employees', 'time']);
 import { TourButton } from '../../ui/tour';
 import { crmApi } from '../../services/api';
 import { triggerFileDownload } from '../../utils/fileDownload';
@@ -204,6 +208,7 @@ export function formatRoleName(role: string): string {
 
 export const ReportsPage: React.FC = () => {
   const { user, activeRole } = useAuth();
+  const { showProjects } = useActiveExtension();
 
   // Date state (defaults to 1st of current month to today)
   const initialDates = useMemo(() => {
@@ -259,6 +264,8 @@ export const ReportsPage: React.FC = () => {
 
     return ALL_REPORT_TABS.filter((tab) => {
       if (!allowed.includes(tab.id)) return false;
+      // Project/task/time reports belong to the Project Delivery extension.
+      if (!showProjects && PROJECT_REPORT_TABS.has(tab.id)) return false;
       if (activeRole === 'client') return true;
       if (tab.requiredPerm === 'canProjects' && !currentPerms.canProjects) return false;
       if (tab.requiredPerm === 'canTime' && !currentPerms.canTime) return false;
@@ -268,7 +275,7 @@ export const ReportsPage: React.FC = () => {
       }
       return true;
     });
-  }, [activeRole, currentPerms]);
+  }, [activeRole, currentPerms, showProjects]);
 
   // Ensure activeTab is always among visible tabs
   useEffect(() => {

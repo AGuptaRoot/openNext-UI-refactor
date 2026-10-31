@@ -13,6 +13,7 @@ import ConfirmationNumberOutlinedIcon from '@mui/icons-material/ConfirmationNumb
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 
 import { useAuth } from '../../context/AuthContext';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { canCreateTasks } from '../../utils/permissions';
 import { CrmRole } from '../../types/dashboard';
 
@@ -148,10 +149,14 @@ export const QuickActionsCard: React.FC<QuickActionsCardProps> = ({
 }) => {
   const navigate = useNavigate();
   const { hasPermission, hasAnyPermission, isClient, activeRole } = useAuth();
+  const { isModuleVisible } = useActiveExtension();
 
   const actions = useMemo(() => {
     return ALL_QUICK_ACTIONS.filter((act) => {
       if (isClient && !act.allowClient) return false;
+      // The action's target module may be hidden by the active CRM extension.
+      const routeId = String(act.path || '').replace(/^\//, '').split(/[/?]/)[0];
+      if (routeId && !isModuleVisible(routeId)) return false;
       if (act.roles?.length && !act.roles.includes(activeRole)) return false;
       if (act.excludeRoles?.includes(activeRole)) return false;
       const allowed = act.anyOf?.length
@@ -171,7 +176,7 @@ export const QuickActionsCard: React.FC<QuickActionsCardProps> = ({
       }
       return true;
     });
-  }, [hasPermission, hasAnyPermission, isClient, activeRole]);
+  }, [hasPermission, hasAnyPermission, isClient, activeRole, isModuleVisible]);
 
   const handleActionClick = (act: ActionItem) => {
     if (isClient && !act.allowClient) return;

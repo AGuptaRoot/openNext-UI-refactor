@@ -270,7 +270,13 @@ export const ActivityLocationReportTab: React.FC<ActivityLocationReportTabProps>
               <tbody className="divide-y divide-zinc-200">
                 {visibleRows.map((row) => {
                   const isOpen = expanded === row.id;
-                  const starting = row.acceptedLocation || row.startingLocation || row.createdLocation;
+                  const starting = hasCoords(row.acceptedLocation)
+                    ? row.acceptedLocation
+                    : (hasCoords(row.startingLocation)
+                        ? row.startingLocation
+                        : (hasCoords(row.createdLocation)
+                            ? row.createdLocation
+                            : (row.acceptedLocation || row.startingLocation || row.createdLocation)));
                   const completed = row.completedLocation;
                   const goal = row.goalLocation;
                   const hasGoal = hasCoords(goal);
@@ -341,9 +347,11 @@ export const ActivityLocationReportTab: React.FC<ActivityLocationReportTabProps>
                             </span>
                             <span
                               className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${
-                                row.isMissed
+                                (row.isMissed || row.displayStatus === 'Missed')
                                   ? 'border-red-200 bg-red-50 text-red-700'
-                                  : 'border-zinc-200 bg-zinc-50 text-zinc-600'
+                                  : (row.displayStatus === 'Completed' || row.status === 'Completed')
+                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                    : 'border-zinc-200 bg-zinc-50 text-zinc-600'
                               }`}
                               title={
                                 row.isMissed
@@ -351,7 +359,7 @@ export const ActivityLocationReportTab: React.FC<ActivityLocationReportTabProps>
                                   : undefined
                               }
                             >
-                              {row.displayStatus || row.status}
+                              {(row.isMissed || row.displayStatus === 'Missed') ? 'Missed' : (row.displayStatus || row.status)}
                             </span>
                           </span>
                         </td>

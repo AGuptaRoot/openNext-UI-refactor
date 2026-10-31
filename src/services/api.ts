@@ -1,4 +1,12 @@
 import { DashboardData, DashboardPeriod, UserContext, WidgetConfig } from '../types/dashboard';
+import type {
+  ActiveExtensionInfo,
+  CrmExtensionInstallResult,
+  CrmExtensionPackageBody,
+  CrmExtensionPackageValidation,
+  CrmExtensionToggleResult,
+  CrmExtensionsResponse,
+} from '../types/extensions';
 import {
   LeadItem,
   LeadQueryParams,
@@ -3864,6 +3872,60 @@ export const crmApi = {
     });
   },
 
+  // ─── CRM-OWNED EXTENSIONS (Settings → Extensions) ──────────────────────────
+  /** Registry of CRM extensions (Product Sales, Project Delivery) with the active flag. Admin only. */
+  listCrmExtensions: async (): Promise<ApiResponse<CrmExtensionsResponse>> => {
+    return request<CrmExtensionsResponse>('/crm-extensions', { method: 'GET' });
+  },
+
+  /** The active CRM extension for any CRM user (also carried on /me). */
+  getActiveCrmExtension: async (): Promise<ApiResponse<ActiveExtensionInfo>> => {
+    return request<ActiveExtensionInfo>('/crm-extensions/active', { method: 'GET' });
+  },
+
+  /** Switch the workspace to this extension: fixes request type, pipeline and visible modules. */
+  enableCrmExtension: async (id: string): Promise<ApiResponse<CrmExtensionToggleResult>> => {
+    return request<CrmExtensionToggleResult>(`/crm-extensions/${encodeURIComponent(id)}/enable`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+
+  /** Disable a non-default extension; the default (Product Sales) becomes active. */
+  disableCrmExtension: async (id: string): Promise<ApiResponse<CrmExtensionToggleResult>> => {
+    return request<CrmExtensionToggleResult>(`/crm-extensions/${encodeURIComponent(id)}/disable`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+
+  /** Check an uploaded extension zip without installing it. Always resolves; look at `data.ok`. */
+  validateCrmExtensionPackage: async (
+    pkg: CrmExtensionPackageBody
+  ): Promise<ApiResponse<CrmExtensionPackageValidation>> => {
+    return request<CrmExtensionPackageValidation>('/crm-extensions/validate', {
+      method: 'POST',
+      body: JSON.stringify(pkg),
+    });
+  },
+
+  /** Validate and store an extension zip. The extension is installed as Disabled. */
+  installCrmExtensionPackage: async (
+    pkg: CrmExtensionPackageBody
+  ): Promise<ApiResponse<CrmExtensionInstallResult>> => {
+    return request<CrmExtensionInstallResult>('/crm-extensions/install', {
+      method: 'POST',
+      body: JSON.stringify(pkg),
+    });
+  },
+
+  /** Remove an uploaded, inactive extension. Built-ins and the active one are refused. */
+  uninstallCrmExtension: async (
+    id: string
+  ): Promise<ApiResponse<{ id: string; name: string; version: string; uninstalled: boolean }>> => {
+    return request(`/crm-extensions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
   // ─── LEADS MODULE APIS ────────────────────────────────────────────────────
   getLeads: async (params: LeadQueryParams = {}): Promise<ApiResponse<LeadItem[]>> => {
     const query = new URLSearchParams();
@@ -5507,7 +5569,7 @@ export const crmApi = {
   acceptLeadEvent: async (
     id: string,
     eventId: string,
-    body: { acceptedLocation?: ActivityLocation | null } = {}
+    body: { acceptedLocation?: ActivityLocation | null; location?: ActivityLocation | null } = {}
   ): Promise<ApiResponse<LeadEvent>> => {
     try {
       return await request(`/leads/${encodeURIComponent(id)}/events/${encodeURIComponent(eventId)}/accept`, {

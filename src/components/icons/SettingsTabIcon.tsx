@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Blocks,
   Building2,
   Briefcase,
   FolderKanban,
@@ -20,6 +21,8 @@ import type { SettingsTabId } from '../../types/admin';
 
 const TAB_ICONS: Record<string, LucideIcon> = {
   general: Building2,
+  modules: Puzzle,
+  extensions: Blocks,
   shipping: Truck,
   finance: Wallet,
   email: Mail,

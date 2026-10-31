@@ -28,18 +28,20 @@ const POLL_MS = 60 * 60 * 1000;
  * and leaves no state behind on the server.
  */
 export const ActivityReminderPopup: React.FC = () => {
-  const { isClient, hasPermission } = useAuth();
+  const { isClient, hasPermission, isAdmin, activeRole } = useAuth();
   const canSeeLeads = hasPermission('crm.leads.read');
+  const isManagerOrAdmin = isAdmin || activeRole === 'sales-manager' || activeRole === 'crm-manager';
 
   const [rows, setRows] = useState<ActivityReminderRow[]>([]);
   const [missedCount, setMissedCount] = useState(0);
+  const [unreachedCount, setUnreachedCount] = useState(0);
   const [open, setOpen] = useState(false);
   const [snoozed, setSnoozed] = useState<Set<string>>(() => loadSnoozedKeys());
 
   const sweep = useCallback(async () => {
     try {
       const res = await crmApi.getActivityReminders({
-        scope: 'mine',
+        scope: isManagerOrAdmin ? 'team' : 'mine',
         windowMinutes: REMINDER_WINDOW_MINUTES,
       });
       const feed = res.data;
@@ -48,13 +50,17 @@ export const ActivityReminderPopup: React.FC = () => {
         (row) => !fresh.has(row.id)
       );
       setSnoozed(fresh);
-      setMissedCount((feed?.missed || []).length);
+      const missedList = feed?.missed || [];
+      setMissedCount(missedList.length);
+      setUnreachedCount(
+        missedList.filter((r) => r.notReachedGoal || (r.hasGoal && !r.reachedGoalArea)).length
+      );
       setRows(all);
       setOpen(all.length > 0);
     } catch {
       // A reminder that fails to load must never interrupt the app.
     }
-  }, []);
+  }, [isManagerOrAdmin]);
 
   useEffect(() => {
     if (isClient || !canSeeLeads) return undefined;
@@ -93,16 +99,19 @@ export const ActivityReminderPopup: React.FC = () => {
       </header>
 
       {missedCount > 0 ? (
-        <p className="m-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-[11px] font-semibold text-amber-900">
-          {missedCount === 1
-            ? '1 of these was missed — mark it Completed or reschedule it.'
-            : `${missedCount} of these were missed — mark them Completed or reschedule them.`}
+        <p className="m-0 border-b border-red-200 bg-red-50 px-4 py-2 text-[11px] font-semibold text-red-900">
+          {unreachedCount > 0
+            ? `${unreachedCount} missed activity with goal place not reached!`
+            : missedCount === 1
+            ? '1 activity was missed — mark it Completed or reschedule it.'
+            : `${missedCount} activities were missed — mark them Completed or reschedule them.`}
         </p>
       ) : null}
 
       <ul className="m-0 flex max-h-80 list-none flex-col gap-2 overflow-y-auto p-3">
         {visible.map((row) => {
           const late = typeof row.minutesLate === 'number';
+          const unreachedGoal = Boolean(row.notReachedGoal || (row.hasGoal && !row.reachedGoalArea));
           return (
             <li
               key={row.id}
@@ -121,6 +130,11 @@ export const ActivityReminderPopup: React.FC = () => {
                     {row.eventType}
                     {row.leadName ? ` · ${row.leadName}` : ''}
                   </p>
+                  {isManagerOrAdmin && row.assignedToLabel ? (
+                    <p className="m-0 mt-0.5 text-[10px] text-zinc-500 font-medium">
+                      Rep: {row.assignedToLabel}
+                    </p>
+                  ) : null}
                   <p
                     className={`m-0 mt-0.5 text-[11px] font-semibold ${
                       late ? 'text-red-700' : 'text-blue-700'
@@ -130,6 +144,11 @@ export const ActivityReminderPopup: React.FC = () => {
                       ? `Missed · ${latenessLabel(row.minutesLate || 0)}`
                       : countdownLabel(row.minutesUntil || 0)}
                   </p>
+                  {unreachedGoal ? (
+                    <span className="mt-1 inline-flex items-center gap-1 rounded bg-red-100 border border-red-200 px-1.5 py-0.5 text-[9px] font-bold text-red-800">
+                      Goal Place Not Reached
+                    </span>
+                  ) : null}
                 </div>
                 <button
                   type="button"
@@ -140,15 +159,24 @@ export const ActivityReminderPopup: React.FC = () => {
                   Snooze
                 </button>
               </div>
-              {row.leadId ? (
+              <div className="mt-1.5 flex items-center gap-3">
                 <Link
-                  to={`/leads/${row.leadId}?tab=activities`}
+                  to={`/activities/${row.id}`}
                   onClick={() => setOpen(false)}
-                  className="mt-1.5 inline-block text-[11px] font-semibold text-blue-700 no-underline hover:underline"
+                  className="text-[11px] font-semibold text-blue-700 no-underline hover:underline"
                 >
-                  Open lead →
+                  View Activity
                 </Link>
-              ) : null}
+                {row.leadId ? (
+                  <Link
+                    to={`/leads/${row.leadId}?tab=activities`}
+                    onClick={() => setOpen(false)}
+                    className="text-[11px] font-semibold text-blue-700 no-underline hover:underline"
+                  >
+                    Open lead →
+                  </Link>
+                ) : null}
+              </div>
             </li>
           );
         })}

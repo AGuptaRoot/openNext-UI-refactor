@@ -27,9 +27,17 @@ import { DashboardTour } from '../tours/DashboardTour';
 import { ReportsTour } from '../tours/ReportsTour';
 import { TourControlBar } from '../tours/TourControlBar';
 
+/** Sidebar labels for the core modules a CRM extension can hide (matched by text, too). */
+const EXTENSION_MODULE_LABELS: Record<string, string> = {
+  projects: 'Projects',
+  tasks: 'Tasks',
+  'time-logs': 'Time Logs',
+  'sales-orders': 'Sales Orders',
+};
+
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { theme } = useTheme();
-  const { activeRole, isClient, canUseTours } = useAuth();
+  const { activeRole, isClient, canUseTours, features } = useAuth();
   useDashboardSidebarSync();
 
   /*
@@ -65,11 +73,39 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     if (role === 'crm-employee' || role === 'employee' || role === 'freelancer' || role === '104') {
       hideIds.push('expenses');
     }
+
+    // Optional module switches (Settings → Modules) - disabled by default
+    const modules = features?.modules;
+    if (!modules?.expenses) {
+      hideIds.push('expenses');
+      hideLabels.push('Expenses');
+    }
+    if (!modules?.marketing) {
+      hideIds.push('marketing');
+      hideLabels.push('Marketing', 'Marketing Automation');
+    }
+    if (!modules?.customerSuccess) {
+      hideIds.push('customer-success');
+      hideLabels.push('Customer Success');
+    }
+    if (!modules?.dataQuality) {
+      hideIds.push('data-quality');
+      hideLabels.push('Data Quality');
+    }
+
+    // Core modules the active CRM extension (Settings → Extensions) leaves out:
+    // Product Sales hides Projects/Tasks/Time Logs, Project Delivery hides Sales Orders.
+    for (const routeId of features?.activeExtension?.hiddenModules || []) {
+      hideIds.push(routeId);
+      const label = EXTENSION_MODULE_LABELS[routeId];
+      if (label) hideLabels.push(label);
+    }
+
     const apply = () => hideParentSidebarRoutes(hideIds, undefined, hideLabels);
     apply();
     const timer = window.setInterval(apply, 500);
     return () => window.clearInterval(timer);
-  }, [isClient, activeRole]);
+  }, [isClient, activeRole, features]);
 
 
 
