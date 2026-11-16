@@ -8,6 +8,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { crmApi } from '../../services/api';
 import { useDialog } from '../../context/DialogContext';
+import { useNotifyMessage } from '@/components/notifications';
 import { ListPager, type ListPaginationMeta } from '../../components/common/ListPager';
 import { TaskItem } from '../../types/tasks';
 import { ProjectItem } from '../../types/projects';
@@ -217,6 +218,7 @@ export const TimeLogsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
   const [tick, setTick] = useState(0);
   const [form, setForm] = useState(emptyForm());
   const [exportOpen, setExportOpen] = useState(false);
@@ -972,10 +974,6 @@ export const TimeLogsPage: React.FC = () => {
             Refresh
           </button>
         </div>
-      )}
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
       )}
 
       {view === 'weekly' ? (

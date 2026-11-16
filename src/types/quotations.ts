@@ -8,6 +8,7 @@ export const QUOTATION_STATUSES = [
   'Rejected',
   'Expired',
   'Converted',
+  'Closed',
 ] as const;
 export type QuotationStatus = (typeof QUOTATION_STATUSES)[number] | string;
 
@@ -33,7 +34,21 @@ export const QUOTATION_TAX_SLABS = [0, 5, 12, 18, 28] as const;
 export type QuotationPaymentType = 'full' | 'advance';
 export type QuotationAdvanceMode = 'percent' | 'amount';
 
+/** Titled text block printed after the totals (inclusions, cancellation policy, ...). */
+export interface QuotationSection {
+  title: string;
+  body: string;
+}
+
 export interface QuotationLineItem {
+  /** What the quantity counts, e.g. "Rooms × Nights". */
+  unit?: string;
+  /** Values of the active extension's line columns (e.g. availability, provider). */
+  extra?: Record<string, string>;
+  /** The extension's own reference for the line (kept on revisions, never shown). */
+  sourceRef?: string;
+  /** Key of the extension's line group (salesFlow.quotationLineGroups); '' = ungrouped. */
+  group?: string;
   name: string;
   description?: string;
   qty: number;
@@ -41,6 +56,28 @@ export interface QuotationLineItem {
   tax: number;
   fileUrl?: string;
   amount?: number;
+}
+
+/** How much of a quotation is paid, from the server's verified payment records. */
+export interface QuotationPaymentState {
+  total: number;
+  paid: number;
+  balance: number;
+  status: 'Unpaid' | 'Partially Paid' | 'Paid';
+  /** Advance workflow: 'Advance Paid' once the required advance is in (nothing more payable on the quotation). */
+  stage?: 'Unpaid' | 'Advance Paid' | 'Partially Paid' | 'Paid';
+  isAdvanceFlow?: boolean;
+  advanceRequired?: number;
+  advancePaid?: number;
+  advanceSatisfied?: boolean;
+  currency: string;
+  invoiceId: string | null;
+  invoiceNo: string;
+  invoiceStatus: string;
+  invoiceTotal?: number;
+  invoiceBalance?: number;
+  nextPayment: { amount: number; kind: 'full' | 'advance' | 'balance' | 'invoice' } | null;
+  canPay: boolean;
 }
 
 export interface QuotationItem {
@@ -72,6 +109,7 @@ export interface QuotationItem {
   discountAmount?: number;
   shippingCharge?: number;
   recipientNotes?: string;
+  sections?: QuotationSection[];
   subtotal?: number;
   taxTotal?: number;
   cgst?: number;
@@ -81,6 +119,10 @@ export interface QuotationItem {
   grandTotal: number;
   status: QuotationStatus;
   isArchived?: boolean;
+  /** Closed (CRM 3.28.0): why, and the accepted quotation of the same opportunity. */
+  closedReason?: string;
+  closedByQuotationId?: string;
+  closedAt?: string | null;
   isLatestVersion?: boolean;
   revisionOf?: string;
   revisionNumber?: number;
@@ -103,6 +145,8 @@ export interface QuotationItem {
   advanceValue?: number;
   /** The payment request raised from this quotation, once one exists. */
   proformaInvoiceId?: string;
+  /** Present on the detail response. */
+  paymentState?: QuotationPaymentState | null;
   proformaInvoiceNo?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -184,6 +228,7 @@ export interface QuotationTemplateItem {
   shippingCharge?: number;
   recipientNotes?: string;
   terms?: string;
+  sections?: QuotationSection[];
   lineItems: QuotationLineItem[];
   discountType?: DiscountType;
   discountValue?: number;

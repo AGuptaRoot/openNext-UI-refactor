@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import AddIcon from '@mui/icons-material/Add';
@@ -35,6 +35,7 @@ import { CsvImportModal } from '../../components/common/CsvImportModal';
 import { VisitingCardLeadCaptureModal } from '../../components/leads/VisitingCardLeadCaptureModal';
 import { TourButton } from '../../ui/tour';
 import { restartLeadsTour } from '../../tours/LeadsTour';
+import { notify } from '@/components/notifications';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import CloseIcon from '@mui/icons-material/Close';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
@@ -140,14 +141,14 @@ export const LeadsPage: React.FC = () => {
 
   // Selection & Sorting State
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
-  const [currentSortField, setCurrentSortField] = useState<string | null>('name');
-  const [currentSortAsc, setCurrentSortAsc] = useState<boolean>(true);
+  // Default: newest lead first (createdAt desc), in list and kanban.
+  const [currentSortField, setCurrentSortField] = useState<string | null>('createdAt');
+  const [currentSortAsc, setCurrentSortAsc] = useState<boolean>(false);
   const [pagination, setPagination] = useState<LeadPaginationMeta | null>(null);
   const [page, setPage] = useState(1);
 
   // Loading & State
   const [loading, setLoading] = useState(true);
-  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
 
   // Modals State
   const [detailModalLead, setDetailModalLead] = useState<LeadItem | null>(null);
@@ -167,10 +168,7 @@ export const LeadsPage: React.FC = () => {
   }, [canWrite, navigate]);
 
   const showToast = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
-    setToastMessage({ text, type });
-    setTimeout(() => {
-      setToastMessage((prev) => (prev?.text === text ? null : prev));
-    }, 4000);
+    notify.show(type, text);
   };
 
   // Load Settings & Metadata — isolate failures so pipeline/source/status/rep selects stay populated
@@ -240,8 +238,17 @@ export const LeadsPage: React.FC = () => {
     loadMetadata();
   }, []);
 
+  // Search waits for a 300 ms pause in typing; only the newest request may update the list.
+  const [debouncedSearch, setDebouncedSearch] = useState(searchQuery);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+  const loadSeqRef = useRef(0);
+
   // Load Leads
   const loadLeads = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     if (currentView === 'activity') {
       setLoading(false);
       return;
@@ -257,10 +264,13 @@ export const LeadsPage: React.FC = () => {
         source: filterSource || undefined,
         matchScore: filterMatchScore || undefined,
         needsSampleRequest: filterNeedsSample || undefined,
-        search: searchQuery.trim() || undefined,
-        sort: currentSortField ? `${currentSortField}:${currentSortAsc ? 'asc' : 'desc'}` : undefined,
+        search: debouncedSearch.trim() || undefined,
+        ...(currentSortField === 'createdAt'
+          ? { sort: 'createdAt', order: currentSortAsc ? ('asc' as const) : ('desc' as const) }
+          : { sort: currentSortField ? `${currentSortField}:${currentSortAsc ? 'asc' : 'desc'}` : undefined }),
       });
 
+      if (seq !== loadSeqRef.current) return; // a newer search is on its way
       let items = res.data || [];
 
       // Local sorting if needed
@@ -268,7 +278,13 @@ export const LeadsPage: React.FC = () => {
         items = [...items].sort((a, b) => {
           let valA = '';
           let valB = '';
-          if (currentSortField === 'name') {
+          if (currentSortField === 'createdAt') {
+            const tA = a.createdAt ? new Date(a.createdAt).getTime() || 0 : 0;
+            const tB = b.createdAt ? new Date(b.createdAt).getTime() || 0 : 0;
+            if (tA < tB) return currentSortAsc ? -1 : 1;
+            if (tA > tB) return currentSortAsc ? 1 : -1;
+            return 0;
+          } else if (currentSortField === 'name') {
             valA = (a.name || '').toLowerCase();
             valB = (b.name || '').toLowerCase();
           } else if (currentSortField === 'company') {
@@ -301,10 +317,11 @@ export const LeadsPage: React.FC = () => {
       setLeads(items);
       setPagination(res.pagination || null);
     } catch (err: unknown) {
+      if (seq !== loadSeqRef.current) return;
       const msg = err instanceof Error ? err.message : 'Failed to load leads';
       showToast(msg, 'error');
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
     }
   }, [
     page,
@@ -314,7 +331,7 @@ export const LeadsPage: React.FC = () => {
     filterSource,
     filterMatchScore,
     filterNeedsSample,
-    searchQuery,
+    debouncedSearch,
     currentSortField,
     currentSortAsc,
   ]);
@@ -567,26 +584,6 @@ export const LeadsPage: React.FC = () => {
 
   return (
     <div className="flex w-full flex-col gap-5 pb-12">
-      {/* Toast Alert Feedback */}
-      {toastMessage && (
-        <div
-          className={`p-3 rounded-xl border flex items-center justify-between text-xs font-semibold ${
-            toastMessage.type === 'error'
-              ? 'bg-red-50 text-red-800 border-red-200'
-              : 'bg-zinc-950 text-white border-zinc-950'
-          }`}
-        >
-          <span>{toastMessage.text}</span>
-          <button
-            type="button"
-            onClick={() => setToastMessage(null)}
-            className="text-inherit hover:opacity-75 p-0 bg-transparent border-none cursor-pointer"
-          >
-            <CloseIcon sx={{ fontSize: 16 }} aria-label="Dismiss" />
-          </button>
-        </div>
-      )}
-
       {/* 1. Header (OpenNext CMS Style) */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-zinc-200">
         <div>

@@ -4,8 +4,14 @@ import { Link, useParams } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CloseIcon from '@mui/icons-material/Close';
 import { crmApi } from '../../services/api';
+import { useNotifyMessage } from '@/components/notifications';
 import { useAuth } from '../../context/AuthContext';
 import { useActiveExtension } from '../../hooks/useActiveExtension';
+import {
+  useExtensionTabs,
+  ExtensionTabContent,
+  ExtensionFieldsSection,
+} from '../../components/extensions';
 import { DocumentUploadControl } from '../../components/common/DocumentUploadControl';
 import type { AssignableUser } from '../../types/leads';
 import {
@@ -16,7 +22,7 @@ import {
   type TicketItem,
 } from '../../types/tickets';
 
-type DetailTab = 'conversation' | 'timeline' | 'watchers';
+type DetailTab = 'conversation' | 'timeline' | 'watchers' | string;
 type ModalKind = 'resolve' | 'reassign' | 'escalate' | null;
 
 const fieldClass =
@@ -67,10 +73,12 @@ export const TicketDetailPage: React.FC = () => {
   const canResolve = hasPermission('crm.tickets.resolve') && !isClient;
 
   const [ticket, setTicket] = useState<TicketItem | null>(null);
+  const declTabs = useExtensionTabs('ticketDetail');
   const [users, setUsers] = useState<AssignableUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error');
   const [tab, setTab] = useState<DetailTab>('conversation');
   const [tick, setTick] = useState(0);
 
@@ -395,10 +403,6 @@ export const TicketDetailPage: React.FC = () => {
         </div>
       </header>
 
-      {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-      )}
-
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_300px]">
         <main className="min-w-0 space-y-4">
           <div data-tour="tickets-detail-tabs" className="inline-flex rounded-lg border border-zinc-200 bg-zinc-50 p-0.5">
@@ -407,6 +411,7 @@ export const TicketDetailPage: React.FC = () => {
                 { id: 'conversation', label: 'Conversation' },
                 { id: 'timeline', label: 'Timeline' },
                 ...(!isClient ? [{ id: 'watchers', label: 'Watchers' } as const] : []),
+                ...declTabs.map((t) => ({ id: `decl_${t.id}`, label: t.label })),
               ] as Array<{ id: DetailTab; label: string }>
             ).map((entry) => (
               <button
@@ -422,8 +427,25 @@ export const TicketDetailPage: React.FC = () => {
             ))}
           </div>
 
+          {tab.startsWith('decl_') && (
+            (() => {
+              const activeDeclTab = declTabs.find((t) => t.id === tab.replace('decl_', ''));
+              if (!activeDeclTab) return null;
+              return (
+                <ExtensionTabContent
+                  tab={activeDeclTab}
+                  record="ticket"
+                  recordId={id!}
+                  recordData={ticket}
+                />
+              );
+            })()
+          )}
+
           {tab === 'conversation' && (
-            <section data-tour="tickets-detail-conversation" className="rounded-xl border border-zinc-300 bg-white p-5">
+            <>
+              <ExtensionFieldsSection record="ticket" recordId={id!} />
+              <section data-tour="tickets-detail-conversation" className="rounded-xl border border-zinc-300 bg-white p-5">
               <h2 className="mt-0 mb-4 text-base font-bold text-zinc-950">Conversation</h2>
               {(ticket.messages || []).length === 0 ? (
                 <p className="text-sm text-zinc-500">No replies yet.</p>
@@ -526,6 +548,7 @@ export const TicketDetailPage: React.FC = () => {
                 </div>
               </form>
             </section>
+            </>
           )}
 
           {tab === 'timeline' && (

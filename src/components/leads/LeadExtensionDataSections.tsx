@@ -53,7 +53,7 @@ export function normalizeExtensionBag(raw: unknown): Record<string, unknown> | n
   return out;
 }
 
-/** crm-travel → Travel ; Travel-General-Information → Travel General Information */
+/** my-extension → My Extension ; General-Information → General Information */
 export function humanizeExtensionKey(key: string): string {
   return String(key || '')
     .replace(/^crm[-_]/i, '')
@@ -109,7 +109,7 @@ function fieldsFromObject(obj: Record<string, unknown>): FieldRow[] {
 }
 
 function unwrapExtensionBag(bag: Record<string, unknown>, extensionId: string): Record<string, unknown> {
-  // Handle accidental double-wrap: { "crm-travel": { "crm-travel": { ...sections } } }
+  // Handle accidental double-wrap: { "<id>": { "<id>": { ...sections } } }
   const nested = bag[extensionId];
   if (isPlainObject(nested) && looksLikeSectionMap(nested)) {
     return nested;
@@ -187,7 +187,7 @@ function parseExtensionBlocks(
 
 /**
  * Generic read-only renderer for Lead.extension JSON.
- * Works for any plugin-extension key (crm-travel, crm-foo, …) without Travel hardcode.
+ * Works for any plugin-extension key without extension-specific code.
  */
 export function LeadExtensionDataSections({ extension, extensionLabels }: Props) {
   const blocks = useMemo(

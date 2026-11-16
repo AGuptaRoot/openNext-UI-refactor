@@ -8,6 +8,7 @@ import ViewListIcon from '@mui/icons-material/ViewList';
 import ViewKanbanIcon from '@mui/icons-material/ViewKanban';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { crmApi } from '../../services/api';
+import { useNotifyMessage } from '@/components/notifications';
 import { useAuth } from '../../context/AuthContext';
 import { TourButton } from '../../ui/tour';
 import { ListPager, type ListPaginationMeta } from '../../components/common/ListPager';
@@ -94,6 +95,7 @@ export const TicketsPage: React.FC = () => {
   const [pagination, setPagination] = useState<ListPaginationMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
   const [busyId, setBusyId] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
   const [tick, setTick] = useState(0);
@@ -484,10 +486,6 @@ export const TicketsPage: React.FC = () => {
           ))}
         </select>
       </div>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-      )}
 
       {loading ? (
         <div className="rounded-xl border border-zinc-300 bg-white p-12 text-center text-sm text-zinc-500">

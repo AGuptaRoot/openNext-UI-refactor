@@ -7,6 +7,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 import { useAuth } from '../../context/AuthContext';
 import { useDialog } from '../../context/DialogContext';
+import { notify } from '@/components/notifications';
 import { crmApi } from '../../services/api';
 import {
   PersonContact,
@@ -34,11 +35,9 @@ export const ContactsPage: React.FC = () => {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
-    setToast({ text, type });
-    window.setTimeout(() => setToast(null), 3500);
+    notify.show(type, text);
   };
 
   useEffect(() => {
@@ -108,18 +107,6 @@ export const ContactsPage: React.FC = () => {
 
   return (
     <div data-tour="contacts-tour-landing" className="flex flex-col gap-5">
-      {toast && (
-        <div
-          className={`fixed top-20 right-6 z-[80] px-4 py-2.5 rounded-lg text-xs font-semibold border ${
-            toast.type === 'error'
-              ? 'bg-red-50 text-red-700 border-red-200'
-              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-          }`}
-        >
-          {toast.text}
-        </div>
-      )}
-
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 pb-1 border-b border-zinc-200">
         <div data-tour="contacts-title">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 m-0 mb-1">

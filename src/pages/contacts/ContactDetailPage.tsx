@@ -8,10 +8,11 @@ import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import CircularProgress from '@mui/material/CircularProgress';
 import Tooltip from '@mui/material/Tooltip';
-import { CheckCircle2, User } from 'lucide-react';
+import { CheckCircle2, ShieldCheck, User } from 'lucide-react';
 
 import { useAuth } from '../../context/AuthContext';
 import { useDialog } from '../../context/DialogContext';
+import { notify } from '@/components/notifications';
 import { ApiError, crmApi } from '../../services/api';
 import { PersonContact, formatContactName, SameCompanyLeadItem } from '../../types/contacts';
 import { LeadItem } from '../../types/leads';
@@ -28,6 +29,8 @@ import { ContactDuplicateBanner } from '../../components/contacts/ContactDuplica
 import { useContactDuplicates } from '../../components/contacts/useContactDuplicates';
 import { LinkLeadModal } from '../../components/contacts/LinkLeadModal';
 import { LinkClientModal } from '../../components/contacts/LinkClientModal';
+import { useExtensionTabs } from '../../components/extensions/ExtensionTabs';
+import { ExtensionMount } from '../../components/extensions/ExtensionMount';
 
 /** Max linked leads/clients resolved to titles on the detail page (the rest stay as id links). */
 const LINKED_LOOKUP_LIMIT = 25;
@@ -53,6 +56,8 @@ export const ContactDetailPage: React.FC = () => {
   const canReadClients = hasAnyPermission('crm.clients.read', 'crm.leads.read');
 
   const [contact, setContact] = useState<PersonContact | null>(null);
+  // Sections the active workspace extension adds to a contact (json/tabs.json → contactDetail).
+  const extensionSections = useExtensionTabs('contactDetail');
   const [values, setValues] = useState<ContactFormValues>({ ...EMPTY_CONTACT_FORM });
   const [linkedLeads, setLinkedLeads] = useState<LinkedLeadRow[]>([]);
   const [linkedClients, setLinkedClients] = useState<LinkedClientRow[]>([]);
@@ -64,12 +69,10 @@ export const ContactDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const { duplicates, setDuplicates, checkValues, clear } = useContactDuplicates(id);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
-    setToast({ text, type });
-    window.setTimeout(() => setToast(null), 3500);
+    notify.show(type, text);
   };
 
   const load = useCallback(async () => {
@@ -295,18 +298,6 @@ export const ContactDetailPage: React.FC = () => {
 
   return (
     <div data-tour="contacts-detail" className="flex flex-col gap-5 pb-20">
-      {toast && (
-        <div
-          className={`fixed top-20 right-6 z-[80] px-4 py-2.5 rounded-lg text-xs font-semibold border ${
-            toast.type === 'error'
-              ? 'bg-red-50 text-red-700 border-red-200'
-              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-          }`}
-        >
-          {toast.text}
-        </div>
-      )}
-
       <div className="bg-white border border-zinc-300 rounded-xl px-5 py-6">
         <div className="flex items-center gap-3 text-xs text-zinc-400 mb-4 font-medium">
           <Link
@@ -716,6 +707,43 @@ export const ContactDetailPage: React.FC = () => {
           </section>
 
           {/* Section 3: Record info */}
+          {id &&
+            extensionSections.map((section) =>
+              section.slot ? (
+                <section
+                  key={section.id}
+                  data-extension-section={section.id}
+                  className="bg-white border border-zinc-300 rounded-xl p-5 shadow-xs"
+                >
+                  <h3 className="text-xs font-bold text-zinc-950 uppercase tracking-wider m-0 mb-3">{section.label}</h3>
+                  <ExtensionMount slot={section.slot} record={{ type: 'contact', id, data: contact }} />
+                </section>
+              ) : null
+            )}
+
+          {/* Portal access (CRM 3.36.0 flag): one portal user per Contact, reused by every lead /
+              opportunity / client of it — so nothing here offers to create another. */}
+          {contact.IsportalAssigned === true && (
+            <section
+              className="bg-white border border-emerald-200 rounded-xl p-5 shadow-xs"
+              data-testid="contact-portal-access"
+            >
+              <div className="flex items-center gap-1.5 mb-2">
+                <ShieldCheck className="h-4 w-4 text-emerald-600" aria-hidden />
+                <h3 className="text-xs font-bold text-zinc-950 uppercase tracking-wider m-0">Portal Access</h3>
+              </div>
+              <p className="m-0 text-xs text-emerald-800 font-semibold">
+                Portal access is already assigned to this contact.
+              </p>
+              <p className="m-0 mt-1 text-[11px] text-zinc-500">
+                Leads, opportunities and clients of this contact use the same portal login.
+                {contact.portalAssignedAt
+                  ? ` Assigned on ${new Date(contact.portalAssignedAt).toLocaleDateString('en-IN')}.`
+                  : ''}
+              </p>
+            </section>
+          )}
+
           <section className="bg-zinc-50 border border-zinc-200 rounded-xl p-5 text-xs text-zinc-600">
             <h4 className="text-xs font-bold text-zinc-900 m-0 mb-2">Record info</h4>
             <dl className="m-0 grid grid-cols-2 gap-y-1.5">

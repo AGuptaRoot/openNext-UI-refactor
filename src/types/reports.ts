@@ -406,3 +406,91 @@ export interface ActivityLocationReport {
   };
   range?: { from: string; to: string };
 }
+
+/* --------------------------- extension Reports page (json/reports.json, CRM 3.29.0) */
+
+export interface ExtensionReportFilterOption {
+  value: string;
+  label: string;
+}
+
+export interface ExtensionReportFilter {
+  key: string;
+  label: string;
+  type: 'daterange' | 'select';
+  default?: string;
+  options?: ExtensionReportFilterOption[];
+}
+
+export interface ExtensionReportSectionDef {
+  id: string;
+  kind: 'kpis' | 'funnel' | 'groups' | 'table' | 'chart' | 'list' | 'steps' | 'progress';
+  title: string;
+  subtitle?: string;
+  width: 'full' | 'half';
+  export?: boolean;
+  periods?: ExtensionReportFilterOption[];
+  /** Tab the section is shown under (CRM 3.30.0); none = above the tabs. */
+  tab?: string;
+}
+
+export interface ExtensionReportDefinition {
+  available: boolean;
+  extensionId?: string;
+  title: string;
+  subtitle?: string;
+  keepCoreTabs: string[];
+  filters: ExtensionReportFilter[];
+  /** Header buttons (e.g. "+ New Travel Lead"). */
+  actions?: Array<{ label: string; link: string }>;
+  tabs?: Array<{ id: string; label: string }>;
+  sections: ExtensionReportSectionDef[];
+}
+
+export interface ExtensionReportItem {
+  key: string;
+  label: string;
+  value: number;
+  count?: number;
+  format?: 'number' | 'money' | 'percent' | 'days' | 'text';
+  currency?: string;
+  hint?: string;
+  tone?: 'neutral' | 'success' | 'warning' | 'danger' | 'info';
+  link?: string;
+}
+
+export interface ExtensionReportSectionData {
+  kind: ExtensionReportSectionDef['kind'];
+  error?: string;
+  note?: string;
+  currency?: string;
+  items?: ExtensionReportItem[];
+  /** "View all" under a section; text when there is nothing. */
+  more?: { label: string; link: string };
+  empty?: string;
+  /** progress: current of total. */
+  current?: number;
+  format?: string;
+  label?: string;
+  stages?: Array<{ key: string; label: string; count: number; conversion: number | null; dropOff: number | null; link?: string }>;
+  columns?: Array<{ key: string; label: string; type: string }>;
+  rows?: Array<Record<string, unknown> & { _link?: string; _tone?: string }>;
+  total?: number;
+  type?: 'bar' | 'line';
+  /** A table's graph: one point per row (CRM 3.30.0). */
+  chart?: { type: 'bar' | 'line' | 'pie'; labelKey: string; series: Array<{ key: string; label: string; format?: string }> };
+  series?: Array<{ key: string; label: string; format?: string }>;
+  points?: Array<{ label: string; values: Record<string, number> }>;
+}
+
+/** A row of a "list" section (dashboard): a short title, one detail line, a badge or an action. */
+export interface ExtensionDashboardListItem {
+  key: string;
+  title?: string;
+  detail?: string;
+  meta?: string;
+  badge?: string;
+  tone?: 'neutral' | 'success' | 'warning' | 'danger' | 'info';
+  actionLabel?: string;
+  link?: string;
+}

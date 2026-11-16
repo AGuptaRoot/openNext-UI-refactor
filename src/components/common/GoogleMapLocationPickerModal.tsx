@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { MapPin, Navigation, X, Check, AlertCircle } from 'lucide-react';
 import { loadGoogleMaps, getGoogleMaps } from '../../utils/googleMapsLoader';
+import { notify } from '@/components/notifications';
 
 export interface LocationCoordinates {
   latitude: number;
@@ -127,7 +128,7 @@ export const GoogleMapLocationPickerModal: React.FC<GoogleMapLocationPickerModal
 
   const handleUseCurrentLocation = () => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      alert('Geolocation is not supported by your browser.');
+      notify.error('Geolocation is not supported by your browser.');
       return;
     }
     setLocatingCurrent(true);
@@ -149,7 +150,7 @@ export const GoogleMapLocationPickerModal: React.FC<GoogleMapLocationPickerModal
       },
       (err) => {
         setLocatingCurrent(false);
-        alert(err?.message || 'Unable to retrieve your current location.');
+        notify.error(err?.message || 'Unable to retrieve your current location.');
       },
       { enableHighAccuracy: true, timeout: 8000 }
     );

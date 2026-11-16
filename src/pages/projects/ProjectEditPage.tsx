@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AddIcon from '@mui/icons-material/Add';
 
+import { useNotifyMessage } from '@/components/notifications';
 import { useAuth } from '../../context/AuthContext';
 import { crmApi } from '../../services/api';
 import {
@@ -39,6 +40,7 @@ export const ProjectEditPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
 
   const [name, setName] = useState('');
   const [clientId, setClientId] = useState('');
@@ -238,12 +240,6 @@ export const ProjectEditPage: React.FC = () => {
         </Link>
         <h1 className="text-2xl font-bold text-zinc-950 m-0 tracking-tight">Edit Project</h1>
       </div>
-
-      {error && (
-        <div className="px-4 py-2.5 rounded-lg text-xs font-semibold border bg-red-50 text-red-700 border-red-200">
-          {error}
-        </div>
-      )}
 
       {loading ? (
         <div className="bg-white border border-zinc-300 rounded-xl p-10 text-center text-sm text-zinc-500 animate-pulse">

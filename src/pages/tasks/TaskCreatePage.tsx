@@ -24,6 +24,7 @@ import {
   type ProjectAssigneeOption,
 } from '../../utils/projectAssigneeOptions';
 import { canCreateTasks, isEmployeeRole } from '../../utils/permissions';
+import { useNotifyMessage } from '@/components/notifications';
 
 const fieldClass =
   'h-10 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-zinc-500 text-zinc-900';
@@ -49,6 +50,7 @@ export const TaskCreatePage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
 
   // Form state
   const [form, setForm] = useState<TaskCreateInput>({
@@ -311,12 +313,6 @@ export const TaskCreatePage: React.FC = () => {
           Configure deliverable details, checklist subtasks, recurrence, and client sign-off settings.
         </p>
       </header>
-
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-3.5 text-sm font-semibold text-red-700">
-          {error}
-        </div>
-      )}
 
       {loading ? (
         <div className="rounded-xl border border-zinc-300 bg-white p-12 text-center text-sm text-zinc-500 animate-pulse">

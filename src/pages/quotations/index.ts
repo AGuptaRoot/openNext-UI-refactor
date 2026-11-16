@@ -3,3 +3,4 @@ export { QuotationCreatePage } from './QuotationCreatePage';
 export { QuotationDetailPage } from './QuotationDetailPage';
 export { QuotationTemplatesPage } from './QuotationTemplatesPage';
 export { QuotationTemplateCreatePage } from './QuotationTemplateCreatePage';
+export { QuotationTemplatesGate } from './QuotationTemplatesGate';

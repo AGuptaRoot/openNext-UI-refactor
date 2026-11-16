@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AddIcon from '@mui/icons-material/Add';
@@ -9,6 +9,9 @@ import CloseIcon from '@mui/icons-material/Close';
 
 import { useAuth } from '../../context/AuthContext';
 import { useDialog } from '../../context/DialogContext';
+import { useNotifyMessage, notify } from '@/components/notifications';
+import { ClientCompanyMatchModal } from '../../components/leads/ClientCompanyMatchModal';
+import { useExistingClientMatch } from '../../hooks/useExistingClientMatch';
 import { ApiError, crmApi } from '../../services/api';
 import {
   PersonContact,
@@ -35,6 +38,8 @@ import {
 import { DEFAULT_CLIENT_AVATAR_COLOR, resolveClientAvatarColor, resolveClientMediaUrl } from '../../utils/clientAvatar';
 import { PhoneNumberField } from '../../components/common/PhoneNumberField';
 import { splitPhoneNumber, validateNationalNumber } from '../../utils/phoneCountryCodes';
+import { ExtensionCreateFields } from '../../components/extensions';
+import { extensionDataApi } from '../../services/extensionDataApi';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^[+]?[\d\s().-]{7,20}$/;
@@ -60,6 +65,8 @@ export const ClientCreatePage: React.FC = () => {
   const [leads, setLeads] = useState<LeadItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
+  const [extensionValues, setExtensionValues] = useState<Record<string, unknown>>({});
 
   const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
   const [showAddTagModal, setShowAddTagModal] = useState(false);
@@ -97,10 +104,18 @@ export const ClientCreatePage: React.FC = () => {
   const [contactPhone, setContactPhone] = useState('');
   const [contactPan, setContactPan] = useState('');
   const [contactJobTitle, setContactJobTitle] = useState('');
-  const [contactIsPrimary, setContactIsPrimary] = useState(true);
 
   // Contact module selection state
   const [selectedPersonContact, setSelectedPersonContact] = useState<PersonContact | null>(null);
+  /**
+   * CRM 3.48.0: the shared Existing Client Found flow. The client name (company) or the Primary Contact
+   * Person may already belong to a Client: "Add as Secondary Contact" adds the contact there and creates no
+   * client; "Continue Creating Client" creates it as usual (the user's explicit OK for a same-name client).
+   */
+  const clientMatch = useExistingClientMatch<'submit'>();
+  /** The client name the user chose "Continue Creating Client" for (a later name is asked again). */
+  const continuedFor = useRef('');
+  const continuedPastMatch = () => continuedFor.current !== '' && continuedFor.current === name.trim().toLowerCase();
   const [contactQuery, setContactQuery] = useState('');
   const [contactDropdownOpen, setContactDropdownOpen] = useState(false);
   const [contactResults, setContactResults] = useState<PersonContact[]>([]);
@@ -345,6 +360,8 @@ export const ClientCreatePage: React.FC = () => {
       addresses,
       leadId: leadId || undefined,
       allowExactDuplicate: allowExactDuplicate || undefined,
+      // 3.48.0: the user saw the existing Client and chose "Continue Creating Client".
+      allowSimilarCompany: continuedPastMatch() || undefined,
     };
   };
 
@@ -354,6 +371,59 @@ export const ClientCreatePage: React.FC = () => {
       ...(dup.similar || []).map((d) => `Similar: ${d.name} (${d.matchReason || 'match'})`),
     ];
     return lines.slice(0, 5).join('\n');
+  };
+
+  const handleClientMatchContinue = () => {
+    if (clientMatch.continueAnyway() !== 'submit') return;
+    continuedFor.current = name.trim().toLowerCase();
+    void handleSubmit({ preventDefault() {} } as React.FormEvent);
+  };
+
+  /** "Add as Secondary Contact": the Primary Contact Person joins the existing Client; no client is created. */
+  const handleClientMatchAddSecondary = async () => {
+    const match = clientMatch.selected;
+    if (!match || !match.canAddContact || clientMatch.busy) return;
+    clientMatch.setBusy(true);
+    clientMatch.setError(null);
+    try {
+      const res = await crmApi.addSecondaryClientContact(
+        match.id,
+        selectedPersonContact
+          ? { name: selectedPersonContact.name, personContactId: selectedPersonContact._id, source: 'client' }
+          : {
+              salutation: contactSalutation || undefined,
+              name: contactName.trim(),
+              gender: contactGender || undefined,
+              companyName: name.trim() || undefined,
+              email: contactEmail.trim() || undefined,
+              phone: contactPhone.trim() || undefined,
+              pan: contactPan.trim().toUpperCase() || undefined,
+              jobTitle: contactJobTitle.trim() || undefined,
+              // An existing directory contact with the same email / mobile / PAN is reused, not duplicated.
+              reuseExisting: true,
+              source: 'client',
+            }
+      );
+      const clientName = res.data?.client?.name || match.name;
+      const personName = res.data?.contact?.name || contactName.trim();
+      notify.success(
+        res.data?.alreadyLinked
+          ? `${personName} is already a contact of ${clientName}. No new client was created.`
+          : `${personName} was added to ${clientName} as a Secondary Contact. No new client was created.`
+      );
+      clientMatch.close();
+      navigate(`/clients/${encodeURIComponent(match.id)}?tab=contacts`);
+    } catch (err: unknown) {
+      clientMatch.setError(
+        err instanceof ApiError && err.status === 409 && Array.isArray(err.duplicates)
+          ? 'Several contacts already have this email / mobile / PAN. Choose the right one in Primary Contact Person first.'
+          : err instanceof Error
+            ? err.message
+            : 'Failed to add the contact to the client'
+      );
+    } finally {
+      clientMatch.setBusy(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -367,6 +437,16 @@ export const ClientCreatePage: React.FC = () => {
       setError(validationError);
       return;
     }
+    const asked = await clientMatch.ask(
+      {
+        company: name.trim(),
+        personContactId: selectedPersonContact?._id,
+        email: selectedPersonContact ? undefined : contactEmail.trim(),
+        phone: selectedPersonContact ? undefined : contactPhone.trim(),
+      },
+      'submit'
+    );
+    if (asked) return;
     setSaving(true);
     setError(null);
     try {
@@ -377,7 +457,9 @@ export const ClientCreatePage: React.FC = () => {
         phone: clientBody.phone,
       });
       let allowExact = false;
-      if (dupRes.data?.hasDuplicates) {
+      // After "Continue Creating Client" a same-name client was already confirmed; same email / mobile still asks.
+      const stillAsk = continuedPastMatch() ? (dupRes.data?.exact || []).length > 0 : Boolean(dupRes.data?.hasDuplicates);
+      if (stillAsk) {
         const proceed = await confirm(
           `Possible duplicates found:\n${formatDuplicates(dupRes.data)}\n\nCreate anyway?`
         );
@@ -423,7 +505,8 @@ export const ClientCreatePage: React.FC = () => {
             email: contactEmail.trim() || undefined,
             phone: contactPhone.trim() || undefined,
             designation: contactJobTitle.trim() || undefined,
-            isPrimary: contactIsPrimary,
+            // One Client = one Contact: the client's contact is its primary one.
+            isPrimary: true,
             personContactId,
           });
 
@@ -454,6 +537,10 @@ export const ClientCreatePage: React.FC = () => {
             // Non-blocking — billing may already be on company record.
           }
         }
+      }
+
+      if (clientId && Object.keys(extensionValues).length > 0) {
+        await extensionDataApi.setValues('client', clientId, extensionValues).catch((err) => console.warn('Extension values save error:', err));
       }
 
       navigate(`/clients/${clientId}`);
@@ -524,12 +611,6 @@ export const ClientCreatePage: React.FC = () => {
           </p>
         </div>
       </div>
-
-      {error && (
-        <div className="px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-xs font-semibold text-red-700">
-          {error}
-        </div>
-      )}
 
       <form data-tour="clients-create-form" onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         <div className="lg:col-span-8 flex flex-col gap-5">
@@ -1230,16 +1311,15 @@ export const ClientCreatePage: React.FC = () => {
                 />
               </label>
 
-              <label className="inline-flex items-center gap-2 text-xs font-semibold text-zinc-700 cursor-pointer sm:col-span-2 pt-1">
-                <input
-                  type="checkbox"
-                  checked={contactIsPrimary}
-                  onChange={(e) => setContactIsPrimary(e.target.checked)}
-                />
-                Set as primary account contact
-              </label>
             </div>
           </section>
+
+          <ExtensionCreateFields
+            record="client"
+            values={extensionValues}
+            onChange={setExtensionValues}
+            disabled={saving}
+          />
 
           <div className="flex items-center gap-3 justify-end">
             <button
@@ -1378,6 +1458,26 @@ export const ClientCreatePage: React.FC = () => {
         subtitle="Define a custom attribute for client accounts."
         onClose={() => setShowAddCustomFieldModal(false)}
         onSubmit={handleCreateCustomField}
+      />
+
+      <ClientCompanyMatchModal
+        open={clientMatch.open}
+        matches={clientMatch.matches}
+        selectedId={clientMatch.selectedId}
+        onSelect={clientMatch.select}
+        onAddSecondary={() => void handleClientMatchAddSecondary()}
+        onContinueLead={handleClientMatchContinue}
+        onClose={clientMatch.close}
+        loading={clientMatch.busy}
+        error={clientMatch.error}
+        continueLabel="Continue Creating Client"
+        addNote="the Primary Contact Person joins this client as a Secondary Contact; the new client is not created and the other details on this form are not saved."
+        continueNote="the same name does not always mean the same client. The new client is created as usual."
+        newContact={
+          selectedPersonContact
+            ? { name: selectedPersonContact.name, email: selectedPersonContact.email, phone: selectedPersonContact.phone }
+            : { name: contactName, email: contactEmail, phone: contactPhone }
+        }
       />
     </div>
   );

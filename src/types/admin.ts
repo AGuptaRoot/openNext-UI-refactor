@@ -74,6 +74,8 @@ export interface CrmSettings {
   /** Admin catalogs used to score Commercial Requirement on leads. */
   /** Ask to move the lead to Qualified after a commercial requirement save. */
   qualification_prompt_on_requirement_save: boolean;
+  /** Lead workflow rules (Qualification Match tab). Missing on older backends. */
+  lead_workflow?: import('./leads').LeadWorkflowRules;
   /**
    * Proforma invoices and advance payments on quotations. Off by default: a
    * proforma is an extra document with its own numbering and its own tax
@@ -83,6 +85,10 @@ export interface CrmSettings {
   /** Only meaningful while proforma_advance_enabled is on. */
   quotation_auto_accept_on_payment: boolean;
   auto_convert_proforma_on_delivery: boolean;
+  /** Raise the tax invoice once an accepted quotation is paid in full (CRM 3.19.0). */
+  auto_invoice_on_full_payment?: boolean;
+  /** Settings → General: an extension's booking may start after the advance (else after full payment). */
+  allow_booking_after_advance?: boolean;
   proforma_prefix: string;
   /** Default advance on a quotation, as a percentage of the total. */
   default_advance_percent: number;
@@ -95,12 +101,6 @@ export interface CrmSettings {
     productSpecifications: string[];
     productCertifications: string[];
   };
-  travel_locations?: {
-    from: string[];
-    to: string[];
-    destination: string[];
-  };
-  travel_services?: string[];
   enabled_modules?: {
     expenses?: boolean;
     marketing?: boolean;
@@ -117,7 +117,6 @@ export type SettingsTabId =
   | 'general'
   | 'modules'
   | 'extensions'
-  | 'travel'
   | 'shipping'
   | 'finance'
   | 'email'

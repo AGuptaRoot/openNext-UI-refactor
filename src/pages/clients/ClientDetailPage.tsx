@@ -1,7 +1,9 @@
 import { displayLabel, displayUserLabel } from '../../utils/displayLabels';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
+import { useSalesFlowConfig } from '../../hooks/useSalesFlowConfig';
 import { formatCrmMoney } from '../../utils/currency';
 import { resolveClientAvatarColor, resolveClientMediaUrl, DEFAULT_CLIENT_AVATAR_COLOR } from '../../utils/clientAvatar';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -15,6 +17,7 @@ import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 
 import { useAuth } from '../../context/AuthContext';
 import { useDialog } from '../../context/DialogContext';
+import { notify } from '@/components/notifications';
 import { crmApi } from '../../services/api';
 import { LeadAuditEntry, LeadItem } from '../../types/leads';
 import {
@@ -26,7 +29,12 @@ import { ContactSelect } from '../../components/contacts/ContactSelect';
 import { PhoneNumberField } from '../../components/common/PhoneNumberField';
 import { splitPhoneNumber, validateNationalNumber } from '../../utils/phoneCountryCodes';
 import { ClientExtensionOverviewSection } from '../../components/clients/ClientExtensionOverviewSection';
-import { ClientPassportsTab } from '../../components/clients/ClientPassportsTab';
+import {
+  useExtensionTabs,
+  useExtensionTabCounts,
+  ExtensionTabContent,
+  ExtensionFieldsSection,
+} from '../../components/extensions';
 import { useExtensions } from '../../hooks/useExtensions';
 import { PersonContact, formatContactName } from '../../types/contacts';
 import {
@@ -54,7 +62,7 @@ import { TicketItem } from '../../types/tickets';
 
 /**
  * Extension-contributed tabs use an `ext:` prefix so they can be deep-linked
- * (`?tab=ext:passports`) without widening the static union to `string`.
+ * (`?tab=ext:<id>`) without widening the static union to `string`.
  */
 type ExtensionTabId = `ext:${string}`;
 
@@ -69,12 +77,14 @@ type StaticTabId =
   | 'projects'
   | 'tasks'
   | 'time-logs'
+  | 'quotations'
+  | 'invoices'
   | 'finance'
   | 'tickets'
   | 'health'
   | 'audit';
 
-type TabId = StaticTabId | ExtensionTabId;
+type TabId = StaticTabId | ExtensionTabId | string;
 
 const CLIENT_TABS: StaticTabId[] = [
   'overview',
@@ -87,6 +97,8 @@ const CLIENT_TABS: StaticTabId[] = [
   'projects',
   'tasks',
   'time-logs',
+  'quotations',
+  'invoices',
   'finance',
   'tickets',
   'health',
@@ -104,6 +116,7 @@ function resolveClientTab(raw: string | null): TabId {
   if (lower === 'events') return 'timeline';
   if ((CLIENT_TABS as string[]).includes(lower)) return lower as TabId;
   if (/^ext:[A-Za-z0-9_-]+$/.test(value)) return value as ExtensionTabId;
+  if (value.startsWith('decl_') || value.startsWith('decl:')) return value;
   return 'overview';
 }
 
@@ -147,6 +160,14 @@ const statusPill = (status?: string) => {
 const moneyLabel = (amount: number | undefined, currency?: string) =>
   formatCrmMoney(amount, currency);
 
+/** Invoice status on the client's Invoices tab: Unpaid / Partially Paid / Paid from the server's payment status. */
+const invoicePaymentLabel = (inv: ClientRelatedInvoice) => {
+  const status = String(inv.status || '');
+  if (['Draft', 'Cancelled', 'Written Off', 'Converted'].includes(status)) return status;
+  if (status === 'Overdue') return inv.paymentStatus === 'Partially Paid' ? 'Overdue (Partially Paid)' : 'Overdue';
+  return inv.paymentStatus || status || '—';
+};
+
 export const ClientDetailPage: React.FC = () => {
   const { id = '' } = useParams();
   const navigate = useNavigate();
@@ -154,23 +175,39 @@ export const ClientDetailPage: React.FC = () => {
   const { hasPermission, isAdmin, activeRole } = useAuth();
   const canApprovePortal = isAdmin || activeRole === 'crm-manager' || activeRole === 'sales-manager' || hasPermission('crm.users.manage');
   const { confirm } = useDialog();
-  const {
-    clientOverviewSectionsForRequestType,
-    clientTabsForRequestType,
-    clientFieldsForTab,
-  } = useExtensions();
+  const { clientOverviewSectionsForRequestType } = useExtensions();
   const canWrite = hasPermission('crm.clients.write');
   const canDelete = hasPermission('crm.clients.delete');
-  const canProjects = hasPermission('crm.projects.read');
-  const canTasks = hasPermission('crm.tasks.read');
+  /*
+   * Projects, Tasks and Time Logs belong to the workspace mode that shows them
+   * (e.g. Project Delivery). When the active extension hides a module, its tab,
+   * KPI tile and shortcut disappear here too, whatever the user's permissions.
+   */
+  const { isModuleVisible } = useActiveExtension();
+  const canProjects = hasPermission('crm.projects.read') && isModuleVisible('projects');
+  const canTasks = hasPermission('crm.tasks.read') && isModuleVisible('tasks');
   const canFinance = hasPermission('crm.finance.read');
   const canAudit = hasPermission('crm.audit.read');
-  const canTime = hasPermission('crm.time.read') || hasPermission('crm.timeLogs.read') || canTasks;
-  const canTickets = hasPermission('crm.tickets.read');
+  const canTime =
+    (hasPermission('crm.time.read') || hasPermission('crm.timeLogs.read') || hasPermission('crm.tasks.read')) &&
+    isModuleVisible('time-logs');
+  const canTickets = hasPermission('crm.tickets.read') && isModuleVisible('tickets');
+  const canWriteQuotations = hasPermission('crm.quotes.write') || hasPermission('crm.finance.write');
+  const canPayments = canFinance && isModuleVisible('payments');
+  /* salesFlow.clientQuotationStartsWithLead: a new quotation for a client starts as a new enquiry (lead). */
+  const salesFlow = useSalesFlowConfig();
+  const quotationStartsWithLead = Boolean(salesFlow.clientQuotationStartsWithLead);
+  const canStartQuotation = canWriteQuotations && (!quotationStartsWithLead || hasPermission('crm.leads.write'));
 
   const [client, setClient] = useState<ClientItem | null>(null);
   const [summary, setSummary] = useState<ClientDetailSummary | null>(null);
   const [contacts, setContacts] = useState<ClientContact[]>([]);
+  /**
+   * CRM 3.46.0: one Primary contact + Secondary contacts. The linked (Primary) contact is the primary row,
+   * else the oldest; documents, portal and quotations use it. All contacts are listed, Primary first.
+   */
+  const linkedContact = contacts.find((c) => c.isPrimary) || contacts[0] || null;
+  const shownContacts = linkedContact ? [linkedContact, ...contacts.filter((c) => c !== linkedContact)] : [];
   const [sourceLead, setSourceLead] = useState<LeadItem | null>(null);
   const [extensionData, setExtensionData] = useState<ClientExtensionData | null>(null);
   const [extensionDataLoading, setExtensionDataLoading] = useState(false);
@@ -219,19 +256,20 @@ export const ClientDetailPage: React.FC = () => {
       showToast(
         emailed
           ? 'Portal access approved & login details emailed to client'
-          : 'Portal access approved & user created, but email could not be sent'
+          : 'Portal access approved & user created, but email could not be sent',
+        emailed ? 'success' : 'warning'
       );
       const updated = await crmApi.getClientPortalAccess(id);
       setPortalUsers(updated.data || []);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to approve portal access');
+      showToast(err instanceof Error ? err.message : 'Failed to approve portal access', 'error');
     }
   };
 
   const handleRejectPortalUser = async () => {
     if (!rejectingAccessId) return;
     if (!clientRejectionReason.trim()) {
-      showToast('Rejection reason is required');
+      showToast('Rejection reason is required', 'warning');
       return;
     }
     setRejectingSaving(true);
@@ -245,7 +283,7 @@ export const ClientDetailPage: React.FC = () => {
       const updated = await crmApi.getClientPortalAccess(id);
       setPortalUsers(updated.data || []);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to reject portal access');
+      showToast(err instanceof Error ? err.message : 'Failed to reject portal access', 'error');
     } finally {
       setRejectingSaving(false);
     }
@@ -263,10 +301,11 @@ export const ClientDetailPage: React.FC = () => {
   const [allTags, setAllTags] = useState<string[]>([]);
   const [customFieldDefs, setCustomFieldDefs] = useState<ClientCustomFieldDef[]>([]);
   const [tab, setTab] = useState<TabId>(() => resolveClientTab(searchParams.get('tab')));
+  const declTabs = useExtensionTabs('clientDetail');
+  const declTabCounts = useExtensionTabCounts(declTabs, id);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refreshingSummary, setRefreshingSummary] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [addrFilter, setAddrFilter] = useState<'all' | 'billing' | 'shipping' | 'branch'>('all');
   const [notesPinnedOnly, setNotesPinnedOnly] = useState(false);
@@ -275,6 +314,8 @@ export const ClientDetailPage: React.FC = () => {
   const [linkingContact, setLinkingContact] = useState(false);
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [showPortalInvite, setShowPortalInvite] = useState(false);
+  /** CRM 3.49.0: the client contact (Primary or Secondary) the portal user is for — the server checks it too. */
+  const [portalContactRowId, setPortalContactRowId] = useState('');
   const [docCategory, setDocCategory] = useState('All');
   const DOC_CATEGORIES = [
     'All',
@@ -319,29 +360,24 @@ export const ClientDetailPage: React.FC = () => {
     return `${window.location.origin}/login`;
   }, []);
 
-  const overviewEditorRef = useRef<HTMLDivElement | null>(null);
-  const overviewNameRef = useRef<HTMLInputElement | null>(null);
-
-  const goToOverviewEditor = useCallback(() => {
-    setTab('overview');
-    window.setTimeout(() => {
-      overviewEditorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      overviewNameRef.current?.focus();
-    }, 50);
-  }, []);
 
   const openPortalInviteModal = () => {
+    // CRM 3.49.0: a portal user is one of the client's contacts (Primary or Secondary); the Primary is offered first.
+    // A client without contacts (older data) falls back to the client record's email.
+    setPortalContactRowId((prev) => prev || linkedContact?._id || '');
+    const seedEmail = linkedContact?.email || client?.email || '';
     setPortalInvite((prev) => ({
       ...prev,
-      name: prev.name || client?.name || '',
-      email: prev.email || client?.email || '',
-      username: prev.username || (client?.email ? client.email.split('@')[0] : ''),
+      name: prev.name || linkedContact?.name || client?.name || '',
+      email: prev.email || seedEmail,
+      username: prev.username || (seedEmail ? seedEmail.split('@')[0] : ''),
     }));
     setShowPortalInvite(true);
   };
 
   const resetPortalInviteForm = () => {
     setResubmittingAccessId(null);
+    setPortalContactRowId('');
     setPortalInvite({
       name: '',
       email: '',
@@ -353,8 +389,16 @@ export const ClientDetailPage: React.FC = () => {
   };
 
   const submitPortalInvite = async () => {
+    if (portalEmailAssigned) {
+      showToast('This contact already has a client portal user.', 'warning');
+      return;
+    }
+    if (contacts.length > 0 && !resubmittingAccessId && !contacts.some((c) => c._id === portalContactRowId)) {
+      showToast('Choose one of this client’s contacts', 'warning');
+      return;
+    }
     if (!portalInvite.name.trim() || !portalInvite.email.trim()) {
-      showToast('Name and email are required');
+      showToast('Name and email are required', 'warning');
       return;
     }
     setPortalInviteSaving(true);
@@ -366,7 +410,9 @@ export const ClientDetailPage: React.FC = () => {
         });
         showToast('Portal access request resubmitted for manager approval');
       } else {
+        const chosenRow = contacts.find((c) => c._id === portalContactRowId);
         const invited = await crmApi.inviteClientPortalContact(id, {
+          contactId: chosenRow ? String(chosenRow.personContactId || chosenRow._id) : undefined,
           name: portalInvite.name.trim(),
           email: portalInvite.email.trim(),
           username: portalInvite.username.trim() || undefined,
@@ -383,7 +429,8 @@ export const ClientDetailPage: React.FC = () => {
           showToast(
             invited.data?.emailSent !== false
               ? `Portal invite sent · ${loginUrl}`
-              : `Portal user created, but email could not be sent`
+              : `Portal user created, but email could not be sent`,
+            invited.data?.emailSent !== false ? 'success' : 'warning'
           );
         }
       }
@@ -393,7 +440,7 @@ export const ClientDetailPage: React.FC = () => {
       const res = await crmApi.getClientPortalAccess(id);
       setPortalUsers(res.data || []);
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Failed to send portal invite');
+      showToast(err instanceof Error ? err.message : 'Failed to send portal invite', 'error');
     } finally {
       setPortalInviteSaving(false);
     }
@@ -449,6 +496,8 @@ export const ClientDetailPage: React.FC = () => {
   const [eventType, setEventType] = useState('Meeting');
   const [eventDue, setEventDue] = useState('');
 
+  /** CRM 3.36.0: the invite's email belongs to a contact that already has its portal user. */
+  const [portalEmailAssigned, setPortalEmailAssigned] = useState(false);
   const [portalInvite, setPortalInvite] = useState({
     name: '',
     email: '',
@@ -459,9 +508,30 @@ export const ClientDetailPage: React.FC = () => {
   });
   const [portalInviteSaving, setPortalInviteSaving] = useState(false);
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3000);
+  // Whether the email typed in the portal invite is a contact that already has its portal user.
+  useEffect(() => {
+    const email = portalInvite.email.trim();
+    if (!showPortalInvite || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setPortalEmailAssigned(false);
+      return undefined;
+    }
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      crmApi
+        .checkContactDuplicates({ email })
+        .then((res) => {
+          if (alive) setPortalEmailAssigned((res.data?.duplicates || []).some((c) => c.IsportalAssigned === true));
+        })
+        .catch(() => alive && setPortalEmailAssigned(false));
+    }, 300);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [portalInvite.email, showPortalInvite]);
+
+  const showToast = (msg: string, type: 'success' | 'error' | 'warning' | 'info' = 'success') => {
+    notify.show(type, msg);
   };
 
   const loadCore = useCallback(async () => {
@@ -555,14 +625,14 @@ export const ClientDetailPage: React.FC = () => {
         } else if (tab === 'time-logs') {
           const res = await crmApi.getClientTimeLogs(id);
           setTimeLogs(res.data || []);
-        } else if (tab === 'finance') {
-          const [q, inv, pay] = await Promise.all([
-            crmApi.getClientQuotations(id),
-            crmApi.getClientInvoices(id),
-            crmApi.getClientPayments(id),
-          ]);
+        } else if (tab === 'quotations') {
+          const q = await crmApi.getClientQuotations(id);
           setQuotations(q.data || []);
+        } else if (tab === 'invoices') {
+          const inv = await crmApi.getClientInvoices(id);
           setInvoices(inv.data || []);
+        } else if (tab === 'finance') {
+          const pay = await crmApi.getClientPayments(id);
           setPayments(pay.data || []);
         } else if (tab === 'tickets') {
           const res = await crmApi.listTickets({ clientId: id, limit: 50 });
@@ -583,7 +653,7 @@ export const ClientDetailPage: React.FC = () => {
           setContacts(res.data || []);
         }
       } catch (err: unknown) {
-        showToast(err instanceof Error ? err.message : 'Failed to load tab data');
+        showToast(err instanceof Error ? err.message : 'Failed to load tab data', 'error');
       }
     };
     loadTab();
@@ -642,7 +712,7 @@ export const ClientDetailPage: React.FC = () => {
       setSummary(res.data || null);
       showToast('Account summary refreshed');
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Failed to refresh summary');
+      showToast(err instanceof Error ? err.message : 'Failed to refresh summary', 'error');
     } finally {
       setRefreshingSummary(false);
     }
@@ -655,7 +725,7 @@ export const ClientDetailPage: React.FC = () => {
       if (split.dial && split.national) {
         const check = validateNationalNumber(split.dial, split.national);
         if (check.state === 'invalid' || check.state === 'incomplete') {
-          showToast(`Phone: ${check.message}`);
+          showToast(`Phone: ${check.message}`, 'warning');
           return;
         }
       }
@@ -695,7 +765,7 @@ export const ClientDetailPage: React.FC = () => {
       });
       showToast('Client updated');
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Update failed');
+      showToast(err instanceof Error ? err.message : 'Update failed', 'error');
     } finally {
       setSaving(false);
     }
@@ -708,7 +778,7 @@ export const ClientDetailPage: React.FC = () => {
       await crmApi.deleteClient(id);
       navigate('/clients');
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Delete failed');
+      showToast(err instanceof Error ? err.message : 'Delete failed', 'error');
     }
   };
 
@@ -760,7 +830,7 @@ export const ClientDetailPage: React.FC = () => {
           await refreshContacts();
           showToast(`Linked ${formatContactName(person) || person.name} to this client`);
         } else {
-          showToast('This contact is already linked to this client');
+          showToast('This contact is already linked to this client', 'warning');
         }
         setPickerContact(null);
         return;
@@ -778,7 +848,7 @@ export const ClientDetailPage: React.FC = () => {
       await refreshContacts();
       showToast(`Added ${formatContactName(person) || person.name} to this client`);
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Failed to link contact');
+      showToast(err instanceof Error ? err.message : 'Failed to link contact', 'error');
       setPickerContact(null);
     } finally {
       setLinkingContact(false);
@@ -796,7 +866,7 @@ export const ClientDetailPage: React.FC = () => {
         if (cancelled || !res.data) return;
         await handleLinkPersonContact(res.data);
       } catch {
-        if (!cancelled) showToast('Created contact, but failed to link it automatically');
+        if (!cancelled) showToast('Created contact, but failed to link it automatically', 'error');
       } finally {
         if (!cancelled) {
           const next = new URLSearchParams(searchParams);
@@ -818,7 +888,7 @@ export const ClientDetailPage: React.FC = () => {
       if (split.dial && split.national) {
         const check = validateNationalNumber(split.dial, split.national);
         if (check.state === 'invalid' || check.state === 'incomplete') {
-          showToast(`Phone: ${check.message}`);
+          showToast(`Phone: ${check.message}`, 'warning');
           return;
         }
       }
@@ -830,7 +900,19 @@ export const ClientDetailPage: React.FC = () => {
       await refreshContacts();
       showToast('Contact updated');
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Failed to save contact');
+      showToast(err instanceof Error ? err.message : 'Failed to save contact', 'error');
+    }
+  };
+
+  /** CRM 3.46.0: a Secondary contact becomes the Primary one (the old Primary becomes Secondary). */
+  const handleMakePrimaryContact = async (contactId: string) => {
+    if (!id) return;
+    try {
+      await crmApi.updateClientContact(id, contactId, { isPrimary: true });
+      await refreshContacts();
+      showToast('Primary contact changed');
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Failed to change the primary contact', 'error');
     }
   };
 
@@ -841,7 +923,7 @@ export const ClientDetailPage: React.FC = () => {
       setContacts((prev) => prev.filter((c) => c._id !== contactId));
       showToast('Contact removed');
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Failed to delete contact');
+      showToast(err instanceof Error ? err.message : 'Failed to delete contact', 'error');
     }
   };
 
@@ -873,13 +955,13 @@ export const ClientDetailPage: React.FC = () => {
       await refreshAddresses();
       showToast(editingAddressId ? 'Address updated' : 'Address added');
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Failed to save address');
+      showToast(err instanceof Error ? err.message : 'Failed to save address', 'error');
     }
   };
 
   const handleSaveNote = async () => {
     if (!id || !noteBody.trim()) {
-      showToast('Note content is required');
+      showToast('Note content is required', 'warning');
       return;
     }
     try {
@@ -904,13 +986,13 @@ export const ClientDetailPage: React.FC = () => {
       setNotes(res.data || []);
       showToast(editingNoteId ? 'Note updated' : 'Note added');
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Failed to save note');
+      showToast(err instanceof Error ? err.message : 'Failed to save note', 'error');
     }
   };
 
   const handleAddEvent = async () => {
     if (!id || !eventTitle.trim()) {
-      showToast('Activity title is required');
+      showToast('Activity title is required', 'warning');
       return;
     }
     try {
@@ -931,9 +1013,17 @@ export const ClientDetailPage: React.FC = () => {
       setTimeline(tl.data || []);
       showToast('Activity added');
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Failed to add activity');
+      showToast(err instanceof Error ? err.message : 'Failed to add activity', 'error');
     }
   };
+
+  // A tab of a module the active extension hides (e.g. ?tab=projects from an old link) falls back to Overview.
+  // Declared before the early returns below so the hook order never changes.
+  useEffect(() => {
+    if ((tab === 'projects' && !canProjects) || (tab === 'tasks' && !canTasks) || (tab === 'time-logs' && !canTime)) {
+      setTab('overview');
+    }
+  }, [tab, canProjects, canTasks, canTime]);
 
   if (loading) {
     return <div className="py-16 text-center text-sm text-zinc-500 animate-pulse">Loading client…</div>;
@@ -964,29 +1054,24 @@ export const ClientDetailPage: React.FC = () => {
     '';
 
   /**
-   * Read-only sections an extension contributes to this Overview tab
-   * (crm-travel adds Travel Requirement when the source lead's Request Type
-   * is Travel). Formatted by the extension — never raw JSON.
+   * Read-only sections an extension contributes to this Overview tab,
+   * filtered by the source lead's request type. Formatted by the extension —
+   * never raw JSON.
    */
   const overviewSections = extensionData
     ? clientOverviewSectionsForRequestType(extensionRequestType)
     : [];
 
   /**
-   * Native tabs contributed by enabled extensions, filtered by the source
-   * lead's request type (crm-travel adds Passports when the lead's Request
-   * Type is Travel).
+   * Client tabs of extensions are rendered by workspace extensions themselves
+   * (declared tabs above). The CRM keeps no extension-specific record manager.
    */
-  const extensionTabs = extensionData ? clientTabsForRequestType(extensionRequestType) : [];
-
-  const activeExtensionTab = isExtensionTab(tab)
-    ? extensionTabs.find((t) => extensionTabId(t.id) === tab) || null
-    : null;
+  const extensionTabs: Array<{ id: string; tabId: string; label: string; title?: string }> = [];
 
   const tabs = (
     [
       { id: 'overview', label: 'Overview' },
-      { id: 'contacts', label: `Contacts (${contacts.length})` },
+      { id: 'contacts', label: 'Contact' },
       { id: 'addresses', label: 'Addresses' },
       { id: 'notes', label: `Notes (${notes.length})` },
       { id: 'timeline', label: 'Timeline' },
@@ -995,10 +1080,16 @@ export const ClientDetailPage: React.FC = () => {
       { id: 'projects', label: 'Projects', show: canProjects },
       { id: 'tasks', label: 'Tasks', show: canTasks },
       { id: 'time-logs', label: 'Time logs', show: canTime },
-      { id: 'finance', label: 'Finance', show: canFinance },
+      { id: 'quotations', label: 'Quotations', show: canFinance },
+      { id: 'invoices', label: 'Invoices', show: canFinance },
+      { id: 'finance', label: 'Payments', show: canPayments },
       { id: 'tickets', label: 'Tickets', show: canTickets },
       { id: 'health', label: 'Health' },
       { id: 'audit', label: 'Audit', show: canAudit },
+      ...declTabs.map((t) => ({
+        id: `decl_${t.id}`,
+        label: declTabCounts[t.id] !== undefined ? `${t.label} (${declTabCounts[t.id]})` : t.label,
+      })),
       ...extensionTabs.map((t) => ({
         id: extensionTabId(t.id),
         label: t.label,
@@ -1006,11 +1097,31 @@ export const ClientDetailPage: React.FC = () => {
     ] as { id: TabId; label: string; show?: boolean }[]
   ).filter((t) => t.show !== false);
 
-  const kpiCards = summary
+  const visibleTabIds = new Set(tabs.map((t) => t.id));
+
+  /** + Create Quotation: a new enquiry (lead) for this client's contact, or the quotation form for the client. */
+  const startClientQuotation = () => {
+    const back = `/clients/${id}?tab=quotations`;
+    // salesFlow.clientQuotation (3.34.0): the quotation page asks the extension (e.g. who travels).
+    if (salesFlow.clientQuotation) {
+      navigate(`/quotations/create?clientId=${encodeURIComponent(id || '')}&returnTo=${encodeURIComponent(back)}`);
+      return;
+    }
+    if (quotationStartsWithLead) {
+      const primary = linkedContact;
+      const params = new URLSearchParams({ clientId: id, returnTo: back });
+      if (primary && primary.personContactId) params.set('contactId', String(primary.personContactId));
+      navigate(`/leads/create?${params.toString()}`);
+      return;
+    }
+    navigate(`/quotations/create?clientId=${encodeURIComponent(id)}&returnTo=${encodeURIComponent(back)}`);
+  };
+
+  const kpiCards = (summary
     ? [
         {
-          label: 'Contacts',
-          value: String(summary.contactCount ?? summary.contacts ?? contacts.length ?? 0),
+          label: 'Contact',
+          value: linkedContact ? linkedContact.name || '1' : '—',
           tab: 'contacts' as TabId,
           alert: false,
         },
@@ -1030,7 +1141,7 @@ export const ClientDetailPage: React.FC = () => {
         {
           label: 'Unpaid invoices',
           value: String(summary.unpaidInvoices ?? summary.invoices ?? 0),
-          tab: 'finance' as TabId,
+          tab: 'invoices' as TabId,
           alert: Number(summary.overdueInvoices || 0) > 0,
           hint:
             Number(summary.overdueInvoices || 0) > 0 ? `${summary.overdueInvoices} overdue` : undefined,
@@ -1038,7 +1149,7 @@ export const ClientDetailPage: React.FC = () => {
         {
           label: 'Outstanding',
           value: moneyLabel(summary.outstandingBalance, summary.defaultCurrency),
-          tab: 'finance' as TabId,
+          tab: 'invoices' as TabId,
           alert: Number(summary.outstandingBalance || 0) > 0,
         },
         {
@@ -1048,16 +1159,11 @@ export const ClientDetailPage: React.FC = () => {
           alert: false,
         },
       ]
-    : [];
+    : []
+  ).filter((card) => visibleTabIds.has(card.tab));
 
   return (
     <div data-tour="clients-detail-root" className="flex flex-col gap-5">
-      {toast && (
-        <div className="fixed top-20 right-6 z-[80] px-4 py-2.5 rounded-lg text-xs font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">
-          {toast}
-        </div>
-      )}
-
       {/* Hero */}
       <section data-tour="clients-detail-hero" className="rounded-xl border border-zinc-300 bg-white p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -1138,14 +1244,6 @@ export const ClientDetailPage: React.FC = () => {
                 View source lead
               </Link>
             ) : null}
-            <button
-              type="button"
-              data-tour="clients-edit-overview-btn"
-              onClick={goToOverviewEditor}
-              className="inline-flex h-9 cursor-pointer items-center rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-800 hover:bg-zinc-50"
-            >
-              Edit overview
-            </button>
             {canDelete && (
               <button
                 type="button"
@@ -1267,9 +1365,9 @@ export const ClientDetailPage: React.FC = () => {
               </h3>
               <dl className="mt-3 space-y-2 text-xs">
                 <div className="flex justify-between gap-3">
-                  <dt className="text-zinc-500">Contacts</dt>
-                  <dd className="m-0 font-semibold text-zinc-900">
-                    {summary?.contactCount ?? contacts.length}
+                  <dt className="text-zinc-500">Contact</dt>
+                  <dd className="m-0 truncate font-semibold text-zinc-900">
+                    {linkedContact ? linkedContact.name : '—'}
                   </dd>
                 </div>
                 <div className="flex justify-between gap-3">
@@ -1353,7 +1451,6 @@ export const ClientDetailPage: React.FC = () => {
 
           <div className="flex flex-col gap-4 lg:col-span-8">
             <div
-              ref={overviewEditorRef}
               id="client-overview-editor"
               data-tour="clients-overview-company"
               className="rounded-xl border border-zinc-300 bg-white p-5 scroll-mt-24"
@@ -1366,7 +1463,6 @@ export const ClientDetailPage: React.FC = () => {
                 <label className="flex flex-col gap-1 sm:col-span-2">
                   <span className="text-[11px] font-semibold uppercase text-zinc-500">Name</span>
                   <input
-                    ref={overviewNameRef}
                     className={fieldClass}
                     value={editName}
                     disabled={!canWrite}
@@ -1427,11 +1523,12 @@ export const ClientDetailPage: React.FC = () => {
                           showToast(
                             err instanceof Error
                               ? `${err.message} — click Save changes to keep the photo`
-                              : 'Photo uploaded — click Save changes'
+                              : 'Photo uploaded — click Save changes',
+                            err instanceof Error ? 'warning' : 'success'
                           );
                         }
                       }}
-                      onError={(msg) => showToast(msg)}
+                      onError={(msg) => showToast(msg, 'error')}
                     />
                   ) : null}
                 </label>
@@ -1585,8 +1682,8 @@ export const ClientDetailPage: React.FC = () => {
             ) : null}
 
             {/*
-              Extension-contributed read-only sections (e.g. crm-travel's
-              Travel Requirement). Read through from the source lead and
+              Extension-contributed read-only sections. Read through from the
+              source lead and
               formatted by the extension's own logic module.
             */}
             {overviewSections.map((entry) => (
@@ -1598,6 +1695,8 @@ export const ClientDetailPage: React.FC = () => {
                 loading={extensionDataLoading}
               />
             ))}
+
+            <ExtensionFieldsSection record="client" recordId={id!} />
 
             {canWrite && (
               <div className="sticky bottom-4 z-10 flex justify-end">
@@ -1622,7 +1721,9 @@ export const ClientDetailPage: React.FC = () => {
             <div>
               <h3 className="m-0 text-sm font-bold text-zinc-950">Contacts</h3>
               <p className="m-0 text-[11px] text-zinc-500">
-                Choose people from the Contacts directory, or create a new contact.
+                {linkedContact
+                  ? 'One Primary contact (used on quotations, invoices and the portal) and any Secondary contacts.'
+                  : 'Choose the client’s Primary contact from the Contacts directory, or create it.'}
               </p>
             </div>
             {canWrite && (
@@ -1648,7 +1749,9 @@ export const ClientDetailPage: React.FC = () => {
                 hint={
                   linkingContact
                     ? 'Linking contact to this client…'
-                    : 'Search and select a contact from the Contacts module to link them here.'
+                    : linkedContact
+                      ? 'Search and select a contact from the Contacts module to add them as a Secondary contact.'
+                      : 'Search and select a contact from the Contacts module to link them as the Primary contact.'
                 }
               />
             </div>
@@ -1680,14 +1783,6 @@ export const ClientDetailPage: React.FC = () => {
                 value={contactForm.designation}
                 onChange={(e) => setContactForm((p) => ({ ...p, designation: e.target.value }))}
               />
-              <label className="inline-flex h-9 items-center gap-2 text-xs font-semibold text-zinc-700">
-                <input
-                  type="checkbox"
-                  checked={contactForm.isPrimary}
-                  onChange={(e) => setContactForm((p) => ({ ...p, isPrimary: e.target.checked }))}
-                />
-                Primary
-              </label>
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -1716,9 +1811,9 @@ export const ClientDetailPage: React.FC = () => {
             </div>
           )}
 
-          {contacts.length === 0 ? (
+          {shownContacts.length === 0 ? (
             emptyState(
-              'No contacts linked yet.',
+              'No contact linked yet.',
               canWrite ? (
                 <button
                   type="button"
@@ -1727,7 +1822,7 @@ export const ClientDetailPage: React.FC = () => {
                   }
                   className="cursor-pointer rounded-lg border-none bg-zinc-950 px-3 py-2 text-xs font-semibold text-white"
                 >
-                  Create first contact
+                  Create contact
                 </button>
               ) : undefined
             )
@@ -1747,7 +1842,7 @@ export const ClientDetailPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {contacts.map((c) => (
+                  {shownContacts.map((c) => (
                     <tr key={c._id} className="border-b border-zinc-100">
                       <td className="px-4 py-3 text-sm">
                         <div className="flex items-center gap-2.5">
@@ -1765,11 +1860,15 @@ export const ClientDetailPage: React.FC = () => {
                             ) : (
                               <div className="font-semibold text-zinc-900">{c.name}</div>
                             )}
-                            {c.isPrimary ? (
-                              <span className="text-[10px] font-semibold text-zinc-500">
-                                Primary contact
+                            {c === linkedContact ? (
+                              <span className="inline-flex rounded bg-zinc-950 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                                Primary
                               </span>
-                            ) : null}
+                            ) : (
+                              <span className="inline-flex rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600">
+                                Secondary
+                              </span>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -1804,13 +1903,25 @@ export const ClientDetailPage: React.FC = () => {
                             >
                               Edit
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteContact(c._id)}
-                              className="cursor-pointer border-none bg-transparent text-xs text-red-600"
-                            >
-                              Remove
-                            </button>
+                            {c !== linkedContact ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleMakePrimaryContact(c._id)}
+                                className="cursor-pointer border-none bg-transparent text-xs text-zinc-700"
+                              >
+                                Make primary
+                              </button>
+                            ) : null}
+                            {/* The only Contact stays (the server refuses removing it); removing the Primary promotes the oldest one left. */}
+                            {contacts.length > 1 ? (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteContact(c._id)}
+                                className="cursor-pointer border-none bg-transparent text-xs text-red-600"
+                              >
+                                Remove
+                              </button>
+                            ) : null}
                           </>
                         )}
                       </td>
@@ -1825,23 +1936,7 @@ export const ClientDetailPage: React.FC = () => {
 
 
 
-      {/*
-        Extension-contributed record tabs — the CRM record manager (upload +
-        OCR + list) whose fields come from the extension package. Read-only
-        enquiry data is a section on the Overview tab instead.
-      */}
-      {activeExtensionTab ? (
-        <ClientPassportsTab
-          key={activeExtensionTab.tabId}
-          clientId={String(id)}
-          tab={activeExtensionTab}
-          group={clientFieldsForTab(activeExtensionTab.extensionId, activeExtensionTab.id)}
-          leadId={extensionData?.leadId || (leadId ? String(leadId) : null)}
-          canWrite={canWrite}
-          showToast={(message) => showToast(message)}
-          confirm={confirm}
-        />
-      ) : isExtensionTab(tab) ? (
+      {isExtensionTab(tab) ? (
         extensionDataLoading ? (
           <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-10 text-center text-xs text-zinc-500">
             Loading extension tab…
@@ -1852,6 +1947,21 @@ export const ClientDetailPage: React.FC = () => {
           )
         )
       ) : null}
+
+      {String(tab).startsWith('decl_') && (
+        (() => {
+          const activeDeclTab = declTabs.find((t) => t.id === String(tab).replace('decl_', ''));
+          if (!activeDeclTab) return null;
+          return (
+            <ExtensionTabContent
+              tab={activeDeclTab}
+              record="client"
+              recordId={id!}
+              recordData={client}
+            />
+          );
+        })()
+      )}
 
       {tab === 'addresses' && (
         <div className="flex flex-col gap-4">
@@ -2078,7 +2188,7 @@ export const ClientDetailPage: React.FC = () => {
                               const res = await crmApi.getClientNotes(id);
                               setNotes(res.data || []);
                             } catch (err: unknown) {
-                              showToast(err instanceof Error ? err.message : 'Failed to update pin');
+                              showToast(err instanceof Error ? err.message : 'Failed to update pin', 'error');
                             }
                           }}
                         >
@@ -2109,7 +2219,7 @@ export const ClientDetailPage: React.FC = () => {
                               await crmApi.deleteClientNote(id, n._id);
                               setNotes((prev) => prev.filter((x) => x._id !== n._id));
                             } catch (err: unknown) {
-                              showToast(err instanceof Error ? err.message : 'Failed to delete note');
+                              showToast(err instanceof Error ? err.message : 'Failed to delete note', 'error');
                             }
                           }}
                         >
@@ -2310,7 +2420,7 @@ export const ClientDetailPage: React.FC = () => {
                       setDocuments(res.data || []);
                       showToast('Document uploaded');
                     }}
-                    onError={(msg) => showToast(msg)}
+                    onError={(msg) => showToast(msg, 'error')}
                   />
                 </div>
               </div>
@@ -2360,7 +2470,7 @@ export const ClientDetailPage: React.FC = () => {
                     disabled={docLinkSaving}
                     onClick={async () => {
                       if (!docLinkForm.name.trim() || !docLinkForm.url.trim()) {
-                        showToast('Link name and URL are required');
+                        showToast('Link name and URL are required', 'warning');
                         return;
                       }
                       setDocLinkSaving(true);
@@ -2379,7 +2489,7 @@ export const ClientDetailPage: React.FC = () => {
                         setDocuments(res.data || []);
                         showToast('Link added');
                       } catch (err: unknown) {
-                        showToast(err instanceof Error ? err.message : 'Failed to add link');
+                        showToast(err instanceof Error ? err.message : 'Failed to add link', 'error');
                       } finally {
                         setDocLinkSaving(false);
                       }
@@ -2467,7 +2577,8 @@ export const ClientDetailPage: React.FC = () => {
                                       showToast('Download started');
                                     } catch (err) {
                                       showToast(
-                                        err instanceof Error ? err.message : 'Download failed'
+                                        err instanceof Error ? err.message : 'Download failed',
+                                        'error'
                                       );
                                     }
                                   }}
@@ -2862,6 +2973,33 @@ export const ClientDetailPage: React.FC = () => {
                 </div>
 
                 <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+                  {contacts.length > 0 && !resubmittingAccessId ? (
+                    <label className="flex flex-col gap-1 text-[11px] font-semibold text-zinc-600" data-testid="portal-invite-contact">
+                      Contact *
+                      <select
+                        className={fieldClass}
+                        value={portalContactRowId}
+                        onChange={(e) => {
+                          const row = contacts.find((c) => c._id === e.target.value);
+                          setPortalContactRowId(e.target.value);
+                          if (row) {
+                            const mail = String(row.email || '');
+                            setPortalInvite((p) => ({ ...p, name: row.name || '', email: mail, username: mail ? mail.split('@')[0] : p.username }));
+                          }
+                        }}
+                      >
+                        <option value="">Choose a contact of this client</option>
+                        {shownContacts.map((c) => (
+                          <option key={c._id} value={c._id} disabled={!c.email}>
+                            {`${c.name} (${c === linkedContact ? 'Primary' : 'Secondary'})${c.email ? ` · ${c.email}` : ' · no email'}`}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="font-normal text-[11px] text-zinc-500">
+                        Primary and Secondary contacts can use the portal and see this client’s quotations, invoices and bookings.
+                      </span>
+                    </label>
+                  ) : null}
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <label className="flex flex-col gap-1 text-[11px] font-semibold text-zinc-600">
                       Name *
@@ -2878,9 +3016,15 @@ export const ClientDetailPage: React.FC = () => {
                         type="email"
                         className={fieldClass}
                         value={portalInvite.email}
+                        readOnly={contacts.length > 0 && !resubmittingAccessId}
                         onChange={(e) => setPortalInvite((p) => ({ ...p, email: e.target.value }))}
                         placeholder="client@company.com"
                       />
+                      {portalEmailAssigned ? (
+                        <span role="alert" className="font-normal text-[11px] text-rose-700" data-testid="portal-contact-assigned">
+                          This contact already has a client portal user. Portal access cannot be assigned again.
+                        </span>
+                      ) : null}
                     </label>
                     <label className="flex flex-col gap-1 text-[11px] font-semibold text-zinc-600">
                       Username
@@ -2927,7 +3071,7 @@ export const ClientDetailPage: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    disabled={portalInviteSaving}
+                    disabled={portalInviteSaving || portalEmailAssigned}
                     onClick={submitPortalInvite}
                     className="inline-flex h-9 cursor-pointer items-center rounded-lg border-none bg-zinc-950 px-4 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
                   >
@@ -3060,44 +3204,63 @@ export const ClientDetailPage: React.FC = () => {
         )
       )}
 
-      {tab === 'finance' && (
+      {(tab === 'quotations' || tab === 'invoices' || tab === 'finance') && (
         <div className="flex flex-col gap-5">
           {[
             {
+              tab: 'quotations',
               title: 'Quotations',
+              hint: 'Every quotation of this client, including the ones made for its lead and opportunities before it became a client.',
+              action: canStartQuotation ? (
+                <button
+                  type="button"
+                  data-testid="client-create-quotation"
+                  onClick={startClientQuotation}
+                  title={quotationStartsWithLead ? 'Starts a new enquiry for this client; the quotation follows from it' : undefined}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-950 bg-zinc-950 px-3 text-xs font-semibold text-white hover:bg-zinc-800"
+                >
+                  + Create Quotation
+                </button>
+              ) : null,
               empty: 'No quotations.',
               rows: quotations,
-              headers: ['Number', 'Title', 'Status', 'Total'],
+              headers: ['Number', 'Title', 'Status', 'Total', ''],
+              path: (q: ClientRelatedQuotation) => `/quotations/${q._id}`,
               render: (q: ClientRelatedQuotation) => (
                 <>
                   <td className="px-4 py-3 text-xs font-semibold text-zinc-900">
                     <Link to={`/quotations/${q._id}`} className="text-zinc-950 no-underline hover:underline">
-                      {displayLabel(q.number)}
+                      {displayLabel(q.number || q.quotationNo)}
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-xs text-zinc-700">{q.title || '—'}</td>
                   <td className="px-4 py-3 text-xs text-zinc-600">{q.status || '—'}</td>
                   <td className="px-4 py-3 text-xs text-zinc-700">
-                    {q.total != null ? moneyLabel(q.total, q.currency) : '—'}
+                    {(q.total ?? q.grandTotal) != null ? moneyLabel(q.total ?? q.grandTotal, q.currency) : '—'}
                   </td>
                 </>
               ),
             },
             {
+              tab: 'invoices',
               title: 'Invoices',
+              hint: 'Every invoice of this client, including the ones raised from its lead’s quotations and opportunities.',
+              action: null,
               empty: 'No invoices.',
               rows: invoices,
-              headers: ['Number', 'Status', 'Total', 'Balance'],
+              headers: ['Number', 'Status', 'Total', 'Balance', ''],
+              path: (inv: ClientRelatedInvoice) => `/invoices/${inv._id}`,
               render: (inv: ClientRelatedInvoice) => (
                 <>
                   <td className="px-4 py-3 text-xs font-semibold text-zinc-900">
                     <Link to={`/invoices/${inv._id}`} className="text-zinc-950 no-underline hover:underline">
-                      {displayLabel(inv.number)}
+                      {displayLabel(inv.number || inv.invoiceNo)}
                     </Link>
+                    {inv.documentType === 'proforma' ? <span className="ml-1.5 text-[10px] font-semibold text-violet-700">Proforma</span> : null}
                   </td>
-                  <td className="px-4 py-3 text-xs text-zinc-600">{inv.status || '—'}</td>
+                  <td className="px-4 py-3 text-xs text-zinc-600">{invoicePaymentLabel(inv)}</td>
                   <td className="px-4 py-3 text-xs text-zinc-700">
-                    {inv.total != null ? moneyLabel(inv.total, inv.currency) : '—'}
+                    {(inv.total ?? inv.grandTotal) != null ? moneyLabel(inv.total ?? inv.grandTotal, inv.currency) : '—'}
                   </td>
                   <td className="px-4 py-3 text-xs text-zinc-700">
                     {inv.balanceDue != null ? moneyLabel(inv.balanceDue, inv.currency) : '—'}
@@ -3106,28 +3269,38 @@ export const ClientDetailPage: React.FC = () => {
               ),
             },
             {
+              tab: 'finance',
               title: 'Payments',
+              hint: '',
+              action: null,
               empty: 'No payments.',
               rows: payments,
-              headers: ['Number', 'Amount', 'Method', 'Status'],
+              headers: ['Number', 'Amount', 'Method', 'Status', ''],
+              path: (p: ClientRelatedPayment) => `/payments/${p._id}`,
               render: (p: ClientRelatedPayment) => (
                 <>
                   <td className="px-4 py-3 text-xs font-semibold text-zinc-900">
                     <Link to={`/payments/${p._id}`} className="text-zinc-950 no-underline hover:underline">
-                      {displayLabel(p.number)}
+                      {displayLabel(p.number || p.paymentNo)}
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-xs text-zinc-700">
                     {p.amount != null ? moneyLabel(p.amount, p.currency) : '—'}
                   </td>
-                  <td className="px-4 py-3 text-xs text-zinc-600">{p.method || '—'}</td>
+                  <td className="px-4 py-3 text-xs text-zinc-600">{p.method || p.mode || '—'}</td>
                   <td className="px-4 py-3 text-xs text-zinc-600">{p.status || '—'}</td>
                 </>
               ),
             },
-          ].map((section) => (
+          ].filter((section) => section.tab === tab).map((section) => (
             <div key={section.title}>
-              <h3 className="mb-2 mt-0 text-sm font-semibold text-zinc-950">{section.title}</h3>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="m-0 text-sm font-semibold text-zinc-950">{section.title}</h3>
+                  {section.hint ? <p className="m-0 mt-0.5 text-[11px] text-zinc-500">{section.hint}</p> : null}
+                </div>
+                {section.action}
+              </div>
               {section.rows.length === 0 ? (
                 emptyState(section.empty)
               ) : (
@@ -3141,11 +3314,31 @@ export const ClientDetailPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {section.rows.map((row) => (
-                        <tr key={row._id} className="border-b border-zinc-100 hover:bg-zinc-50">
-                          {section.render(row as never)}
-                        </tr>
-                      ))}
+                      {section.rows.map((row) => {
+                        // The whole row opens the record's detail page (the number stays a link too).
+                        const to = section.path(row as never);
+                        return (
+                          <tr
+                            key={row._id}
+                            data-testid={`client-${section.tab}-row`}
+                            onClick={(e) => {
+                              if ((e.target as HTMLElement).closest('a,button')) return;
+                              navigate(to);
+                            }}
+                            className="cursor-pointer border-b border-zinc-100 hover:bg-zinc-50"
+                          >
+                            {section.render(row as never)}
+                            <td className="px-4 py-3 text-right">
+                              <Link
+                                to={to}
+                                className="inline-flex h-7 items-center rounded-lg border border-zinc-300 bg-white px-2.5 text-[11px] font-semibold text-zinc-900 no-underline hover:bg-zinc-50"
+                              >
+                                Open
+                              </Link>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

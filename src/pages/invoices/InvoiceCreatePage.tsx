@@ -23,6 +23,8 @@ import { DocumentUploadControl } from '../../components/common/DocumentUploadCon
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
 import { useFinanceOptions } from '../../components/finance/useFinanceOptions';
 import { useActiveExtension } from '../../hooks/useActiveExtension';
+import { useSalesFlowConfig } from '../../hooks/useSalesFlowConfig';
+import { QuotationInvoiceCreate } from './QuotationInvoiceCreate';
 import { calculateFinanceTotals, clampDiscountValue } from '../../utils/financeTotals';
 import {
   consumeFinancePdfScanDraft,
@@ -30,6 +32,7 @@ import {
   normalizeTaxCalculationValue,
 } from '../../utils/financePdfScanDraft';
 import { normalizeCurrencyCode, useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import { useNotifyMessage } from '@/components/notifications';
 
 function localToday(): string {
   const d = new Date();
@@ -85,8 +88,9 @@ export function isSalesOrderDispatched(order?: {
   return false;
 }
 
-export const InvoiceCreatePage: React.FC = () => {
+const StandardInvoiceCreatePage: React.FC = () => {
   const navigate = useNavigate();
+  const hideRecurring = Boolean(useSalesFlowConfig().hideRecurringInvoices);
   const [searchParams] = useSearchParams();
   const returnTo = searchParams.get('returnTo');
   const fromScan = searchParams.get('fromScan') === '1';
@@ -126,6 +130,8 @@ export const InvoiceCreatePage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
+  useNotifyMessage(scanNotice, 'info', () => setScanNotice(null));
   const [quotations, setQuotations] = useState<QuotationItem[]>([]);
   const [salesOrders, setSalesOrders] = useState<SalesOrderItem[]>([]);
   const [templates, setTemplates] = useState<InvoiceTemplateItem[]>([]);
@@ -205,6 +211,8 @@ export const InvoiceCreatePage: React.FC = () => {
         const deal = (await crmApi.getOpportunity(opportunityIdParam)).data;
         if (cancelled || !deal) return;
         if (deal.clientId) setClientId(deal.clientId);
+        // Linked to the accepted quotation: its lines are used and an advance paid on it is applied.
+        if (deal.acceptedQuotationId) setQuotationId(String(deal.acceptedQuotationId));
         const dealCurrency = String(deal.currency || deal.currencyCode || '').trim().toUpperCase();
         if (/^[A-Z]{3}$/.test(dealCurrency)) {
           currencyLockedRef.current = true;
@@ -566,6 +574,7 @@ export const InvoiceCreatePage: React.FC = () => {
         clientId,
         projectId: projectId || undefined,
         quotationId: quotationId || undefined,
+        opportunityId: opportunityIdParam || undefined,
         salesOrderId: salesOrderId || undefined,
         paymentDetails: paymentDetails.trim(),
         billingAddress: billingAddress.trim(),
@@ -600,12 +609,6 @@ export const InvoiceCreatePage: React.FC = () => {
         saving={saving}
         formId="invoice-form"
       />
-
-      {scanNotice ? (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-          {scanNotice}
-        </div>
-      ) : null}
 
       <div
         data-tour="invoices-create-import"
@@ -673,12 +676,6 @@ export const InvoiceCreatePage: React.FC = () => {
           Save as Template
         </button>
       </div>
-
-      {error && (
-        <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-xs font-semibold text-red-700">
-          {error}
-        </div>
-      )}
 
       <form id="invoice-form" onSubmit={submit} className="flex flex-col gap-5" noValidate>
         <div data-tour="invoices-create-client">
@@ -808,6 +805,7 @@ export const InvoiceCreatePage: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {hideRecurring ? null : (
           <div data-tour="invoices-create-recurring">
           <FormSection title="Recurring Invoice">
             <div className="grid grid-cols-1 gap-4">
@@ -868,6 +866,7 @@ export const InvoiceCreatePage: React.FC = () => {
             </div>
           </FormSection>
           </div>
+          )}
 
           <div data-tour="invoices-create-notes">
           <FormSection title="Notes, terms & reminders">
@@ -1013,4 +1012,23 @@ export const InvoiceCreatePage: React.FC = () => {
       </form>
     </div>
   );
+};
+
+/**
+ * Create Invoice: the standard form, or — when the active extension raises invoices from an accepted
+ * quotation (salesFlow.invoiceFromQuotation) — the read-only quotation invoice page.
+ */
+export const InvoiceCreatePage: React.FC = () => {
+  const salesFlow = useSalesFlowConfig();
+  const [searchParams] = useSearchParams();
+  if (salesFlow.invoiceFromQuotation) {
+    return (
+      <QuotationInvoiceCreate
+        initialQuotationId={searchParams.get('quotationId') || ''}
+        opportunityId={searchParams.get('opportunityId') || ''}
+        returnTo={searchParams.get('returnTo')}
+      />
+    );
+  }
+  return <StandardInvoiceCreatePage />;
 };

@@ -7,6 +7,7 @@ import React, {
   useState,
 } from 'react';
 import { crmApi } from '../services/api';
+import { useAuth } from './AuthContext';
 import {
   CRM_SETTINGS_CURRENCY_CHANGED,
   FALLBACK_DEFAULT_CURRENCY,
@@ -54,7 +55,18 @@ export const CurrencyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return meta.code;
   }, []);
 
+  // Only admins may read the settings (GET /settings is crm.settings.manage); everyone else — staff
+  // roles and client portal logins — takes the currency from their login context, so no 403 is raised.
+  const { user, hasPermission, loading: authLoading } = useAuth();
+  const canReadSettings = Boolean(user) && hasPermission('crm.settings.manage');
+  const contextCurrency = user?.features?.defaultCurrency || null;
+
   const refresh = useCallback(async () => {
+    if (!canReadSettings) {
+      if (contextCurrency) apply(contextCurrency);
+      setReady(true);
+      return;
+    }
     try {
       const response = await crmApi.getSettings();
       apply(response.data?.default_currency);
@@ -63,7 +75,7 @@ export const CurrencyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } finally {
       setReady(true);
     }
-  }, [apply]);
+  }, [apply, canReadSettings, contextCurrency]);
 
   const setDefaultCurrency = useCallback(
     (code: string) => {
@@ -73,6 +85,7 @@ export const CurrencyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   );
 
   useEffect(() => {
+    if (authLoading) return undefined;
     void refresh();
 
     const onCurrencyChanged = (event: Event) => {
@@ -88,7 +101,7 @@ export const CurrencyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => {
       window.removeEventListener(CRM_SETTINGS_CURRENCY_CHANGED, onCurrencyChanged);
     };
-  }, [apply, refresh]);
+  }, [apply, refresh, authLoading]);
 
   const value = useMemo<CurrencyContextValue>(
     () => ({

@@ -9,6 +9,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useAuth } from '../../context/AuthContext';
 import { TourButton } from '../../ui/tour';
 import { useDialog } from '../../context/DialogContext';
+import { notify } from '@/components/notifications';
 import { crmApi } from '../../services/api';
 import {
   ClientItem,
@@ -41,12 +42,10 @@ export const ClientsPage: React.FC = () => {
   const [exporting, setExporting] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
-  const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
-    setToast({ text, type });
-    setTimeout(() => setToast(null), 3500);
+    notify.show(type, text);
   };
 
   useEffect(() => {
@@ -166,18 +165,6 @@ export const ClientsPage: React.FC = () => {
 
   return (
     <div data-tour="clients-tour-landing" className="flex flex-col gap-5">
-      {toast && (
-        <div
-          className={`fixed top-20 right-6 z-[80] px-4 py-2.5 rounded-lg text-xs font-semibold border ${
-            toast.type === 'error'
-              ? 'bg-red-50 text-red-700 border-red-200'
-              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-          }`}
-        >
-          {toast.text}
-        </div>
-      )}
-
       <div data-tour="clients-page-header" className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 pb-1 border-b border-zinc-200">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 m-0 mb-1">

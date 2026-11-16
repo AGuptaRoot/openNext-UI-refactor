@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { transform } from 'esbuild';
 
 /**
  * Build for the OpenNext CMS Mount API (no iframe).
@@ -63,8 +64,27 @@ function scopeFriendlyCss() {
   };
 }
 
+/**
+ * Library mode keeps whitespace in the ES output (to preserve annotations for a consumer's
+ * bundler); our consumer is the browser, so the mount bundle is minified fully (~-30 %).
+ */
+function fullyMinifyMount() {
+  return {
+    name: 'crm-fully-minify-mount',
+    enforce: 'post' as const,
+    // After Vite's own (whitespace-keeping) minify pass, so nothing re-prints the output.
+    async generateBundle(_options: unknown, bundle: Record<string, { type: string; fileName: string; code?: string }>) {
+      for (const item of Object.values(bundle)) {
+        if (item.type !== 'chunk' || item.fileName !== 'mount.js' || !item.code) continue;
+        const out = await transform(item.code, { minify: true, format: 'esm', target: 'es2020', legalComments: 'none' });
+        item.code = out.code;
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), scopeFriendlyCss()],
+  plugins: [react(), scopeFriendlyCss(), fullyMinifyMount()],
   /**
    * Library mode leaves `process.env.NODE_ENV` in place for the consumer to
    * define, but our consumer is a browser: without this React would look for a

@@ -8,6 +8,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 
 import { crmApi } from '../../services/api';
 import type { ClientItem } from '../../types/clients';
+import { useNotifyMessage } from '@/components/notifications';
 
 export interface LinkClientModalProps {
   open?: boolean;
@@ -33,6 +34,7 @@ export const LinkClientModal: React.FC<LinkClientModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [linkingId, setLinkingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
 
   const activeLinkedIds = existingClientIds || alreadyLinkedClientIds || [];
   const linkedSet = new Set(activeLinkedIds.map(String));
@@ -136,12 +138,6 @@ export const LinkClientModal: React.FC<LinkClientModalProps> = ({
             autoFocus
           />
         </div>
-
-        {error && (
-          <div className="rounded-lg bg-red-50 p-2.5 text-xs text-red-700 border border-red-200">
-            {error}
-          </div>
-        )}
 
         <div className="flex flex-col gap-2 max-h-[360px] overflow-y-auto">
           {loading ? (

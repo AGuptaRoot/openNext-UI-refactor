@@ -7,8 +7,9 @@ import type { OpportunityItemDraft } from '../../types/leads';
 import { INDIAN_STATES } from '../../types/opportunities';
 import { PhoneNumberField } from '../common/PhoneNumberField';
 import { splitPhoneNumber, validateNationalNumber } from '../../utils/phoneCountryCodes';
+import type { SalesTerms } from '../../utils/salesTerms';
 
-export type OpportunityEditSection = 'products' | 'financials' | 'contact';
+export type OpportunityEditSection = 'products' | 'financials' | 'contact' | 'contactCorrection';
 
 export interface OpportunityEditModalProps {
   item: OpportunityItem;
@@ -18,6 +19,10 @@ export interface OpportunityEditModalProps {
   onClose: () => void;
   onSaved: (updated: OpportunityItem & { contactSynced?: boolean }) => void;
   showToast: (message: string, kind?: 'success' | 'error') => void;
+  /** salesFlow.fixedLines: the lines come from the extension's records — only price and tax change. */
+  fixedLines?: boolean;
+  /** Page wording and switches of the active extension (no shipping, …). */
+  terms?: SalesTerms;
 }
 
 interface LineRow extends OpportunityProductLine {
@@ -34,6 +39,7 @@ const SECTION_TITLE: Record<OpportunityEditSection, string> = {
   products: 'Edit products & line items',
   financials: 'Edit shipping & financials',
   contact: 'Edit primary contact',
+  contactCorrection: 'Correct primary contact',
 };
 
 let rowSeq = 0;
@@ -78,7 +84,13 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
   onClose,
   onSaved,
   showToast,
+  fixedLines = false,
+  terms,
 }) => {
+  const hideShipping = Boolean(terms && terms.hideShipping);
+  const isCorrection = section === 'contactCorrection';
+  const [reason, setReason] = useState('');
+  const [confirmed, setConfirmed] = useState(false);
   const [rows, setRows] = useState<LineRow[]>(() => toRows(item.products));
   const [shippingState, setShippingState] = useState(item.shippingState || '');
   const [shippingCharge, setShippingCharge] = useState(String(item.shippingCharge ?? 0));
@@ -219,14 +231,16 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
         showToast('Exchange rate must be greater than zero', 'error');
         return;
       }
-      body.shippingState = shippingState;
-      body.shippingCharge = charge;
+      if (!hideShipping) {
+        body.shippingState = shippingState;
+        body.shippingCharge = charge;
+      }
       body.probability = prob;
       body.currencyCode = currency;
       body.exchangeRate = rate;
     }
 
-    if (section === 'contact') {
+    if (section === 'contact' || isCorrection) {
       if (contactMobile.trim()) {
         const split = splitPhoneNumber(contactMobile);
         if (split.dial && split.national) {
@@ -241,6 +255,33 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
       body.contactEmail = contactEmail.trim();
       body.contactMobile = contactMobile.trim();
       body.syncContactRecord = hasLinkedContact && syncContact;
+    }
+
+    if (isCorrection) {
+      if (reason.trim().length < 10) {
+        showToast('Give a reason for the correction (at least 10 characters)', 'error');
+        return;
+      }
+      if (!confirmed) {
+        showToast('Confirm the correction first', 'error');
+        return;
+      }
+      setSaving(true);
+      try {
+        const res = await crmApi.correctOpportunityContact(item._id, {
+          contactPerson: contactPerson.trim(),
+          contactEmail: contactEmail.trim(),
+          contactMobile: contactMobile.trim(),
+          reason: reason.trim(),
+          confirm: true,
+        });
+        if (res.data) onSaved(res.data as OpportunityItem);
+      } catch (err: unknown) {
+        showToast(err instanceof Error ? err.message : 'The contact could not be corrected', 'error');
+      } finally {
+        setSaving(false);
+      }
+      return;
     }
 
     setSaving(true);
@@ -259,7 +300,7 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
       className="fixed inset-0 z-[1000] flex items-start justify-center overflow-y-auto bg-zinc-950/50 p-4 sm:items-center"
       role="dialog"
       aria-modal="true"
-      aria-label={SECTION_TITLE[section]}
+      aria-label={section === 'products' && fixedLines ? 'Edit prices' : section === 'financials' && hideShipping ? `Edit ${terms?.commercialSummary || 'commercial summary'}` : SECTION_TITLE[section]}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -267,7 +308,7 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
       <div className="w-full max-w-3xl rounded-2xl border border-zinc-200 bg-white shadow-xl">
         <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-6 py-4">
           <div>
-            <h3 className="m-0 text-sm font-bold text-zinc-950">{SECTION_TITLE[section]}</h3>
+            <h3 className="m-0 text-sm font-bold text-zinc-950">{section === 'products' && fixedLines ? 'Edit prices' : section === 'financials' && hideShipping ? `Edit ${terms?.commercialSummary || 'commercial summary'}` : SECTION_TITLE[section]}</h3>
             <p className="mb-0 mt-1 text-xs text-zinc-500">
               {item.opportunityNumber ? `${item.opportunityNumber} · ` : ''}
               {item.title}
@@ -297,8 +338,10 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
           {section === 'products' && (
             <>
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-semibold text-zinc-600">Line items</span>
-                <button
+                <span className="text-xs font-semibold text-zinc-600">
+                  {fixedLines ? 'Services come from the requirements — enter the rate and tax.' : 'Line items'}
+                </span>
+                {fixedLines ? null : <button
                   type="button"
                   disabled={commercialLocked}
                   onClick={() => setRows((cur) => [...cur, emptyRow()])}
@@ -306,7 +349,7 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
                 >
                   <Plus className="h-3 w-3 shrink-0" aria-hidden />
                   Add line
-                </button>
+                </button>}
               </div>
 
               <div ref={linesContainerRef} className="flex flex-col gap-3">
@@ -316,6 +359,14 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
                     <div key={row.key} className="relative rounded-xl border border-zinc-200 bg-zinc-50/60 p-3">
                       <div className="flex items-start gap-2">
                         <div className="grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-12">
+                          {fixedLines ? (
+                            <div className="sm:col-span-12" data-testid="opportunity-fixed-line">
+                              <div className="text-xs font-semibold text-zinc-950 break-words">{row.productName}</div>
+                              {row.description ? (
+                                <div className="mt-0.5 text-[11px] text-zinc-600 break-words whitespace-pre-line">{row.description}</div>
+                              ) : null}
+                            </div>
+                          ) : (<>
                           <div className="sm:col-span-5">
                             <label className={labelClass}>Product / service {index + 1}</label>
                             <input
@@ -342,7 +393,8 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
                               className={inputClass}
                             />
                           </div>
-                        <div className="sm:col-span-3">
+                          </>)}
+                        {fixedLines ? null : <div className="sm:col-span-3">
                           <label className={labelClass}>Qty</label>
                           <input
                             type="number"
@@ -355,7 +407,7 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
                             }
                             className={inputClass}
                           />
-                        </div>
+                        </div>}
                         <div className="sm:col-span-4">
                           <label className={labelClass}>Unit price</label>
                           <input
@@ -394,7 +446,7 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
                           </div>
                         </div>
                       </div>
-                      <button
+                      {fixedLines ? null : <button
                         type="button"
                         disabled={commercialLocked || rows.length === 1}
                         onClick={() => setRows((cur) => cur.filter((r) => r.key !== row.key))}
@@ -402,7 +454,7 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
                         className="mt-5 shrink-0 rounded-lg border-0 bg-transparent p-1.5 text-red-600 hover:bg-red-50 disabled:opacity-30"
                       >
                         <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                      </button>
+                      </button>}
                     </div>
 
                     {matches.length > 0 && (
@@ -466,6 +518,7 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
 
           {section === 'financials' && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {hideShipping ? null : (<>
               <div>
                 <label className={labelClass}>Destination state</label>
                 <select
@@ -494,6 +547,7 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
                   className={inputClass}
                 />
               </div>
+              </>)}
               <div>
                 <label className={labelClass}>Currency</label>
                 <select
@@ -535,14 +589,22 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
               </div>
               <div className="flex flex-col justify-end">
                 <span className="text-[11px] text-zinc-500">
-                  Deal value is recalculated from the line items plus shipping when saved.
+                  {hideShipping
+                    ? 'The value is recalculated from the services when saved.'
+                    : 'Deal value is recalculated from the line items plus shipping when saved.'}
                 </span>
               </div>
             </div>
           )}
 
-          {section === 'contact' && (
+          {(section === 'contact' || isCorrection) && (
             <div className="flex flex-col gap-4">
+              {isCorrection ? (
+                <p className="m-0 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                  The primary contact was fixed when this opportunity was created. Correct it only if it is wrong; the
+                  change and your reason are recorded in the audit history. The link to the lead and contact stays.
+                </p>
+              ) : null}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
                   <label className={labelClass}>Contact person</label>
@@ -575,7 +637,27 @@ export const OpportunityEditModal: React.FC<OpportunityEditModalProps> = ({
                 </div>
               </div>
 
-              {hasLinkedContact ? (
+              {isCorrection ? (
+                <div className="flex flex-col gap-3" data-testid="contact-correction-fields">
+                  <div>
+                    <label className={labelClass} htmlFor="contact-correction-reason">Reason for the correction *</label>
+                    <textarea
+                      id="contact-correction-reason"
+                      rows={3}
+                      maxLength={500}
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                      className={inputClass}
+                      placeholder="e.g. The lead's email was typed wrongly when the opportunity was created"
+                    />
+                  </div>
+                  <label className="flex items-start gap-2 text-xs text-zinc-700">
+                    <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="mt-0.5" />
+                    <span>I confirm this correction. It will be recorded with my name and the reason.</span>
+                  </label>
+                </div>
+              ) : null}
+              {hasLinkedContact && !isCorrection ? (
                 <label className="flex items-start gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
                   <input
                     type="checkbox"

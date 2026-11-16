@@ -1,7 +1,7 @@
 /**
  * Generic host ↔ extension bridge for Lead Create embeds.
  * Extensions own field UI/validation; CRM mounts iframes and persists
- * returned `extension` JSON on the Lead document (no Travel hardcode).
+ * returned `extension` JSON on the Lead document.
  * Never read/write extension lead drafts from localStorage / sessionStorage.
  */
 
@@ -13,15 +13,9 @@ export type ExtensionLeadCommitResult = {
 };
 
 /** postMessage types extensions use to sync JSON onto CRM Lead.extension. */
-export const EXTENSION_LEAD_SYNC_TYPES = [
-  'extension-lead-sync',
-  'crm-travel-sync',
-] as const;
+export const EXTENSION_LEAD_SYNC_TYPES = ['extension-lead-sync'] as const;
 
-export const EXTENSION_LEAD_GET_TYPES = [
-  'extension-lead-get',
-  'crm-travel-get-extension',
-] as const;
+export const EXTENSION_LEAD_GET_TYPES = ['extension-lead-get'] as const;
 
 export function asExtensionBag(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -81,7 +75,6 @@ export function requestExtensionLeadDraft(
       if (data.requestId !== requestId) return;
       const isDraft =
         data.type === 'extension-lead-draft' ||
-        data.type === 'crm-travel-draft' ||
         data.type === 'extension-lead-get-draft-result';
       if (!isDraft) return;
       window.clearTimeout(timer);
@@ -98,15 +91,6 @@ export function requestExtensionLeadDraft(
       {
         source: 'crm-host',
         type: 'extension-lead-get-draft',
-        requestId,
-      },
-      '*'
-    );
-    // Legacy alias some embeds still listen for
-    iframe.contentWindow.postMessage(
-      {
-        source: 'crm-host',
-        type: 'crm-travel-get-draft',
         requestId,
       },
       '*'
@@ -138,9 +122,7 @@ export function commitExtensionLeadEmbed(
     const onMessage = (event: MessageEvent) => {
       const data = event.data || {};
       if (data.requestId && data.requestId !== requestId) return;
-      // Generic ack; also accept legacy travel alias until all extensions migrate.
-      const isCommitAck =
-        data.type === 'extension-lead-committed' || data.type === 'crm-travel-committed';
+      const isCommitAck = data.type === 'extension-lead-committed';
       if (!isCommitAck) return;
       window.clearTimeout(timer);
       window.removeEventListener('message', onMessage);

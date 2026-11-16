@@ -4,6 +4,7 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined';
 import { DynamicFormBuilder } from '../form-builder/DynamicFormBuilder';
+import { useNotifyMessage } from '@/components/notifications';
 import { crmApi } from '../../services/api';
 import {
   ensureBudgetField,
@@ -14,7 +15,6 @@ import {
 import { getDefaultCurrencySymbol } from '../../utils/currency';
 import { AlertTriangle, Lock, Ruler } from 'lucide-react';
 import { useActiveExtension } from '../../hooks/useActiveExtension';
-import { isInactiveExtensionRequestType } from '../../types/extensions';
 
 const inputClass =
   'h-9 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-400';
@@ -42,13 +42,15 @@ export function RequestTypesPanel() {
    */
   const { extension: activeExtension, requestTypeKey: fixedKey } = useActiveExtension();
   const [items, setItems] = useState<RequestType[]>([]);
-  const visibleItems = items.filter((rt) => !isInactiveExtensionRequestType(rt.key, fixedKey));
+  const visibleItems = items.filter(
+    (rt) => rt.key === fixedKey || rt.key === activeExtension.requestTypeKey
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  useNotifyMessage(message?.text, message?.kind === 'success' ? 'success' : 'error', () => setMessage(null));
   const [mode, setMode] = useState<EditorMode>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<RequestType | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -165,33 +167,6 @@ export function RequestTypesPanel() {
     }
   };
 
-  const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    if ((deleteTarget.leadCount || 0) > 0) {
-      setMessage({
-        kind: 'error',
-        text: `Cannot delete "${deleteTarget.name}" — ${deleteTarget.leadCount} lead(s) use it. Disable it instead.`,
-      });
-      setDeleteTarget(null);
-      return;
-    }
-    setSaving(true);
-    try {
-      await crmApi.deleteRequestType(deleteTarget._id);
-      setMessage({ kind: 'success', text: `Deleted "${deleteTarget.name}".` });
-      setDeleteTarget(null);
-      await load();
-    } catch (reason) {
-      setMessage({
-        kind: 'error',
-        text: reason instanceof Error ? reason.message : 'Failed to delete request type',
-      });
-    } finally {
-      setSaving(false);
-      setDeleteTarget(null);
-    }
-  };
-
   if (mode && draft && (mode === 'create' || mode === 'edit' || mode === 'catalog')) {
     return (
       <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4">
@@ -221,18 +196,6 @@ export function RequestTypesPanel() {
           </div>
 
           <div className="max-h-[75vh] space-y-4 overflow-y-auto px-5 py-4">
-            {message && (
-              <div
-                className={`rounded-lg px-3 py-2 text-xs font-medium ${
-                  message.kind === 'success'
-                    ? 'bg-emerald-50 text-emerald-800'
-                    : 'bg-red-50 text-red-700'
-                }`}
-              >
-                {message.text}
-              </div>
-            )}
-
             {mode !== 'catalog' && (
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <label className="block md:col-span-1">
@@ -430,18 +393,6 @@ export function RequestTypesPanel() {
           </span>
         </div>
 
-        {message && (
-          <div
-            className={`rounded-lg px-3 py-2 text-xs font-medium ${
-              message.kind === 'success'
-                ? 'bg-emerald-50 text-emerald-800'
-                : 'bg-red-50 text-red-700'
-            }`}
-          >
-            {message.text}
-          </div>
-        )}
-
         {loading ? (
           <p className="m-0 text-xs text-zinc-500">Loading request types…</p>
         ) : (
@@ -453,7 +404,6 @@ export function RequestTypesPanel() {
                   <th className="px-4 py-3 font-semibold">Budget Range</th>
                   <th className="px-4 py-3 font-semibold">Fields</th>
                   <th className="px-4 py-3 font-semibold">Leads</th>
-                  <th className="px-4 py-3 font-semibold">Status</th>
                   <th className="px-4 py-3 font-semibold text-right">Actions</th>
                 </tr>
               </thead>
@@ -509,17 +459,6 @@ export function RequestTypesPanel() {
                     </td>
                     <td className="px-4 py-3 text-xs text-zinc-700">{item.leadCount ?? 0}</td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                          item.isEnabled
-                            ? 'bg-emerald-50 text-emerald-700'
-                            : 'bg-zinc-100 text-zinc-500'
-                        }`}
-                      >
-                        {item.isEnabled ? 'Enabled' : 'Disabled'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
                       <div className="flex flex-wrap justify-end gap-1.5">
                         <button
                           type="button"
@@ -544,35 +483,6 @@ export function RequestTypesPanel() {
           </div>
         )}
       </div>
-
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl">
-            <h4 className="m-0 text-sm font-bold text-zinc-950">Delete request type?</h4>
-            <p className="mt-2 text-xs text-zinc-600">
-              Delete <strong>{deleteTarget.name}</strong>? This cannot be undone. Types used by
-              existing leads cannot be deleted — disable them instead.
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setDeleteTarget(null)}
-                className="inline-flex h-9 items-center rounded-lg border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => void confirmDelete()}
-                className="inline-flex h-9 items-center rounded-lg border-0 bg-red-600 px-3 text-xs font-semibold text-white"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

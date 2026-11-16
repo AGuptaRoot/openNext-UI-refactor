@@ -19,6 +19,7 @@ import { fileToVisionDataUrl } from '../../utils/imageDataUrl';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 import { PhoneNumberField } from '../common/PhoneNumberField';
 import { splitPhoneNumber, validateNationalNumber } from '../../utils/phoneCountryCodes';
+import { useNotifyMessage } from '@/components/notifications';
 
 const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif';
 const MAX_BYTES = 12 * 1024 * 1024;
@@ -161,6 +162,7 @@ export const VisitingCardLeadCaptureModal: React.FC<VisitingCardLeadCaptureModal
   const [step, setStep] = useState<Step>('pick');
   const [statusText, setStatusText] = useState('');
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
   const [busy, setBusy] = useState(false);
   const [liveCameraOpen, setLiveCameraOpen] = useState(false);
   const [draft, setDraft] = useState<DraftFields>(emptyDraft());
@@ -777,14 +779,6 @@ export const VisitingCardLeadCaptureModal: React.FC<VisitingCardLeadCaptureModal
           </div>
         ) : null}
 
-        {error && (
-          <div
-            role="alert"
-            className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-xs font-semibold text-red-700"
-          >
-            {error}
-          </div>
-        )}
 
         {step === 'done' && createdLead && (
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs text-emerald-900">

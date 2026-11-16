@@ -16,6 +16,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { canCreateTasks } from '../../utils/permissions';
 import { CrmRole } from '../../types/dashboard';
+import { getExtensionIcon } from '../extensions/extensionIcons';
 
 interface QuickActionsCardProps {
   onNavigateUnmigrated: (moduleName: string) => void;
@@ -149,7 +150,7 @@ export const QuickActionsCard: React.FC<QuickActionsCardProps> = ({
 }) => {
   const navigate = useNavigate();
   const { hasPermission, hasAnyPermission, isClient, activeRole } = useAuth();
-  const { isModuleVisible } = useActiveExtension();
+  const { isModuleVisible, declarations, canSeePage, extension } = useActiveExtension();
 
   const actions = useMemo(() => {
     return ALL_QUICK_ACTIONS.filter((act) => {
@@ -178,16 +179,30 @@ export const QuickActionsCard: React.FC<QuickActionsCardProps> = ({
     });
   }, [hasPermission, hasAnyPermission, isClient, activeRole, isModuleVisible]);
 
+  // Extension declared pages with showInQuickActions: true
+  const extensionActions = useMemo<ActionItem[]>(() => {
+    const pages = declarations.navigation?.pages || [];
+    return pages
+      .filter((page) => page.showInQuickActions && canSeePage(page))
+      .map((page) => ({
+        id: `ext-${extension.id}-${page.id}`,
+        label: page.label,
+        module: page.label,
+        path: `/ext/${extension.id}/${page.id}`,
+        icon: getExtensionIcon(page.icon, { className: 'h-4 w-4' }),
+        allowClient: page.audience === 'portal' || page.audience === 'all',
+      }));
+  }, [declarations.navigation?.pages, canSeePage, extension.id]);
+
+  const allActions = useMemo(
+    () => [...actions, ...extensionActions],
+    [actions, extensionActions]
+  );
+
   const handleActionClick = (act: ActionItem) => {
     if (isClient && !act.allowClient) return;
     if (act.roles?.length && !act.roles.includes(activeRole)) return;
     if (act.excludeRoles?.includes(activeRole)) return;
-    const allowed = act.anyOf?.length
-      ? hasAnyPermission(...act.anyOf)
-      : act.permission
-        ? hasPermission(act.permission)
-        : false;
-    if (!allowed) return;
     if (act.path) {
       navigate(act.path);
       return;
@@ -195,7 +210,7 @@ export const QuickActionsCard: React.FC<QuickActionsCardProps> = ({
     onNavigateUnmigrated(act.module);
   };
 
-  if (actions.length === 0) return null;
+  if (allActions.length === 0) return null;
 
   return (
     <div data-tour="dashboard-quick-actions" className="bg-white border border-zinc-300 rounded-xl p-5">
@@ -207,7 +222,7 @@ export const QuickActionsCard: React.FC<QuickActionsCardProps> = ({
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        {actions.map((act) => (
+        {allActions.map((act) => (
           <button
             key={act.id}
             type="button"

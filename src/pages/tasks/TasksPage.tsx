@@ -4,6 +4,7 @@ import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ViewListIcon from '@mui/icons-material/ViewList';
 import ViewKanbanIcon from '@mui/icons-material/ViewKanban';
+import AssessmentOutlinedIcon from '@mui/icons-material/AssessmentOutlined';
 import SearchIcon from '@mui/icons-material/Search';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import SendIcon from '@mui/icons-material/Send';
@@ -16,6 +17,7 @@ import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { TourButton } from '../../ui/tour';
 import { useDialog } from '../../context/DialogContext';
+import { notify, useNotifyMessage } from '@/components/notifications';
 import { ListPager, type ListPaginationMeta } from '../../components/common/ListPager';
 import {
   TaskItem,
@@ -27,6 +29,7 @@ import { ProjectItem, ProjectMilestone } from '../../types/projects';
 import TaskTemplateModal from '../../components/tasks/TaskTemplateModal';
 import RecurringTasksModal from '../../components/tasks/RecurringTasksModal';
 import { TaskKanbanView } from '../../components/tasks/TaskKanbanView';
+import { TaskWorkReportsView } from '../../components/tasks/TaskWorkReportsView';
 import { triggerFileDownload } from '../../utils/fileDownload';
 import { canCreateTasks, canFullyManageTasks } from '../../utils/permissions';
 import { displayLabel, displayUserLabel } from '../../utils/displayLabels';
@@ -42,11 +45,13 @@ const btnSecondary =
 const btnPrimary =
   'inline-flex h-9 items-center gap-1.5 rounded-lg bg-zinc-950 px-4 text-sm font-semibold text-white no-underline hover:bg-zinc-800 transition-colors cursor-pointer';
 
-type ViewMode = 'list' | 'kanban';
+type ViewMode = 'list' | 'kanban' | 'reports';
 
 export const TasksPage: React.FC = () => {
   const { confirm } = useDialog();
-  const { hasPermission, isClient, activeRole } = useAuth();
+  const { hasPermission, isClient, activeRole, isAdmin } = useAuth();
+  // Employee work reports: CRM managers and project managers (the server checks the same).
+  const canViewWorkReports = !isClient && (isAdmin || activeRole === 'crm-manager' || activeRole === 'project-manager');
   const canWrite = hasPermission('crm.tasks.write') && !isClient;
   const canAddTask = canCreateTasks({
     hasTaskWrite: canWrite,
@@ -67,7 +72,7 @@ export const TasksPage: React.FC = () => {
   const [milestones, setMilestones] = useState<ProjectMilestone[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  useNotifyMessage(error, 'error', () => setError(''));
 
   // Modals state
   const [templatesModalOpen, setTemplatesModalOpen] = useState(false);
@@ -93,9 +98,16 @@ export const TasksPage: React.FC = () => {
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
   // View mode and pagination
-  const [view, setView] = useState<ViewMode>(
-    () => (sessionStorage.getItem('crm-tasks-view') as ViewMode) || 'list'
-  );
+  const [view, setView] = useState<ViewMode>(() => {
+    const fromUrl = searchParams.get('view');
+    if (fromUrl === 'list' || fromUrl === 'kanban' || fromUrl === 'reports') return fromUrl;
+    return (sessionStorage.getItem('crm-tasks-view') as ViewMode) || 'list';
+  });
+  useEffect(() => {
+    if (view === 'reports' && !canViewWorkReports) setView('list');
+  }, [view, canViewWorkReports]);
+  // Never shows the Reports tab, even for a moment, to someone who may not open it.
+  const showReports = view === 'reports' && canViewWorkReports;
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState<ListPaginationMeta | null>(null);
   const listLimit = view === 'kanban' ? 100 : 20;
@@ -134,8 +146,7 @@ export const TasksPage: React.FC = () => {
   }, []);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
-    setToast({ text, type });
-    setTimeout(() => setToast(null), 3000);
+    notify.show(type, text);
   };
 
   // Debounce search
@@ -242,6 +253,8 @@ export const TasksPage: React.FC = () => {
 
   // Load tasks list
   const load = useCallback(async () => {
+    // The Reports tab loads its own data.
+    if (view === 'reports') return;
     setLoading(true);
     setError('');
     try {
@@ -599,19 +612,6 @@ export const TasksPage: React.FC = () => {
 
   return (
     <div data-tour="tasks-tour-landing" className="flex flex-col gap-5">
-      {/* Toast */}
-      {toast && (
-        <div
-          className={`fixed bottom-5 right-5 z-50 rounded-lg border px-4 py-2.5 text-xs font-semibold shadow-lg ${
-            toast.type === 'error'
-              ? 'border-red-200 bg-red-50 text-red-800'
-              : 'border-emerald-200 bg-emerald-50 text-emerald-800'
-          }`}
-        >
-          {toast.text}
-        </div>
-      )}
-
       {/* Page Header */}
       <header className="flex flex-col gap-4 border-b border-zinc-200 pb-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
@@ -693,6 +693,7 @@ export const TasksPage: React.FC = () => {
       </header>
 
       {/* KPI cards */}
+      {!showReports && (
       <div data-tour="tasks-kpis" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
           { label: 'Total Tasks', value: kpis.total },
@@ -714,6 +715,7 @@ export const TasksPage: React.FC = () => {
           </div>
         ))}
       </div>
+      )}
 
       {/* View toggle */}
       <div className="flex flex-wrap items-center gap-3">
@@ -738,9 +740,25 @@ export const TasksPage: React.FC = () => {
           >
             <ViewKanbanIcon sx={{ fontSize: 15 }} /> Kanban
           </button>
+          {canViewWorkReports && (
+            <button
+              type="button"
+              data-tour="tasks-tab-reports"
+              onClick={() => setViewMode('reports')}
+              className={`inline-flex h-8 cursor-pointer items-center gap-1 rounded-md border-0 px-3 text-xs font-semibold ${
+                view === 'reports' ? 'bg-zinc-950 text-white' : 'bg-transparent text-zinc-600'
+              }`}
+            >
+              <AssessmentOutlinedIcon sx={{ fontSize: 15 }} /> Reports
+            </button>
+          )}
         </div>
       </div>
 
+      {showReports ? (
+        <TaskWorkReportsView />
+      ) : (
+      <>
       {/* Filters */}
       <section data-tour="tasks-filters" className="flex flex-col gap-3 rounded-xl border border-zinc-300 bg-white p-4">
         {assignedToFilter ? (
@@ -945,12 +963,6 @@ export const TasksPage: React.FC = () => {
           </button>
         </div>
       </section>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-700">
-          {error}
-        </div>
-      )}
 
       {/* Main Content Area: List View vs Kanban View */}
       {loading ? (
@@ -1237,6 +1249,8 @@ export const TasksPage: React.FC = () => {
           onMoveStatus={(taskId, nextStatus) => void handleStatusChange(taskId, nextStatus)}
           onResendReminder={(taskId, title) => void handleResendReminder(taskId, title)}
         />
+      )}
+      </>
       )}
 
       {/* Task Templates Studio Modal */}

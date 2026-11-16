@@ -327,7 +327,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
             <div className="flex items-center gap-1 text-zinc-600">
               <span>Deal Value:</span>
               <strong className="font-mono text-zinc-950">
-                {formatMoney(lead.value, lead.currency || 'INR')}
+                {formatMoney(lead.value ?? undefined, lead.currency || 'INR')}
               </strong>
             </div>
           </div>

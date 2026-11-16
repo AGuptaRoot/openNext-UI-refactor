@@ -1,3 +1,4 @@
+import type { ExtensionFact, ExtensionValueConfirm } from './extensions';
 import type { LeadCommercialRequirement } from '../utils/qualificationMatchScore';
 import type { ClientPortalAccess } from './clients';
 
@@ -39,7 +40,7 @@ export interface LeadItem {
   requestType?: string;
   /** Stable RequestType id for dynamic commercial forms. */
   requestTypeId?: string | null;
-  value?: number;
+  value?: number | null;
   currency?: string;
   salesOwner?: string;
   assignedTo?: string;
@@ -82,7 +83,7 @@ export interface LeadItem {
   /**
    * Plugin-extension JSON on the lead document (Mongo `plugin_openext_crm_suite_leads`).
    * Section-wise by extension id, e.g.
-   * { "crm-travel": { "Travel-General-Information": { "Enquiry-Date": "…" }, "Travel-Information": { From, To, Destination } } }
+   * { "<extensionId>": { "<Section>": { "<Field>": value } } }
    */
   extension?: Record<string, unknown>;
   createdAt: string;
@@ -325,6 +326,8 @@ export interface LeadQueryParams {
   needsSampleRequest?: string;
   search?: string;
   sort?: string;
+  /** Sort direction sent as `order` (the server reads direction from here). */
+  order?: 'asc' | 'desc';
 }
 
 /** True when Commercial Requirement marked the lead as needing a sample request. */
@@ -357,7 +360,7 @@ export interface LeadCreateInput {
   leadType?: string;
   requestType?: string;
   requestTypeId?: string | null;
-  value?: number;
+  value?: number | null;
   currency?: string;
   /** Optional — empty string / undefined means the lead is unassigned. */
   assignedTo?: string;
@@ -370,7 +373,7 @@ export interface LeadCreateInput {
   longitude?: number | null;
   photoUrl?: string;
   customFields?: Record<string, string | number | boolean>;
-  /** Plugin-extension JSON stored with the lead (e.g. Travel from/to/destination). */
+  /** Plugin-extension JSON stored with the lead, keyed by extension id. */
   extension?: Record<string, unknown>;
   /** Allow another lead with the same email / mobile / PAN (e.g. reuse existing contact). */
   allowExactDuplicate?: boolean;
@@ -498,4 +501,302 @@ export interface LeadPortalAccessState {
   access: ClientPortalAccess[];
   /** Why a new invite is refused right now; empty when it is allowed. */
   blockedReason: string;
+  /** CRM 3.36.0: the lead's Contact already has its portal user (IsportalAssigned). */
+  contactPortalAssigned?: boolean;
+}
+
+/** Tenant lead workflow rules (Settings → Qualification Match → Lead workflow). */
+export interface LeadWorkflowRules {
+  /** When Create Opportunity shows on a lead. */
+  opportunityButton: 'qualified' | 'ready' | 'qualified_or_ready';
+  /** Hide Commercial Requirement when the active extension has its own requirement tab. */
+  hideReplacedCommercialRequirement: boolean;
+  /** Move a lead to Qualified when the extension reports it ready. */
+  autoQualifyReadyLeads: boolean;
+  /** Leads offered (and accepted) for a new opportunity. */
+  opportunityLeads: 'all' | 'qualified_or_ready';
+  /** 'extension' = follow the active extension, 'always', 'never'. */
+  quotationNeedsOpportunity?: 'extension' | 'always' | 'never';
+}
+
+/** GET /leads/:id/workflow */
+export interface LeadWorkflowFacts {
+  leadId: string;
+  stage: string;
+  qualified: boolean;
+  /** The active extension can say whether a lead is ready. */
+  hasReadiness: boolean;
+  ready: boolean;
+  readyReasons: string[];
+  readySummary: string;
+  hideCommercialRequirement: boolean;
+  /** The lead was converted into a client: no new opportunity from it (older servers leave it out). */
+  converted?: boolean;
+  canCreateOpportunity: boolean;
+  eligibleForOpportunity: boolean;
+  rules: LeadWorkflowRules;
+}
+
+/** GET /lead-workflow/opportunity-leads */
+/** A line suggested by the active extension (sales flow); prices are usually left for the agent. */
+export interface SalesFlowDetail {
+  label: string;
+  value: string;
+}
+
+/** A column the extension adds to quotation lines (salesFlow.quotationLineFields). */
+export interface SalesFlowLineField {
+  key: string;
+  label: string;
+  type: 'select' | 'text';
+  options?: string[];
+  maxLength?: number;
+  print?: boolean;
+  /** Colour per select option. */
+  tones?: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'>;
+}
+
+export interface SalesFlowSummaryItem {
+  icon?: string;
+  label: string;
+  value: string;
+}
+
+export interface SalesFlowLine {
+  name: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  /** What the quantity counts, e.g. "Rooms × Nights". */
+  unit?: string;
+  tax?: number;
+  extra?: Record<string, string>;
+  /** The extension's reference for the line (kept on the quotation line). */
+  sourceRef?: string;
+  /** false: the row starts unticked. */
+  selected?: boolean;
+  /** Read-only details shown with the line (e.g. the service's requirement); not saved. */
+  details?: SalesFlowDetail[];
+  /** Key of one of salesFlow.quotationLineGroups ('' or missing = ungrouped). */
+  group?: string;
+}
+
+/** One row of the extension's checklist on a create page (prefill `checks`). */
+export interface SalesFlowCheck {
+  label: string;
+  ok: boolean;
+  hint?: string;
+}
+
+/** salesFlow.opportunityForm — the extension's layout of the Create Opportunity page. */
+export interface SalesFlowOpportunityForm {
+  title?: string;
+  subtitle?: string;
+  /** Allowed link types, in order of preference (already resolved through the lead-only setting). */
+  linkTypes?: Array<'lead' | 'client'>;
+  /** Declared opportunity fields stay disabled until a lead is chosen. */
+  needsLead?: boolean;
+  emptyText?: string;
+  /** Present when the extension wants to hear about saved opportunities. */
+  savedRoute?: string;
+  /** The stage of a new opportunity is set by the CRM (stage labels as the pipeline names them). */
+  startStage?: { stage: string; readyStage?: string; locked?: boolean };
+}
+
+/** GET /opportunities/start-stage — the stage a new opportunity for a lead opens in. */
+export interface OpportunityStartStage {
+  /** false without salesFlow.opportunityForm.startStage: the user picks the stage as usual. */
+  locked: boolean;
+  /** The stage the opportunity will open in. */
+  stage?: string;
+  probability?: number;
+  /** The first stage, and the one used once the lead is ready ('' when none). */
+  startStage?: string;
+  readyStage?: string;
+  ready?: boolean;
+  reasons?: string[];
+}
+
+/** salesFlow.quotationForm — the extension's layout of the quotation create / edit page. */
+export interface SalesFlowQuotationForm {
+  emptyText?: string;
+  savedRoute?: string;
+  /** "Grand total ÷ N" line; N is a declared quotation field. Omitted when switched off. */
+  totalPer?: { label: string; countField: string };
+}
+
+/** salesFlow.quotationLineGroups[] — a titled group of quotation lines with its own columns. */
+export interface SalesFlowLineGroup {
+  key: string;
+  title: string;
+  /** Keys of quotationLineFields shown for this group (missing = every line field). */
+  fields?: string[];
+  /** Card icon: flight, hotel, car, activity, document, shield, place, beach, event, group, package, service. */
+  icon?: string;
+}
+
+/** POST /sales-flow/opportunity-saved and /sales-flow/quotation-saved */
+export interface SalesFlowSavedResult {
+  ok: boolean;
+  skipped?: boolean;
+  message?: string;
+}
+
+/** Read-only information the extension shows for a lead (e.g. its services and travellers). */
+export interface SalesFlowPanel {
+  title: string;
+  empty?: string;
+  note?: string;
+  items: Array<{ title: string; subtitle?: string; badge?: string; details?: SalesFlowDetail[] }>;
+}
+
+/** GET /sales-flow — page layout switches of the active extension. */
+export interface SalesFlowConfig {
+  available: boolean;
+  opportunityPrefill?: boolean;
+  quotationPrefill?: boolean;
+  /** The extension's panels replace the opportunity's product lines (products come from the extension). */
+  hideOpportunityLines?: boolean;
+  /** Quotation lines come only from the extension; the agent enters price and tax. */
+  lockQuotationLines?: boolean;
+  quotationLineFields?: SalesFlowLineField[];
+  quotationPageTitle?: string;
+  quotationPageSubtitle?: string;
+  quotationSummaryTitle?: string;
+  quotationLinesTitle?: string;
+  quotationLinesSubtitle?: string;
+  quotationAddLineLabel?: string;
+  /** Effective "a new quotation needs an opportunity" rule (setting or extension). */
+  requireOpportunityForQuotation?: boolean;
+  extensionName?: string;
+  opportunityForm?: SalesFlowOpportunityForm;
+  quotationForm?: SalesFlowQuotationForm;
+  quotationLineGroups?: SalesFlowLineGroup[];
+  /** Lines come only from the extension's records: users change price and tax only. */
+  fixedLines?: boolean;
+  /** The quotation's text sections are not edited on the create page. */
+  hideQuotationSections?: boolean;
+  /** Where the source data is edited: a lead tab of the extension. */
+  requirementLink?: { label: string; leadTab: string } | null;
+  /** Page wording: lines, line, proposedLines, subtotal, commercialSummary. */
+  terms?: Partial<Record<'lines' | 'line' | 'proposedLines' | 'subtotal' | 'commercialSummary', string>> | null;
+  /** Services, not goods: no shipping charge or shipping wording. */
+  hideShipping?: boolean;
+  /** The opportunity's primary contact is fixed once it is created. */
+  lockOpportunityContact?: boolean;
+  /** Invoices are raised from an accepted quotation only (its lines and payments carried over). */
+  invoiceFromQuotation?: boolean;
+  /** No Recurring Profiles tab, filter, KPI or recurring option on the invoice pages. */
+  hideRecurringInvoices?: boolean;
+  /** CRM 3.28.0 switches (salesFlow): see the extension manifest reference. */
+  lockOpportunityOnAccept?: boolean;
+  lockConvertedLead?: boolean;
+  completeOpportunitiesOnConversion?: boolean;
+  clientQuotationStartsWithLead?: boolean;
+  bookingAfterAdvance?: boolean;
+  /** CRM 3.34.0: a Won (or converted) lead is read-only. */
+  lockWonLead?: boolean;
+  /** CRM 3.34.0: a quotation for a client goes through the extension (eligible clients, a picker, a start step). */
+  clientQuotation?: {
+    notEligibleText?: string;
+    /** CRM 3.44.0: tag on a client that is not ready yet. */
+    notEligibleLabel?: string;
+    /** CRM 3.45.0: a client quotation is saved for the client and its enquiry, without an opportunity. */
+    withoutOpportunity?: boolean;
+    /** CRM 3.46.0: the client tab (clientDetail tab id) where new business for an existing client starts. */
+    clientTab?: string;
+    /** CRM 3.47.0: Lead create → "Add as Secondary Contact" may copy the lead form's values (checkbox text). */
+    leadFormSync?: { label: string; help?: string } | null;
+  } | null;
+  /** CRM 3.32.0: the extension limits Issue Date / Valid Till (POST /sales-flow/quotation-dates). */
+  quotationDates?: boolean;
+  /** No Templates button on the invoice list. */
+  hideInvoiceTemplates?: boolean;
+  /** CRM 3.41.0: no quotation templates (list button, Load / Save as Template, template pages). */
+  hideQuotationTemplates?: boolean;
+  /** CRM 3.39.0: no Write off on invoices (the server refuses it too). */
+  hideInvoiceWriteOff?: boolean;
+}
+
+/** A notice from the extension above a create page, with an optional link to one of its lead tabs. */
+export interface SalesFlowNotice {
+  tone: 'warning' | 'info';
+  text: string;
+  action?: { label: string; leadTab: string };
+}
+
+/** POST /sales-flow/opportunity-prefill — { available: false } without an extension that offers it. */
+export interface OpportunityPrefill {
+  available: boolean;
+  reason?: string;
+  message?: string;
+  leadId?: string;
+  title?: string;
+  expectedCloseDate?: string;
+  description?: string;
+  /** Suggested Estimated Deal Value (null when the lead has none). */
+  dealValue?: number | null;
+  panels?: SalesFlowPanel[];
+  lines?: SalesFlowLine[];
+  values?: Record<string, unknown>;
+  warnings?: string[];
+  checks?: SalesFlowCheck[];
+  notices?: SalesFlowNotice[];
+  facts?: ExtensionFact[];
+  valueConfirms?: ExtensionValueConfirm[];
+}
+
+/** POST /sales-flow/quotation-prefill */
+/** What to choose before a client quotation (CRM 3.34.0, salesFlow.clientQuotation picker). */
+export interface ClientQuotationPickerData {
+  eligible: boolean;
+  message?: string;
+  title: string;
+  intro?: string;
+  submitLabel?: string;
+  min: number;
+  items: Array<{ id: string; label: string; detail?: string; checked?: boolean; disabled?: boolean; hint?: string }>;
+  emptyText?: string;
+  emptyLink?: { label: string; link: string };
+}
+
+/** Issue Date / Valid Till limits of a quotation (days "YYYY-MM-DD"; missing = no limit). */
+export interface QuotationDateRules {
+  today?: string;
+  /** New quotations: the issue date cannot be earlier. */
+  issueDateMin?: string;
+  /** Valid Till cannot be later, e.g. a travel quotation's Travel Start Date. */
+  validTillMax?: string;
+  validTillMaxLabel?: string;
+}
+
+export interface QuotationPrefill {
+  available: boolean;
+  reason?: string;
+  message?: string;
+  leadId?: string;
+  title?: string;
+  description?: string;
+  summary?: SalesFlowSummaryItem[];
+  panels?: SalesFlowPanel[];
+  lineOptions?: Array<{ name: string; unit?: string; tax?: number; group?: string }>;
+  lineNote?: string;
+  lines?: SalesFlowLine[];
+  sections?: Array<{ key?: string; title: string; body: string }>;
+  warnings?: string[];
+  /** Declared quotation field values. */
+  values?: Record<string, unknown>;
+  /** Default "Valid till" (YYYY-MM-DD). */
+  validTill?: string;
+  /** Latest sensible "Valid till"; a later date asks for confirmation on save. */
+  validTillMax?: string;
+  checks?: SalesFlowCheck[];
+  notices?: SalesFlowNotice[];
+}
+
+export interface OpportunityLeadOptions {
+  leads: Array<LeadItem & { workflow?: { qualified: boolean; ready: boolean } }>;
+  hidden: number;
+  rule: 'all' | 'qualified_or_ready';
+  hasReadiness: boolean;
 }

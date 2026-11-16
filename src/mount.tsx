@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 
 import { App } from './App';
+import { crmPathForMount, EXTENSION_SEGMENT } from './utils/extensionPageRoute';
 // Imported twice on purpose: the plain import makes Vite emit a real
 // stylesheet for `manifest.styles` (which the host scopes), and the `?inline`
 // copy is the fallback injected when that scoping did not apply.
@@ -54,7 +55,6 @@ const MOUNT_ROOT_ATTR = 'data-crm-mount-root';
  */
 const PAGE_ROUTES: Record<string, string> = {
   dashboard: '/dashboard',
-  'add-ons': '/add-ons',
   'customer-success': '/customer-success',
   'data-quality': '/data-quality',
   'sales-orders': '/sales-orders',
@@ -66,6 +66,11 @@ const PAGE_ROUTES: Record<string, string> = {
 function routeForPage(pageId?: string): string {
   const key = String(pageId || '').trim();
   if (!key) return '/';
+  // Workspace-extension pages: /runtime/<plugin>/extension/<id>/<page> (see utils/extensionPageRoute.ts).
+  const extensionRoute = crmPathForMount(key, typeof window !== 'undefined' ? window.location.pathname : '');
+  if (extensionRoute) return extensionRoute;
+  // adminNav "extension" only carries extension pages; without one in the URL, open the Dashboard.
+  if (key === EXTENSION_SEGMENT) return '/dashboard';
   return PAGE_ROUTES[key] || `/${key.replace(/^\/+/, '')}`;
 }
 

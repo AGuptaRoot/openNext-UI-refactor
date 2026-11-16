@@ -1,5 +1,6 @@
+import { useNotifyMessage } from '@/components/notifications';
 import { displayLabel } from '../../utils/displayLabels';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import EditIcon from '@mui/icons-material/Edit';
 import SendIcon from '@mui/icons-material/Send';
@@ -16,6 +17,15 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import CreditCardIcon from '@mui/icons-material/CreditCard';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 import { crmApi } from '../../services/api';
+import { useSalesFlowConfig } from '../../hooks/useSalesFlowConfig';
+import { salesTerms } from '../../utils/salesTerms';
+import { ExtensionActions } from '../../components/extensions/ExtensionActions';
+import { ExtensionMount } from '../../components/extensions/ExtensionMount';
+import { ExtensionFieldsSection } from '../../components/extensions/ExtensionFieldsSection';
+import { extensionDataApi } from '../../services/extensionDataApi';
+import { notifySalesFlowSaved } from '../../utils/salesFlowSaved';
+import type { SalesFlowLineField } from '../../types/leads';
+import { useExtensionTabs } from '../../components/extensions/ExtensionTabs';
 import { useAuth } from '../../context/AuthContext';
 import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { useDialog } from '../../context/DialogContext';
@@ -42,6 +52,7 @@ function statusClass(status: string): string {
     Sent: 'bg-sky-50 text-sky-800',
     Accepted: 'bg-emerald-50 text-emerald-800',
     Rejected: 'bg-rose-50 text-rose-800',
+    Closed: 'bg-zinc-100 text-zinc-600',
     Expired: 'bg-amber-50 text-amber-800',
     Converted: 'bg-indigo-50 text-indigo-800',
   };
@@ -57,7 +68,8 @@ export const QuotationDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const { alert, confirm } = useDialog();
   const { hasPermission, hasAnyPermission, isClient, features, activeRole, isAdmin } = useAuth();
-  const { canConvertToSalesOrder, showSalesOrders } = useActiveExtension();
+  const { canConvertToSalesOrder, showSalesOrders, declarations } = useActiveExtension();
+  const hasQuoteFields = (declarations.fields?.quotation || []).length > 0;
   const canWriteQuotes =
     hasAnyPermission('crm.quotes.write', 'crm.finance.write') && !isClient;
   const canWriteFinance = hasPermission('crm.finance.write') && !isClient;
@@ -76,17 +88,33 @@ export const QuotationDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error');
   const [portalLink, setPortalLink] = useState('');
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [reviseOpen, setReviseOpen] = useState(false);
   const [reviseReason, setReviseReason] = useState('');
   const [reviseValidTill, setReviseValidTill] = useState('');
+  /** Valid Till limit of the revision (CRM 3.32.0, e.g. the trip's start); the server checks it too. */
+  const [reviseRules, setReviseRules] = useState<{ today?: string; issueDateMin?: string; validTillMax?: string; validTillMaxLabel?: string }>({});
   /**
    * A revision exists to change the numbers, so the items are editable right
    * here rather than leaving the rep with a copy they cannot touch.
    */
   const [reviseItems, setReviseItems] = useState<QuotationLineItem[]>([]);
+  const salesFlow = useSalesFlowConfig();
+  const terms = salesTerms(salesFlow);
+  /** Columns the active extension adds to quotation lines (labels from its manifest). */
+  // Client (portal) users see only the columns that are printed for customers.
+  const lineFields = (salesFlow.quotationLineFields || []).filter((f) => !isClient || f.print);
+  /** salesFlow.quotationLineGroups: lines shown by group, each with its own columns. */
+  const lineGroups = salesFlow.quotationLineGroups || [];
+  /** quotationForm.totalPer: grand total ÷ a declared quotation field (read from the saved values). */
+  const totalPer = salesFlow.quotationForm?.totalPer || null;
+  const [totalPerCount, setTotalPerCount] = useState(0);
+  const valuesSeq = useRef(0);
+  // Sections the active extension adds to a quotation (json/tabs.json → quotationDetail).
+  const extensionSections = useExtensionTabs('quotationDetail');
   const [reviseDiscount, setReviseDiscount] = useState(0);
   const [reviseNotes, setReviseNotes] = useState('');
 
@@ -156,6 +184,23 @@ export const QuotationDetailPage: React.FC = () => {
   useEffect(() => {
     load();
   }, [load]);
+
+  const totalPerField = totalPer?.countField || '';
+  useEffect(() => {
+    const seq = ++valuesSeq.current;
+    setTotalPerCount(0);
+    if (!id || !totalPerField || !hasQuoteFields) return;
+    extensionDataApi
+      .getValues('quotation', id)
+      .then((res) => {
+        if (seq !== valuesSeq.current) return; // another quotation (e.g. a new revision) is shown now
+        const n = Number((res.values || {})[totalPerField]);
+        setTotalPerCount(Number.isFinite(n) && n > 0 ? n : 0);
+      })
+      .catch(() => {
+        // no values (or no access): no per-unit line
+      });
+  }, [id, totalPerField, hasQuoteFields]);
 
   const totals = useMemo(() => {
     if (!quote) return null;
@@ -265,12 +310,33 @@ export const QuotationDetailPage: React.FC = () => {
         qty: Number(line.qty) || 1,
         rate: Number(line.rate) || 0,
         tax: Number(line.tax) || 0,
+        ...(line.unit ? { unit: line.unit } : {}),
+        ...(line.extra && Object.keys(line.extra).length ? { extra: { ...line.extra } } : {}),
+        ...(line.sourceRef ? { sourceRef: line.sourceRef } : {}),
+        ...(line.group ? { group: line.group } : {}),
       }))
     );
     setReviseDiscount(Number(quote.discountPercent || 0));
     setReviseNotes(quote.recipientNotes || '');
+    setReviseRules({});
+    const leadRef = quote.leadId && typeof quote.leadId === 'object' ? String((quote.leadId as { _id?: string })._id || '') : String(quote.leadId || '');
+    const oppRef = String(quote.opportunityId || (quote as unknown as { dealId?: string }).dealId || '');
+    if (leadRef || oppRef) {
+      crmApi
+        .getQuotationDateRules({ leadId: leadRef, opportunityId: oppRef })
+        .then((res) => setReviseRules(res.data || {}))
+        .catch(() => setReviseRules({}));
+    }
     setReviseOpen(true);
   };
+  /** The revision is issued today; its Valid Till stays between today and the extension's limit. */
+  const reviseToday = (() => {
+    const d = new Date();
+    return reviseRules.issueDateMin || `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+  const reviseLimitText = reviseRules.validTillMax
+    ? `${reviseRules.validTillMaxLabel || 'the latest allowed date'} (${new Date(`${reviseRules.validTillMax}T12:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })})`
+    : '';
 
   const updateReviseItem = (index: number, patch: Partial<QuotationLineItem>) =>
     setReviseItems((current) =>
@@ -286,6 +352,10 @@ export const QuotationDetailPage: React.FC = () => {
       if (!(reviseTotals.grandTotal > 0)) {
         throw new Error('A quotation cannot total \u20b90. Set a price on at least one item.');
       }
+      if (reviseValidTill && reviseValidTill < reviseToday) throw new Error('Valid Till cannot be before Issue Date.');
+      if (reviseValidTill && reviseRules.validTillMax && reviseValidTill > reviseRules.validTillMax) {
+        throw new Error(`Valid Till cannot be after ${reviseLimitText}.`);
+      }
       const created = await crmApi.reviseQuotation(id, {
         reason: reviseReason.trim(),
         validTill: reviseValidTill || undefined,
@@ -297,6 +367,16 @@ export const QuotationDetailPage: React.FC = () => {
       setReviseReason('');
       setReviseValidTill('');
       setReviseItems([]);
+      // The new version already carries the declared values (copied by the server); tell the extension.
+      if (created.data?._id && salesFlow.quotationForm?.savedRoute) {
+        const syncProblem = await notifySalesFlowSaved('quotation', created.data._id);
+        if (syncProblem) {
+          void alert({
+            title: 'Quotation saved',
+            message: `Quotation saved. ${salesFlow.extensionName || 'Extension'} details were not synced: ${syncProblem}`,
+          });
+        }
+      }
       navigate(`/quotations/${created.data._id}`);
     });
 
@@ -491,6 +571,83 @@ export const QuotationDetailPage: React.FC = () => {
       }
     });
 
+  /** Lines by declared group (ungrouped last, under "Other"); empty without groups. */
+  const lineBuckets = (() => {
+    const items = quote?.lineItems || [];
+    if (!lineGroups.length || !items.length) return [];
+    const known = new Set(lineGroups.map((g) => g.key));
+    const list = lineGroups.map((g) => ({
+      key: g.key,
+      title: g.title,
+      fields: Array.isArray(g.fields)
+        ? g.fields.map((k) => lineFields.find((f) => f.key === k)).filter((f): f is SalesFlowLineField => Boolean(f))
+        : lineFields,
+      lines: [] as QuotationLineItem[],
+    }));
+    const other = { key: '', title: 'Other', fields: lineFields, lines: [] as QuotationLineItem[] };
+    for (const line of items) {
+      const bucket = line.group && known.has(line.group) ? list.find((b) => b.key === line.group) : undefined;
+      (bucket || other).lines.push(line);
+    }
+    return [...list, other].filter((b) => b.lines.length);
+  })();
+
+  const renderLineTable = (rows: QuotationLineItem[], cols: SalesFlowLineField[]) =>
+    quote ? (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead className="bg-zinc-50 text-[11px] uppercase text-zinc-500">
+              <tr>
+                <th className="px-4 py-2 text-left">{terms.hideShipping ? terms.line : 'Item'}</th>
+                {cols.map((f) => (
+                  <th key={f.key} className="px-4 py-2 text-left">{f.label}</th>
+                ))}
+                <th className="px-4 py-2 text-right">Qty</th>
+                <th className="px-4 py-2 text-right">Rate</th>
+                <th className="px-4 py-2 text-right">Tax %</th>
+                <th className="px-4 py-2 text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((line, index) => (
+                <tr key={`${line.name}-${index}`} className="border-t border-zinc-100">
+                  <td className="px-4 py-3">
+                    <div className="font-medium">{line.name}</div>
+                    {line.description && (
+                      <div className="text-xs text-zinc-500">{line.description}</div>
+                    )}
+                    {line.unit ? <div className="text-xs text-zinc-500">{line.unit}</div> : null}
+                    {line.fileUrl && !/amazonaws\.com/i.test(String(line.fileUrl)) && (
+                      <a
+                        href={line.fileUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-sky-700"
+                      >
+                        View attachment
+                      </a>
+                    )}
+                  </td>
+                  {cols.map((f) => (
+                    <td key={f.key} className="px-4 py-3 text-left text-xs text-zinc-700">
+                      {(line.extra && line.extra[f.key]) || '—'}
+                    </td>
+                  ))}
+                  <td className="px-4 py-3 text-right">{line.qty}</td>
+                  <td className="px-4 py-3 text-right">
+                    {formatFinanceMoney(line.rate, quote.currency)}
+                  </td>
+                  <td className="px-4 py-3 text-right">{line.tax}</td>
+                  <td className="px-4 py-3 text-right font-semibold">
+                    {formatFinanceMoney(line.amount ?? line.qty * line.rate, quote.currency)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+    ) : null;
+
   if (loading) {
     return <div className="p-12 text-center text-sm text-zinc-500">Loading quotation…</div>;
   }
@@ -506,11 +663,15 @@ export const QuotationDetailPage: React.FC = () => {
     );
   }
 
-  const locked = ['Converted'].includes(quote.status) || quote.isArchived;
+  // Closed: another quotation of the same opportunity was accepted (history only).
+  const locked = ['Converted', 'Closed'].includes(quote.status) || quote.isArchived;
   // Only the client portal user can accept or reject quotations (admin / staff must not).
   // Quotations must be in 'Sent' status to be accepted or rejected (Drafts cannot be accepted/rejected).
   const canDecideQuote = isClient;
-  const canAccept = canDecideQuote && quote.status === 'Sent' && !locked;
+  const paymentState = quote.paymentState || null;
+  // Proforma & advance payment on: paying is the acceptance, so there is no Accept button.
+  const paymentAccepts = proformaEnabled && Number(quote.grandTotal) > 0;
+  const canAccept = canDecideQuote && quote.status === 'Sent' && !locked && !paymentAccepts;
   const canReject = canDecideQuote && quote.status === 'Sent' && !locked;
   const canRevise = canWriteQuotes && !locked && ['Rejected', 'Sent', 'Expired'].includes(quote.status);
   const canConvertInvoice =
@@ -548,12 +709,18 @@ export const QuotationDetailPage: React.FC = () => {
   const canPayQuote =
     proformaEnabled &&
     razorpayConfigured &&
-    Number(quote.grandTotal) > 0 &&
-    !locked &&
+    Boolean(paymentState?.canPay) &&
     payableQuoteStatus &&
-    !quote.convertedInvoiceId &&
-    (proforma ? proformaOpen : true) &&
     (isClient || hasAnyPermission('crm.finance.read', 'crm.finance.write'));
+  const nextPayment = paymentState?.nextPayment || null;
+  const payLabel =
+    nextPayment?.kind === 'advance'
+      ? 'Pay Advance'
+      : nextPayment?.kind === 'invoice'
+        ? 'Pay Invoice Balance'
+        : paymentState && paymentState.paid > 0
+          ? 'Pay Remaining Balance'
+          : 'Pay Now';
   const canRaiseProforma =
     proformaEnabled &&
     canWriteFinance &&
@@ -594,6 +761,15 @@ export const QuotationDetailPage: React.FC = () => {
             {quote.status === 'Rejected' && (
               <span className="inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold bg-rose-50 text-rose-800 border border-rose-200">
                 Read-only
+              </span>
+            )}
+            {quote.status === 'Closed' && (
+              <span
+                data-testid="quotation-closed-note"
+                title={quote.closedReason || 'Another quotation of this opportunity was accepted'}
+                className="inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold bg-zinc-100 text-zinc-600 border border-zinc-200"
+              >
+                Closed — another quotation of this opportunity was accepted
               </span>
             )}
             {quote.isArchived && (
@@ -676,6 +852,15 @@ export const QuotationDetailPage: React.FC = () => {
               <HistoryIcon sx={{ fontSize: 15 }} /> Revise Quotation
             </button>
           )}
+          {id ? (
+            <ExtensionActions
+              page="quotationDetail"
+              record={{ type: 'quotation', id, data: quote }}
+              state={{ status: quote.status }}
+              onDone={(message) => void alert(message)}
+              onError={setError}
+            />
+          ) : null}
           {canConvertInvoice && (
             <button
               type="button"
@@ -734,10 +919,6 @@ export const QuotationDetailPage: React.FC = () => {
             ))}
         </div>
       </header>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-      )}
 
       {canWriteQuotes && portalLink && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950 shadow-2xs">
@@ -893,8 +1074,8 @@ export const QuotationDetailPage: React.FC = () => {
                   </p>
                   {payableNow.isAdvance && (
                     <p className="m-0 mt-0.5 text-zinc-500">
-                      Balance {formatFinanceMoney(payableNow.balance, quote.currency)}, invoiced
-                      with the tax invoice once the work is delivered.
+                      Balance {formatFinanceMoney(payableNow.balance, quote.currency)}, paid later with
+                      Pay Remaining Balance. At full payment the tax invoice is raised as Paid.
                     </p>
                   )}
                 </>
@@ -920,7 +1101,84 @@ export const QuotationDetailPage: React.FC = () => {
           </div>
 
           <div className="rounded-xl border border-zinc-300 bg-white p-5">
-            <h2 className="m-0 mb-1 text-sm font-semibold">Payment request</h2>
+            <h2 className="m-0 mb-1 text-sm font-semibold">Payment</h2>
+            {paymentState && (
+              <div data-testid="quotation-payment-status" className="mb-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Payment status</span>
+                  <span
+                    className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                      paymentState.status === 'Paid' || paymentState.stage === 'Advance Paid'
+                        ? 'bg-emerald-50 text-emerald-800'
+                        : paymentState.status === 'Partially Paid'
+                          ? 'bg-amber-50 text-amber-800'
+                          : 'bg-zinc-100 text-zinc-700'
+                    }`}
+                  >
+                    {paymentState.stage || paymentState.status}
+                  </span>
+                </div>
+                <dl className="m-0 mt-2 grid grid-cols-3 gap-2 text-sm">
+                  <div>
+                    <dt className="text-[11px] uppercase text-zinc-500">Quotation total</dt>
+                    <dd className="m-0 font-semibold tabular-nums">{formatFinanceMoney(paymentState.total, quote.currency)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] uppercase text-zinc-500">Paid</dt>
+                    <dd className="m-0 font-semibold tabular-nums">{formatFinanceMoney(paymentState.paid, quote.currency)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] uppercase text-zinc-500">{paymentState.isAdvanceFlow ? 'Remaining contract amount' : 'Balance'}</dt>
+                    <dd className="m-0 font-semibold tabular-nums">{formatFinanceMoney(paymentState.balance, quote.currency)}</dd>
+                  </div>
+                  {paymentState.isAdvanceFlow ? (
+                    <div>
+                      <dt className="text-[11px] uppercase text-zinc-500">Advance required</dt>
+                      <dd className="m-0 font-semibold tabular-nums">{formatFinanceMoney(paymentState.advanceRequired || 0, quote.currency)}</dd>
+                    </div>
+                  ) : null}
+                  {paymentState.isAdvanceFlow ? (
+                    <div>
+                      <dt className="text-[11px] uppercase text-zinc-500">Advance paid</dt>
+                      <dd className="m-0 font-semibold tabular-nums">{formatFinanceMoney(paymentState.advancePaid || 0, quote.currency)}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+                {paymentState.stage === 'Advance Paid' && (
+                  <p className="m-0 mt-2 text-xs text-emerald-800" data-testid="quotation-advance-paid">
+                    Advance payment received. {formatFinanceMoney(paymentState.advancePaid || 0, quote.currency)} paid.{' '}
+                    {formatFinanceMoney(paymentState.balance, quote.currency)} will be payable after the Tax Invoice is issued.
+                  </p>
+                )}
+                {paymentState.status !== 'Paid' && paymentState.invoiceId && (
+                  <p className="m-0 mt-2 text-xs text-zinc-700">
+                    Tax invoice{' '}
+                    <Link to={`/invoices/${paymentState.invoiceId}`} className="font-semibold text-zinc-950">
+                      {paymentState.invoiceNo || 'open'}
+                    </Link>{' '}
+                    issued: balance due {formatFinanceMoney(paymentState.invoiceBalance || 0, quote.currency)} is payable on the invoice.
+                  </p>
+                )}
+                {paymentState.status === 'Paid' && (
+                  <p className="m-0 mt-2 text-xs text-emerald-800">
+                    Paid in full — no further payment is taken.
+                    {paymentState.invoiceId && (
+                      <>
+                        {' '}Tax invoice{' '}
+                        <Link to={`/invoices/${paymentState.invoiceId}`} className="font-semibold text-emerald-900">
+                          {paymentState.invoiceNo || 'open'}
+                        </Link>
+                        {paymentState.invoiceStatus ? ` (${paymentState.invoiceStatus})` : ''}.
+                      </>
+                    )}
+                  </p>
+                )}
+                {paymentAccepts && quote.status === 'Sent' && isClient && (
+                  <p className="m-0 mt-2 text-xs text-zinc-600">Your payment confirms your acceptance of this quotation.</p>
+                )}
+              </div>
+            )}
+            <h3 className="m-0 mb-1 text-xs font-semibold text-zinc-700">Latest payment request</h3>
             {proforma ? (
               <>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -977,10 +1235,10 @@ export const QuotationDetailPage: React.FC = () => {
                     </div>
                   )}
                 </dl>
-                {!proformaOpen && !proforma.convertedInvoiceId && (
-                  <p className="m-0 mt-3 text-xs text-emerald-800">
-                    Paid in full. A tax invoice is raised from the proforma when the work is
-                    delivered.
+                {!proformaOpen && !proforma.convertedInvoiceId && paymentState?.status !== 'Paid' && (
+                  <p className="m-0 mt-3 text-xs text-zinc-600">
+                    This request is paid. The remaining balance is collected with the next payment; at full
+                    payment the tax invoice is raised and every payment moves onto it.
                   </p>
                 )}
               </>
@@ -1002,10 +1260,7 @@ export const QuotationDetailPage: React.FC = () => {
                   <CreditCardIcon sx={{ fontSize: 15 }} />
                   {paying
                     ? 'Opening Razorpay…'
-                    : `Pay ${formatFinanceMoney(
-                        proforma ? (proforma.balanceDue ?? proforma.grandTotal) : payableNow.amount,
-                        quote.currency
-                      )} now`}
+                    : `${payLabel} · ${formatFinanceMoney(nextPayment ? nextPayment.amount : payableNow.amount, quote.currency)}`}
                 </button>
               )}
               {canRaiseProforma && (
@@ -1080,7 +1335,7 @@ export const QuotationDetailPage: React.FC = () => {
               <dd className="m-0 font-medium capitalize">{quote.recipientType}</dd>
             </div>
             <div>
-              <dt className="text-[11px] uppercase text-zinc-500">Shipping state</dt>
+              <dt className="text-[11px] uppercase text-zinc-500">{terms.hideShipping ? 'Place of supply' : 'Shipping state'}</dt>
               <dd className="m-0 font-medium">{quote.shippingState}</dd>
             </div>
             {quote.description && (
@@ -1140,65 +1395,82 @@ export const QuotationDetailPage: React.FC = () => {
                 <span>Tax total</span>
                 <strong>{formatFinanceMoney(taxTotal, quote.currency)}</strong>
               </div>
+              {terms.hideShipping && !Number(totals.shippingCharge) ? null : (
               <div className="flex justify-between">
                 <span>Shipping</span>
                 <strong>{formatFinanceMoney(totals.shippingCharge, quote.currency)}</strong>
               </div>
+              )}
               <div className="flex justify-between border-t border-zinc-200 pt-2 text-base">
                 <span>Grand total</span>
                 <strong>{formatFinanceMoney(quote.grandTotal ?? totals.grandTotal, quote.currency)}</strong>
               </div>
+              {totalPer && totalPerCount > 0 ? (
+                <div className="flex justify-between gap-3 text-zinc-700" data-testid="quotation-total-per">
+                  <span>
+                    {totalPer.label} ({totalPerCount})
+                  </span>
+                  <strong>
+                    {formatFinanceMoney(Number(quote.grandTotal ?? totals.grandTotal) / totalPerCount, quote.currency)}
+                  </strong>
+                </div>
+              ) : null}
             </div>
           )}
         </section>
       </div>
 
+      {id &&
+        extensionSections.map((section) =>
+          section.slot ? (
+            <section
+              key={section.id}
+              data-extension-section={section.id}
+              className="rounded-xl border border-zinc-300 bg-white p-5"
+            >
+              <h3 className="text-xs font-bold text-zinc-950 uppercase tracking-wider m-0 mb-3">{section.label}</h3>
+              <ExtensionMount slot={section.slot} record={{ type: 'quotation', id, data: quote }} />
+            </section>
+          ) : null
+        )}
+
       <section className="rounded-xl border border-zinc-300 bg-white overflow-hidden">
-        <div className="px-5 py-3 border-b border-zinc-200 text-sm font-semibold">Line items</div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
-            <thead className="bg-zinc-50 text-[11px] uppercase text-zinc-500">
-              <tr>
-                <th className="px-4 py-2 text-left">Item</th>
-                <th className="px-4 py-2 text-right">Qty</th>
-                <th className="px-4 py-2 text-right">Rate</th>
-                <th className="px-4 py-2 text-right">Tax %</th>
-                <th className="px-4 py-2 text-right">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(quote.lineItems || []).map((line, index) => (
-                <tr key={`${line.name}-${index}`} className="border-t border-zinc-100">
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{line.name}</div>
-                    {line.description && (
-                      <div className="text-xs text-zinc-500">{line.description}</div>
-                    )}
-                    {line.fileUrl && !/amazonaws\.com/i.test(String(line.fileUrl)) && (
-                      <a
-                        href={line.fileUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-sky-700"
-                      >
-                        View attachment
-                      </a>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right">{line.qty}</td>
-                  <td className="px-4 py-3 text-right">
-                    {formatFinanceMoney(line.rate, quote.currency)}
-                  </td>
-                  <td className="px-4 py-3 text-right">{line.tax}</td>
-                  <td className="px-4 py-3 text-right font-semibold">
-                    {formatFinanceMoney(line.amount ?? line.qty * line.rate, quote.currency)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <div className="px-5 py-3 border-b border-zinc-200 text-sm font-semibold">{terms.hideShipping ? terms.lines : 'Line items'}</div>
+        {lineBuckets.length ? (
+          <div className="flex flex-col">
+            {lineBuckets.map((bucket) => (
+              <div key={bucket.key || '_other'} data-testid="quotation-line-group" data-group={bucket.key}>
+                <div className="px-5 py-2 border-b border-zinc-100 bg-zinc-50/60 text-xs font-semibold uppercase tracking-wide text-zinc-700">
+                  {bucket.title}
+                </div>
+                {renderLineTable(bucket.lines, bucket.fields)}
+              </div>
+            ))}
+          </div>
+        ) : (
+          renderLineTable(quote.lineItems || [], lineFields)
+        )}
       </section>
+
+      {hasQuoteFields && id && !isClient ? (
+        <div data-testid="quotation-extension-values">
+          <ExtensionFieldsSection record="quotation" recordId={id} readOnly />
+        </div>
+      ) : null}
+
+      {Array.isArray(quote.sections) && quote.sections.length ? (
+        <section className="rounded-xl border border-zinc-300 bg-white p-5" data-testid="quotation-detail-sections">
+          <h2 className="text-sm font-semibold m-0 mb-3">Terms &amp; details</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {quote.sections.map((s, i) => (
+              <div key={`${s.title}-${i}`} className="min-w-0">
+                <h3 className="m-0 mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">{s.title}</h3>
+                <p className="m-0 text-sm text-zinc-800 whitespace-pre-line break-words">{s.body}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {quote.recipientNotes && (
         <section className="rounded-xl border border-zinc-300 bg-white p-5">
@@ -1323,8 +1595,11 @@ export const QuotationDetailPage: React.FC = () => {
                 type="date"
                 className="h-9 rounded-lg border border-zinc-200 px-3 text-sm"
                 value={reviseValidTill}
+                min={reviseToday}
+                max={reviseRules.validTillMax || undefined}
                 onChange={(e) => setReviseValidTill(e.target.value)}
               />
+              {reviseLimitText ? <span className="text-[11px] text-zinc-500">Up to {reviseLimitText}.</span> : null}
             </label>
 
             <div className="mb-3 rounded-lg border border-zinc-200">

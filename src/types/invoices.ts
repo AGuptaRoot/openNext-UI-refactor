@@ -9,6 +9,7 @@ export type InvoiceStatus =
   | 'Overdue'
   | 'Written Off'
   | 'Cancelled'
+  | 'Converted'
   | string;
 
 export interface InvoiceReminder {
@@ -43,6 +44,8 @@ export type InvoiceDocumentType = 'tax' | 'proforma';
 export interface InvoiceItem {
   _id: string;
   invoiceNo: string;
+  /** From verified payments (CRM 3.28.0): Unpaid / Partially Paid / Paid. */
+  paymentStatus?: 'Unpaid' | 'Partially Paid' | 'Paid';
   documentType?: InvoiceDocumentType;
   issueDate: string;
   dueDate: string;
@@ -88,6 +91,12 @@ export interface InvoiceItem {
   taxTotal?: number;
   grandTotal: number;
   amountPaid?: number;
+  /** The won opportunity this invoice bills. */
+  opportunityId?: string | null;
+  /** The advance carried from the proforma at conversion. */
+  advancePaid?: number;
+  /** From the verified payment records (server): total, paid, advance, credit, balance. */
+  paymentSummary?: { total: number; paid: number; advancePaid: number; credit: number; balance: number; status: string } | null;
   creditAmount?: number;
   creditNoteIds?: string[];
   balanceDue?: number;

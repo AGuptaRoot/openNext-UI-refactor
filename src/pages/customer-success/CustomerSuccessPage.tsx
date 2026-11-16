@@ -25,6 +25,8 @@ import {
   healthCategoryTone,
 } from '../../types/customerSuccess';
 import { triggerFileDownload } from '../../utils/fileDownload';
+import { useNotifyMessage } from '@/components/notifications';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 
 type MainTab = 'accounts' | 'reviews';
 type CsatModalStep = 1 | 2 | 3 | 4;
@@ -56,6 +58,8 @@ function categoryChipClass(active: boolean): string {
 
 export const CustomerSuccessPage: React.FC = () => {
   const { isClient, isLeadPortal, user } = useAuth();
+  // Tickets hidden by the active extension: no Open Tickets column.
+  const ticketsVisible = useActiveExtension().isModuleVisible('tickets');
   const myClientId = String(user?.clientId || '').trim();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
@@ -75,6 +79,8 @@ export const CustomerSuccessPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
+  useNotifyMessage(success, 'success', () => setSuccess(''));
   const [exportOpen, setExportOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStep, setModalStep] = useState<CsatModalStep>(1);
@@ -407,15 +413,6 @@ export const CustomerSuccessPage: React.FC = () => {
         </div>
       </header>
 
-      {error && !modalOpen && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-      )}
-      {success && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
-          {success}
-        </div>
-      )}
-
       <section data-tour="cs-kpis" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
           {
@@ -523,7 +520,7 @@ export const CustomerSuccessPage: React.FC = () => {
                     <th className="px-4 py-3 font-semibold">Health Score</th>
                     <th className="px-4 py-3 font-semibold">Orders</th>
                     <th className="px-4 py-3 font-semibold">Avg CSAT</th>
-                    <th className="px-4 py-3 font-semibold">Open Tickets</th>
+                    {ticketsVisible && <th className="px-4 py-3 font-semibold">Open Tickets</th>}
                     <th className="px-4 py-3 font-semibold">Overdue Invoices</th>
                     <th className="px-4 py-3 font-semibold">Recommended Action</th>
                   </tr>
@@ -574,7 +571,7 @@ export const CustomerSuccessPage: React.FC = () => {
                           {account.factors.avgCsat != null ? account.factors.avgCsat.toFixed(1) : '—'} / 5
                         </span>
                       </td>
-                      <td className="px-4 py-3">
+                      {ticketsVisible && <td className="px-4 py-3">
                         <span
                           className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${
                             account.factors.openTickets > 0
@@ -585,7 +582,7 @@ export const CustomerSuccessPage: React.FC = () => {
                           <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
                           {account.factors.openTickets} Open
                         </span>
-                      </td>
+                      </td>}
                       <td className="px-4 py-3">
                         <span
                           className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold ${
@@ -758,12 +755,6 @@ export const CustomerSuccessPage: React.FC = () => {
             </div>
 
             <div className="flex-1 overflow-y-auto px-5 py-4">
-              {error && modalOpen && (
-                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  {error}
-                </div>
-              )}
-
               <div className="mb-5 flex gap-2">
                 {[1, 2, 3, 4].map((step) => (
                   <div

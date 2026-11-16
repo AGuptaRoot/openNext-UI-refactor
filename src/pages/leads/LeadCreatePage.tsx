@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
@@ -30,6 +30,7 @@ import {
   validateContactForm,
 } from '../../components/contacts/ContactFormFields';
 import { ContactDuplicateBanner } from '../../components/contacts/ContactDuplicateBanner';
+import { ContactCompanyEditModal } from '../../components/contacts/ContactCompanyEditModal';
 import { useContactDuplicates } from '../../components/contacts/useContactDuplicates';
 import {
   PIPELINE_STAGES as DEFAULT_PIPELINE_STAGES,
@@ -51,7 +52,14 @@ import {
   buildExtensionPayloadFromFields,
   validateExtensionFields,
 } from '../../components/extensions/ExtensionFieldsSlot';
+import { ExtensionCreateFields } from '../../components/extensions';
+import { extensionDataApi } from '../../services/extensionDataApi';
+import { invalidFieldValue, missingRequiredFields } from '../../utils/extensionFieldLogic';
 import { useExtensions } from '../../hooks/useExtensions';
+import { useNotifyMessage, notify } from '@/components/notifications';
+import { ClientCompanyMatchModal } from '../../components/leads/ClientCompanyMatchModal';
+import { useSalesFlowConfig } from '../../hooks/useSalesFlowConfig';
+import { useExistingClientMatch } from '../../hooks/useExistingClientMatch';
 
 const CONTACT_SEARCH_LIMIT = 8;
 
@@ -80,8 +88,10 @@ const localDateInputValue = (): string => {
 
 export const LeadCreatePage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const presetContactId = String(searchParams.get('contactId') || '').trim();
   const { hasPermission, user, isClient, activeRole } = useAuth();
-  const { extension: activeExtension } = useActiveExtension();
+  const { extension: activeExtension, declarations: extDeclarations } = useActiveExtension();
   const fixedRequestTypeKey = String(activeExtension.requestTypeKey || '').trim().toLowerCase();
   const { confirm } = useDialog();
   const {
@@ -90,6 +100,8 @@ export const LeadCreatePage: React.FC = () => {
     summary: extensionSummary,
   } = useExtensions();
   const canWrite = hasPermission('crm.leads.write');
+  // Same rule as PUT /contacts/:id (crm.contacts.write or crm.leads.write).
+  const canEditContact = hasPermission('crm.contacts.write') || canWrite;
   const canAssignOthers = canAssignToOtherUsers(user, { isClient, activeRole });
   const currentUserId = String(user?.userId || '').trim();
   const settingsCurrency = useDefaultCurrency();
@@ -99,6 +111,7 @@ export const LeadCreatePage: React.FC = () => {
   const [extensionFieldValues, setExtensionFieldValues] = useState<
     Record<string, Record<string, unknown>>
   >({});
+  const [extensionValues, setExtensionValues] = useState<Record<string, unknown>>({});
 
   // Metadata
   const [pipelineStages, setPipelineStages] = useState<string[]>([]);
@@ -131,6 +144,9 @@ export const LeadCreatePage: React.FC = () => {
 
   // B) Contact person
   const [selectedContact, setSelectedContact] = useState<PersonContact | null>(null);
+  /** Matched-contact flow: the existing contact whose Company Name is being edited, and the one edited. */
+  const [editingContact, setEditingContact] = useState<PersonContact | null>(null);
+  const [matchedContactId, setMatchedContactId] = useState('');
   const [contactQuery, setContactQuery] = useState('');
   const [contactResults, setContactResults] = useState<PersonContact[]>([]);
   const [contactSearching, setContactSearching] = useState(false);
@@ -164,7 +180,7 @@ export const LeadCreatePage: React.FC = () => {
   const [duplicateMatches, setDuplicateMatches] = useState<LeadItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const errorRef = useRef<HTMLDivElement>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
 
   // Modals
   const [showAddSourceModal, setShowAddSourceModal] = useState(false);
@@ -174,6 +190,44 @@ export const LeadCreatePage: React.FC = () => {
   const [showAddCustomFieldModal, setShowAddCustomFieldModal] = useState(false);
   const [showOcrImportModal, setShowOcrImportModal] = useState(false);
   const [showDiscrepancyModal, setShowDiscrepancyModal] = useState(false);
+  /**
+   * CRM 3.46.0: the NEW contact's company already exists as a Client. The user chooses "Add as Secondary
+   * Contact" (no lead) or "Continue Creating Lead"; nothing is linked only because the names match.
+   * `resume` is the create step that asked ('submit' = the form, 'duplicate' = Create new lead despite a
+   * duplicate contact). A company the user already answered for is not asked again.
+   */
+  const salesFlow = useSalesFlowConfig();
+  // CRM 3.48.0: the shared Existing Client Found flow (also on Client create and Contact create).
+  const clientMatch = useExistingClientMatch<'submit' | 'duplicate' | 'existing'>();
+  /** CRM 3.50.5: the existing contact chosen in the duplicate banner, while the modal asks about it. */
+  const matchContactRef = useRef<PersonContact | null>(null);
+  /**
+   * CRM 3.47.0: the active extension's "sync" checkbox (e.g. Sync Travel Information to Client), checked by
+   * default, shown only when the extension allows it for the selected client (checked on the server again).
+   */
+  const leadFormSync = salesFlow.clientQuotation?.leadFormSync || null;
+  const [syncChecked, setSyncChecked] = useState(true);
+  const [syncAvailable, setSyncAvailable] = useState<boolean | null>(null);
+  const syncClientId = clientMatch.selectedId;
+  useEffect(() => {
+    if (!leadFormSync || !syncClientId) {
+      setSyncAvailable(null);
+      return undefined;
+    }
+    let alive = true;
+    setSyncAvailable(null);
+    crmApi
+      .getClientLeadFormSyncStatus(syncClientId)
+      .then((res) => {
+        if (alive) setSyncAvailable(res.data?.available === true);
+      })
+      .catch(() => {
+        if (alive) setSyncAvailable(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [leadFormSync, syncClientId]);
 
   // Email / phone / name that will end up on the lead (drives duplicate & discrepancy checks)
   const leadName = selectedContact ? selectedContact.name || '' : newContact.name;
@@ -235,7 +289,8 @@ export const LeadCreatePage: React.FC = () => {
                   const displayName = u.displayName || u.name || u.username || u.email || 'User';
                   return { ...u, id, name: u.name || displayName, displayName };
                 })
-                .filter((u) => u.id)
+                // CRM 3.50.5: never offer a user whose only label is a raw id (no account name found).
+                .filter((u) => u.id && !/^[a-f0-9]{24}$/i.test(String(u.displayName).trim()))
             : [];
         const customFieldList =
           cfRes.status === 'fulfilled' && Array.isArray(cfRes.value.data) ? cfRes.value.data : [];
@@ -389,7 +444,7 @@ export const LeadCreatePage: React.FC = () => {
   /*
    * The active CRM extension (Settings → Extensions) fixes the Request Type.
    * The API already returns only that type (plus any contributed by a CMS
-   * extension such as crm-travel), so with a single option the field is
+   * extension), so with a single option the field is
    * shown read-only and selected automatically.
    */
   const fixedRequestType = useMemo(
@@ -428,11 +483,6 @@ export const LeadCreatePage: React.FC = () => {
     window.addEventListener('crm-leads-tour-open-contact-form', onTourOpen);
     return () => window.removeEventListener('crm-leads-tour-open-contact-form', onTourOpen);
   }, []);
-
-  // Bring validation / API errors into view (the banner sits at the top of a long form)
-  useEffect(() => {
-    if (error) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [error]);
 
   // Close contact dropdown on outside click
   useEffect(() => {
@@ -490,6 +540,21 @@ export const LeadCreatePage: React.FC = () => {
     return () => window.clearTimeout(timer);
   }, [leadEmail, leadPhone]);
 
+  // ?contactId= (Client → Create Quotation): the enquiry is for that existing contact.
+  const presetContactDone = useRef(false);
+  useEffect(() => {
+    if (!presetContactId || presetContactDone.current) return;
+    presetContactDone.current = true;
+    crmApi
+      .getContact(presetContactId)
+      .then((res) => {
+        if (res.data && res.data._id) chooseContact(res.data);
+      })
+      .catch(() => {
+        /* the contact is picked by hand */
+      });
+  }, [presetContactId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ─── Contact helpers ──────────────────────────────────────────────────────
   const chooseContact = (contact: PersonContact) => {
     setSelectedContact(contact);
@@ -499,6 +564,8 @@ export const LeadCreatePage: React.FC = () => {
     setContactDropdownOpen(false);
     clearContactDuplicates();
     setError(null);
+    const compName = String(contact.companyName || (contact as any).company || '').trim();
+    setCompany(compName);
   };
 
   /** Create the lead linked to an already-resolved contact. */
@@ -513,7 +580,7 @@ export const LeadCreatePage: React.FC = () => {
       key: selectedRt?.key,
       name: selectedRt?.name || requestType,
     });
-    const primaryTravellerName = selectedContact
+    const primaryContactName = selectedContact
       ? formatContactName(selectedContact)
       : showCreateContact
         ? newContact.name
@@ -531,7 +598,7 @@ export const LeadCreatePage: React.FC = () => {
       { key: selectedRt?.key, name: selectedRt?.name || requestType },
       {
         preparedBy: preparedByLabel,
-        primaryTraveller: primaryTravellerName,
+        primaryContact: primaryContactName,
         defaultCurrency: settingsCurrency,
       }
     );
@@ -578,6 +645,9 @@ export const LeadCreatePage: React.FC = () => {
       allowSimilarCompany: allowExactDuplicate,
       confirmDifferentCompany: options.confirmDifferentCompany,
     });
+    if (created?.data?._id && Object.keys(extensionValues).length > 0) {
+      await extensionDataApi.setValues('lead', created.data._id, extensionValues).catch((err) => console.warn('Extension values save error:', err));
+    }
     const detailTabs = leadTabsForRequestType({
       key: selectedRt?.key,
       name: selectedRt?.name || requestType,
@@ -600,35 +670,137 @@ export const LeadCreatePage: React.FC = () => {
     );
   };
 
-  /** Option 1 — use existing contact, then create the lead immediately. */
+  /**
+   * Option 1 — use the existing contact. It is selected straight away (no lead fields are needed for
+   * that); the lead is created at once only when its own details are already filled in, otherwise the
+   * user continues with the form and creates it as usual.
+   */
   const handleChooseExistingContactAndCreate = async (contact: PersonContact) => {
     if (!canWrite || saving) return;
     setError(null);
-    if (!title.trim()) {
-      setError('Lead Title is required.');
+    chooseContact(contact);
+    setMatchedContactId(contact._id);
+    // The company typed on the form (state) is what the lead is created with in this same click.
+    const ready =
+      Boolean(title.trim()) &&
+      Boolean(company.trim()) &&
+      Boolean(requestType.trim() && requestTypeId.trim()) &&
+      Boolean(stage);
+    if (!ready) {
+      window.setTimeout(() => {
+        const el = document.querySelector('[data-tour="leads-field-title"]');
+        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        (el?.querySelector('input') as HTMLInputElement | null)?.focus();
+      }, 50);
       return;
     }
-    if (!company.trim()) {
-      setError('Company Name is required.');
-      return;
-    }
-    if (!requestType.trim() || !requestTypeId.trim()) {
-      setError('Request Type is required.');
-      return;
-    }
-    if (!stage) {
-      setError('Stage is required.');
-      return;
-    }
+    // CRM 3.50.5: an existing contact whose company (or the contact itself) already is a Client asks first.
+    matchContactRef.current = contact;
+    if (await askClientCompanyMatch('existing', contact)) return;
     // Do not block: existing contact may already have other leads with same email/phone/PAN.
-
     setSaving(true);
     try {
-      chooseContact(contact);
       await createLeadWithContact(contact, { allowExactDuplicate: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to create lead');
       setSaving(false);
+    }
+  };
+
+  // ─── CRM 3.46.0: the new contact's company is an existing Client (shared flow, 3.48.0) ────────────
+  /**
+   * Asks when the company is an existing Client, or (3.50.5) when the chosen existing contact already
+   * belongs to one — for a new contact and for a picked existing contact alike. true = wait for the answer.
+   */
+  const askClientCompanyMatch = async (
+    resume: 'submit' | 'duplicate' | 'existing',
+    existing: PersonContact | null = selectedContact
+  ): Promise<boolean> => {
+    const shown = await clientMatch.ask({ company: company.trim(), personContactId: existing?._id || undefined }, resume);
+    if (shown) setSyncChecked(true);
+    return shown;
+  };
+
+  const handleClientMatchContinue = () => {
+    const resume = clientMatch.continueAnyway();
+    if (resume === 'duplicate') void handleCreateNewLeadDespiteDuplicate();
+    else if (resume === 'submit') void handleSubmit({ preventDefault() {} } as React.FormEvent);
+    else if (resume === 'existing' && matchContactRef.current) void handleChooseExistingContactAndCreate(matchContactRef.current);
+  };
+
+  const handleClientMatchAddSecondary = async () => {
+    if (!clientMatch.open || clientMatch.busy) return;
+    const match = clientMatch.selected;
+    if (!match || !match.canAddContact) return;
+    // 3.50.5: an existing contact (picked, or chosen in the duplicate banner) is linked as it is — no new contact.
+    const existingContact = clientMatch.resume === 'existing' ? matchContactRef.current : selectedContact;
+    if (!existingContact) {
+      const contactError = validateContactForm(newContact, { requireReachability: true });
+      if (contactError) {
+        clientMatch.setError(contactError);
+        return;
+      }
+    }
+    clientMatch.setBusy(true);
+    clientMatch.setError(null);
+    try {
+      const input = existingContact
+        ? { name: formatContactName(existingContact) || existingContact.name }
+        : contactFormToInput(newContact);
+      if (!existingContact && !input.companyName && company.trim()) input.companyName = company.trim();
+      const res = await crmApi.addSecondaryClientContact(
+        match.id,
+        existingContact
+          ? { name: input.name, personContactId: existingContact._id, source: 'lead' }
+          : {
+              ...input,
+              // "Create new lead" despite a duplicate contact: the user already chose to keep the duplicate.
+              allowDuplicate: clientMatch.resume === 'duplicate',
+              source: 'lead',
+            }
+      );
+      const result = res.data;
+      const clientName = result?.client?.name || match.name;
+      const personName = result?.contact?.name || input.name;
+      // The contact is added first; the copy is a second step the extension may still refuse (it says why).
+      let synced = false;
+      let syncProblem = '';
+      if (leadFormSync && syncAvailable === true && syncChecked) {
+        try {
+          const syncRes = await crmApi.syncClientLeadForm(match.id, extensionValues);
+          synced = syncRes.data?.synced === true;
+        } catch (syncErr: unknown) {
+          syncProblem = syncErr instanceof Error ? syncErr.message : 'Not copied';
+        }
+      }
+      notify.success(
+        result?.alreadyLinked
+          ? `${personName} is already a contact of ${clientName}.`
+          : `${personName} was added to ${clientName} as a Secondary Contact.`
+      );
+      if (syncProblem && leadFormSync) notify.warning(`${leadFormSync.label}: not done. ${syncProblem}`);
+      clientMatch.close();
+      // Synced → the extension's client tab (where the copied values are); otherwise the client as usual.
+      const tab = String(salesFlow.clientQuotation?.clientTab || '').trim();
+      navigate(
+        synced && tab
+          ? `/clients/${encodeURIComponent(match.id)}?tab=${encodeURIComponent(`decl_${tab}`)}`
+          : `/clients/${encodeURIComponent(match.id)}`
+      );
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 409 && Array.isArray(err.duplicates)) {
+        // Same email / mobile / PAN as an existing contact: choose it, or Create new lead (asks again).
+        clientMatch.close();
+        setContactDuplicates(err.duplicates as PersonContact[]);
+        setError('Matching contact found (email / mobile / PAN). Choose existing contact or Create new lead below.');
+        document
+          .getElementById('lead-create-contact-duplicate-alert')
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else {
+        clientMatch.setError(err instanceof Error ? err.message : 'Failed to add the contact to the client');
+      }
+    } finally {
+      clientMatch.setBusy(false);
     }
   };
 
@@ -661,6 +833,7 @@ export const LeadCreatePage: React.FC = () => {
       setError('Stage is required.');
       return;
     }
+    if (!selectedContact && (await askClientCompanyMatch('duplicate'))) return;
     if (!(await confirmDuplicateLeadsIfNeeded())) return;
 
     setSaving(true);
@@ -688,39 +861,30 @@ export const LeadCreatePage: React.FC = () => {
   const clearSelectedContact = () => {
     setSelectedContact(null);
     setContactQuery('');
+    setCompany('');
   };
-
-  const [contactCompanyEdited, setContactCompanyEdited] = useState(false);
 
   const openCreateContact = () => {
     setSelectedContact(null);
     setShowCreateContact(true);
     setContactDropdownOpen(false);
-    setContactCompanyEdited(false);
+    setCompany('');
     setNewContact((prev) => ({
-      ...prev,
+      ...EMPTY_CONTACT_FORM,
       name: prev.name || contactQuery.trim(),
-      companyName: company.trim() || prev.companyName,
     }));
   };
 
-  // Automatically fetch / prefill company name from lead to contact, unless user edited it
-  useEffect(() => {
-    if (showCreateContact && company.trim() && !contactCompanyEdited) {
-      setNewContact((prev) => (prev.companyName !== company.trim() ? { ...prev, companyName: company.trim() } : prev));
-    }
-  }, [company, showCreateContact, contactCompanyEdited]);
-
   const cancelCreateContact = () => {
     setShowCreateContact(false);
-    setContactCompanyEdited(false);
     setNewContact({ ...EMPTY_CONTACT_FORM });
     clearContactDuplicates();
+    setCompany('');
   };
 
   const patchNewContact = (patch: Partial<ContactFormValues>) => {
     if (patch.companyName !== undefined) {
-      setContactCompanyEdited(true);
+      setCompany(String(patch.companyName || '').trim());
     }
     setNewContact((prev) => ({ ...prev, ...patch }));
   };
@@ -915,7 +1079,6 @@ export const LeadCreatePage: React.FC = () => {
     setContactResults([]);
     setContactDropdownOpen(false);
     setShowCreateContact(true);
-    setContactCompanyEdited(false);
     setNewContact({
       ...EMPTY_CONTACT_FORM,
       salutation,
@@ -957,6 +1120,19 @@ export const LeadCreatePage: React.FC = () => {
     ) {
       return 'Select a valid enabled Request Type.';
     }
+    // Required fields declared by the active workspace extension.
+    {
+      const rtKey = requestTypes.find((rt) => rt._id === requestTypeId)?.key || requestType;
+      const missingExt = missingRequiredFields(extDeclarations.fields?.lead || [], extensionValues, rtKey);
+      if (missingExt.length) return `${missingExt.join(', ')} ${missingExt.length > 1 ? 'are' : 'is'} required.`;
+      // The server's value rules (e.g. Travel Start Date not in the past, end not before start), checked
+      // before the lead is created so it is never saved without them.
+      const leadFields = (extDeclarations.fields?.lead || [])
+        .filter((g) => !g.whenRequestTypeKey || g.whenRequestTypeKey === rtKey)
+        .flatMap((g) => g.fields);
+      const badExt = invalidFieldValue(leadFields, extensionValues, null);
+      if (badExt) return badExt;
+    }
     if (!stage) return 'Stage is required.';
     if (nextFollowUp && nextFollowUp < localDateInputValue()) {
       return 'Next follow-up date cannot be in the past.';
@@ -997,6 +1173,9 @@ export const LeadCreatePage: React.FC = () => {
       setError(validationError);
       return;
     }
+    // A known duplicate contact is answered first (the banner below); its "Create new lead" asks this then.
+    // A known duplicate contact is answered first (the banner below). 3.50.5: a picked existing contact asks too.
+    if (contactDuplicates.length === 0 && (await askClientCompanyMatch('submit'))) return;
     if (!(await confirmDuplicateLeadsIfNeeded())) return;
 
     // Check company discrepancy (different company with same email/phone/name)
@@ -1173,15 +1352,29 @@ export const LeadCreatePage: React.FC = () => {
         ) : null}
       </div>
 
+      {editingContact ? (
+        <ContactCompanyEditModal
+          contact={editingContact}
+          onClose={() => setEditingContact(null)}
+          onSaved={(saved) => {
+            // The same contact stays selected, shown with its saved data; nothing new is created.
+            setEditingContact(null);
+            setMatchedContactId(saved._id);
+            chooseContact(saved);
+          }}
+        />
+      ) : null}
+
       {/* Duplicate contact alert kept near contact section while creating */}
       {contactDuplicates.length > 0 && !showCreateContact ? (
         <ContactDuplicateBanner
           duplicates={contactDuplicates}
           onUseContact={(c) => void handleChooseExistingContactAndCreate(c)}
+          onEditContact={canEditContact ? (c) => setEditingContact(c) : undefined}
           onCreateNewLead={() => void handleCreateNewLeadDespiteDuplicate()}
-          actionLabel="Choose existing contact"
+          actionLabel="Use Existing Contact"
           createNewLabel="Create new lead"
-          option1Title="Option 1 — Choose existing contact"
+          option1Title="Option 1 — Use existing contact"
           option2Title="Option 2 — Create new lead"
           option2Description={
             <>
@@ -1218,21 +1411,217 @@ export const LeadCreatePage: React.FC = () => {
         </div>
       )}
 
-      {/* Error Message */}
-      {error && (
-        <div
-          ref={errorRef}
-          role="alert"
-          className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold p-3.5 rounded-xl"
-        >
-          {error}
-        </div>
-      )}
-
       <form data-tour="leads-create-form" onSubmit={handleSubmit} className="flex flex-col gap-6">
-        {/* A) Lead */}
+        {/* A) Contact person */}
+        <section data-tour="leads-field-contact" className={sectionCls}>
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-4 pb-2 border-b border-zinc-100">
+            <h3 className="text-xs font-bold text-zinc-950 uppercase tracking-wider m-0">
+              A. Contact Person
+            </h3>
+            {!showCreateContact && (
+              <button
+                type="button"
+                onClick={openCreateContact}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-900 bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 px-2.5 py-1 rounded cursor-pointer"
+              >
+                <AddIcon sx={{ fontSize: 13 }} />
+                Create contact
+              </button>
+            )}
+          </div>
+
+          {selectedContact ? (
+            <>
+            <div className="flex items-center justify-between gap-3 border border-zinc-300 bg-zinc-50 rounded-lg p-3 text-xs">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-lg bg-zinc-950 text-white flex items-center justify-center font-bold overflow-hidden shrink-0">
+                  {selectedContact.photoUrl ? (
+                    <img
+                      src={selectedContact.photoUrl}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    (selectedContact.name.charAt(0) || 'C').toUpperCase()
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <span className="block font-semibold text-zinc-950 truncate">
+                    {formatContactName(selectedContact)}
+                  </span>
+                  <span className="block text-[11px] text-zinc-500 truncate">
+                    {[selectedContact.companyName, selectedContact.jobTitle, selectedContact.email, selectedContact.phone]
+                      .filter(Boolean)
+                      .join(' · ') || '—'}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {canEditContact && matchedContactId && matchedContactId === selectedContact._id ? (
+                  <button
+                    type="button"
+                    onClick={() => setEditingContact(selectedContact)}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-700 hover:text-zinc-950 bg-white border border-zinc-300 px-2.5 py-1 rounded cursor-pointer"
+                  >
+                    Edit Contact
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={clearSelectedContact}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-700 hover:text-zinc-950 bg-white border border-zinc-300 px-2.5 py-1 rounded cursor-pointer"
+                >
+                  <CloseIcon sx={{ fontSize: 13 }} />
+                  Change
+                </button>
+              </div>
+            </div>
+            {/* One portal user per Contact: the new lead reuses it; Create Portal is not offered. */}
+            {selectedContact.IsportalAssigned === true ? (
+              <p
+                role="status"
+                data-testid="lead-create-contact-portal-assigned"
+                className="m-0 mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-800"
+              >
+                This contact already has portal access. The existing portal login is reused for this lead.
+              </p>
+            ) : null}
+            </>
+          ) : !showCreateContact ? (
+            <div ref={contactPickerRef} className="relative text-xs">
+              <label className={labelCls}>Search existing contact</label>
+              <div className="relative">
+                <SearchIcon
+                  sx={{ fontSize: 16 }}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none"
+                />
+                <input
+                  type="text"
+                  value={contactQuery}
+                  onChange={(e) => {
+                    setContactQuery(e.target.value);
+                    setContactDropdownOpen(true);
+                  }}
+                  onFocus={() => setContactDropdownOpen(true)}
+                  placeholder="Search by name, email or mobile…"
+                  autoComplete="off"
+                  className={`${inputCls} pl-8`}
+                />
+              </div>
+              {contactDropdownOpen && (
+                <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-zinc-300 rounded-lg shadow-lg max-h-72 overflow-y-auto">
+                  {contactSearching ? (
+                    <p className="m-0 p-3 text-zinc-500">Searching contacts…</p>
+                  ) : contactSearchError ? (
+                    <p className="m-0 p-3 text-red-600">{contactSearchError}</p>
+                  ) : contactResults.length === 0 ? (
+                    <div className="p-3 text-zinc-500">
+                      <p className="m-0 mb-2">
+                        {contactQuery.trim()
+                          ? 'No contacts match your search.'
+                          : 'No contacts yet.'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={openCreateContact}
+                        className="text-[11px] font-semibold text-zinc-950 underline bg-transparent border-none cursor-pointer p-0"
+                      >
+                        Create a new contact
+                      </button>
+                    </div>
+                  ) : (
+                    <ul className="list-none m-0 p-0 divide-y divide-zinc-100">
+                      {contactResults.map((c) => (
+                        <li key={c._id}>
+                          <button
+                            type="button"
+                            onClick={() => chooseContact(c)}
+                            className="w-full text-left px-3 py-2 bg-white hover:bg-zinc-50 border-none cursor-pointer flex items-center gap-2.5"
+                          >
+                            <span className="w-7 h-7 rounded-md bg-zinc-950 text-white flex items-center justify-center text-[11px] font-bold overflow-hidden shrink-0">
+                              {c.photoUrl ? (
+                                <img src={c.photoUrl} alt="" className="w-full h-full object-cover" />
+                              ) : (
+                                (c.name.charAt(0) || 'C').toUpperCase()
+                              )}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block font-semibold text-zinc-950 truncate">
+                                {formatContactName(c)}
+                              </span>
+                              <span className="block text-[11px] text-zinc-500 truncate">
+                                {[c.jobTitle, c.email, c.phone].filter(Boolean).join(' · ') || '—'}
+                              </span>
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+              <p className="text-[11px] text-zinc-500 mt-1.5 mb-0">
+                Pick an existing contact, or use “Create contact” to add a new person.
+              </p>
+            </div>
+          ) : null}
+
+          {showCreateContact && !selectedContact && (
+            <div className="border border-zinc-200 rounded-xl p-4 bg-zinc-50/50">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-xs font-bold text-zinc-900 m-0">New contact</h4>
+                <button
+                  type="button"
+                  onClick={cancelCreateContact}
+                  className="text-[11px] font-semibold text-zinc-600 hover:text-zinc-950 hover:underline bg-transparent border-none cursor-pointer"
+                >
+                  Cancel — search existing instead
+                </button>
+              </div>
+
+              <div id="lead-create-contact-duplicate-alert" className="mb-3">
+                <ContactDuplicateBanner
+                  duplicates={contactDuplicates}
+                  onUseContact={(c) => void handleChooseExistingContactAndCreate(c)}
+                  onEditContact={canEditContact ? (c) => setEditingContact(c) : undefined}
+                  onCreateNewLead={() => void handleCreateNewLeadDespiteDuplicate()}
+                  actionLabel="Use Existing Contact"
+                  createNewLabel="Create new lead"
+                  option1Title="Option 1 — Use existing contact"
+                  option2Title="Option 2 — Create new lead"
+                  option2Description={
+                    <>
+                      Creates a <strong>new contact</strong> with the same email / mobile / PAN and
+                      then creates the lead.
+                    </>
+                  }
+                  busy={saving}
+                  onDismiss={clearContactDuplicates}
+                  checking={contactDupChecking}
+                />
+              </div>
+
+              <ContactFormFields
+                values={newContact}
+                onChange={patchNewContact}
+                requireReachability
+                disabled={saving}
+                tourPrefix="leads-field"
+                onFieldBlur={(vals) => void checkContactDuplicates(vals)}
+                onUploadError={setError}
+              />
+              <p className="text-[11px] text-zinc-500 mt-3 mb-0">
+                The contact is saved to the Contacts directory when you create the lead. If email,
+                mobile or PAN already exists, choose <strong>Choose existing contact</strong> or{' '}
+                <strong>Create new lead</strong> — either option creates the lead.
+              </p>
+            </div>
+          )}
+        </section>
+
+        {/* B) Lead Details */}
         <section className={sectionCls}>
-          <h3 className={sectionTitleCls}>A. Lead</h3>
+          <h3 className={sectionTitleCls}>B. Lead Details</h3>
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 text-xs">
             <div data-tour="leads-field-title" className="sm:col-span-6">
               <label className={labelCls}>Lead Title *</label>
@@ -1248,15 +1637,21 @@ export const LeadCreatePage: React.FC = () => {
             </div>
 
             <div data-tour="leads-field-company" className="sm:col-span-6">
-              <label className={labelCls}>Company Name *</label>
+              <label className={labelCls}>
+                Company Name *{' '}
+                <span className="text-[11px] font-normal text-zinc-500 dark:text-zinc-400">
+                  (Synced from contact person)
+                </span>
+              </label>
               <input
                 type="text"
                 required
+                readOnly={true}
                 maxLength={120}
                 value={company}
                 onChange={(e) => setCompany(e.target.value)}
-                placeholder="Acme Global Solutions Pvt Ltd"
-                className={inputCls}
+                placeholder="Auto-filled from contact person"
+                className={`${inputCls} bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 cursor-not-allowed`}
               />
             </div>
 
@@ -1481,189 +1876,6 @@ export const LeadCreatePage: React.FC = () => {
           </div>
         </section>
 
-        {/* B) Contact person */}
-        <section data-tour="leads-field-contact" className={sectionCls}>
-          <div className="flex items-center justify-between gap-3 flex-wrap mb-4 pb-2 border-b border-zinc-100">
-            <h3 className="text-xs font-bold text-zinc-950 uppercase tracking-wider m-0">
-              B. Contact Person
-            </h3>
-            {!showCreateContact && (
-              <button
-                type="button"
-                onClick={openCreateContact}
-                className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-900 bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 px-2.5 py-1 rounded cursor-pointer"
-              >
-                <AddIcon sx={{ fontSize: 13 }} />
-                Create contact
-              </button>
-            )}
-          </div>
-
-          {selectedContact ? (
-            <div className="flex items-center justify-between gap-3 border border-zinc-300 bg-zinc-50 rounded-lg p-3 text-xs">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-lg bg-zinc-950 text-white flex items-center justify-center font-bold overflow-hidden shrink-0">
-                  {selectedContact.photoUrl ? (
-                    <img
-                      src={selectedContact.photoUrl}
-                      alt=""
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    (selectedContact.name.charAt(0) || 'C').toUpperCase()
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <span className="block font-semibold text-zinc-950 truncate">
-                    {formatContactName(selectedContact)}
-                  </span>
-                  <span className="block text-[11px] text-zinc-500 truncate">
-                    {[selectedContact.jobTitle, selectedContact.email, selectedContact.phone]
-                      .filter(Boolean)
-                      .join(' · ') || '—'}
-                  </span>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={clearSelectedContact}
-                className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-700 hover:text-zinc-950 bg-white border border-zinc-300 px-2.5 py-1 rounded cursor-pointer shrink-0"
-              >
-                <CloseIcon sx={{ fontSize: 13 }} />
-                Change
-              </button>
-            </div>
-          ) : !showCreateContact ? (
-            <div ref={contactPickerRef} className="relative text-xs">
-              <label className={labelCls}>Search existing contact</label>
-              <div className="relative">
-                <SearchIcon
-                  sx={{ fontSize: 16 }}
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none"
-                />
-                <input
-                  type="text"
-                  value={contactQuery}
-                  onChange={(e) => {
-                    setContactQuery(e.target.value);
-                    setContactDropdownOpen(true);
-                  }}
-                  onFocus={() => setContactDropdownOpen(true)}
-                  placeholder="Search by name, email or mobile…"
-                  autoComplete="off"
-                  className={`${inputCls} pl-8`}
-                />
-              </div>
-              {contactDropdownOpen && (
-                <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-zinc-300 rounded-lg shadow-lg max-h-72 overflow-y-auto">
-                  {contactSearching ? (
-                    <p className="m-0 p-3 text-zinc-500">Searching contacts…</p>
-                  ) : contactSearchError ? (
-                    <p className="m-0 p-3 text-red-600">{contactSearchError}</p>
-                  ) : contactResults.length === 0 ? (
-                    <div className="p-3 text-zinc-500">
-                      <p className="m-0 mb-2">
-                        {contactQuery.trim()
-                          ? 'No contacts match your search.'
-                          : 'No contacts yet.'}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={openCreateContact}
-                        className="text-[11px] font-semibold text-zinc-950 underline bg-transparent border-none cursor-pointer p-0"
-                      >
-                        Create a new contact
-                      </button>
-                    </div>
-                  ) : (
-                    <ul className="list-none m-0 p-0 divide-y divide-zinc-100">
-                      {contactResults.map((c) => (
-                        <li key={c._id}>
-                          <button
-                            type="button"
-                            onClick={() => chooseContact(c)}
-                            className="w-full text-left px-3 py-2 bg-white hover:bg-zinc-50 border-none cursor-pointer flex items-center gap-2.5"
-                          >
-                            <span className="w-7 h-7 rounded-md bg-zinc-950 text-white flex items-center justify-center text-[11px] font-bold overflow-hidden shrink-0">
-                              {c.photoUrl ? (
-                                <img src={c.photoUrl} alt="" className="w-full h-full object-cover" />
-                              ) : (
-                                (c.name.charAt(0) || 'C').toUpperCase()
-                              )}
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block font-semibold text-zinc-950 truncate">
-                                {formatContactName(c)}
-                              </span>
-                              <span className="block text-[11px] text-zinc-500 truncate">
-                                {[c.jobTitle, c.email, c.phone].filter(Boolean).join(' · ') || '—'}
-                              </span>
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-              <p className="text-[11px] text-zinc-500 mt-1.5 mb-0">
-                Pick an existing contact, or use “Create contact” to add a new person.
-              </p>
-            </div>
-          ) : null}
-
-          {showCreateContact && !selectedContact && (
-            <div className="border border-zinc-200 rounded-xl p-4 bg-zinc-50/50">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-xs font-bold text-zinc-900 m-0">New contact</h4>
-                <button
-                  type="button"
-                  onClick={cancelCreateContact}
-                  className="text-[11px] font-semibold text-zinc-600 hover:text-zinc-950 hover:underline bg-transparent border-none cursor-pointer"
-                >
-                  Cancel — search existing instead
-                </button>
-              </div>
-
-              <div id="lead-create-contact-duplicate-alert" className="mb-3">
-                <ContactDuplicateBanner
-                  duplicates={contactDuplicates}
-                  onUseContact={(c) => void handleChooseExistingContactAndCreate(c)}
-                  onCreateNewLead={() => void handleCreateNewLeadDespiteDuplicate()}
-                  actionLabel="Choose existing contact"
-                  createNewLabel="Create new lead"
-                  option1Title="Option 1 — Choose existing contact"
-                  option2Title="Option 2 — Create new lead"
-                  option2Description={
-                    <>
-                      Creates a <strong>new contact</strong> with the same email / mobile / PAN and
-                      then creates the lead.
-                    </>
-                  }
-                  busy={saving}
-                  onDismiss={clearContactDuplicates}
-                  checking={contactDupChecking}
-                />
-              </div>
-
-              <ContactFormFields
-                values={newContact}
-                onChange={patchNewContact}
-                requireReachability
-                disabled={saving}
-                tourPrefix="leads-field"
-                onFieldBlur={(vals) => void checkContactDuplicates(vals)}
-                onUploadError={setError}
-              />
-              <p className="text-[11px] text-zinc-500 mt-3 mb-0">
-                The contact is saved to the Contacts directory when you create the lead. If email,
-                mobile or PAN already exists, choose <strong>Choose existing contact</strong> or{' '}
-                <strong>Create new lead</strong> — either option creates the lead.
-              </p>
-            </div>
-          )}
-        </section>
-
         {/* C) Location */}
         <section data-tour="leads-field-location" className={sectionCls}>
           <div className="flex items-center justify-between mb-3">
@@ -1799,11 +2011,11 @@ export const LeadCreatePage: React.FC = () => {
           </div>
         </section>
 
-        {/* D) Tags & Segmentation */}
+        {/* D) Tags */}
         <section data-tour="leads-field-tags" className={sectionCls}>
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-xs font-bold text-zinc-950 uppercase tracking-wider m-0">
-              D. Tags & Segmentation
+              D. Tags
             </h3>
             <button type="button" onClick={() => setShowAddTagModal(true)} className={addLinkCls}>
               + Add New Tag
@@ -1830,11 +2042,11 @@ export const LeadCreatePage: React.FC = () => {
           </div>
         </section>
 
-        {/* E) Custom Attributes — Settings fields + this-create-only session fields */}
+        {/* E) Custom Fields — Settings fields + this-create-only session fields */}
         <section className={sectionCls}>
           <div className="flex items-center justify-between mb-1">
             <h3 className="text-xs font-bold text-zinc-950 uppercase tracking-wider m-0">
-              E. Custom Attributes
+              E. Custom Fields
             </h3>
             <button
               type="button"
@@ -1974,7 +2186,7 @@ export const LeadCreatePage: React.FC = () => {
             }}
             meta={{
               preparedBy: preparedByLabel,
-              primaryTraveller: selectedContact
+              primaryContact: selectedContact
                 ? formatContactName(selectedContact)
                 : showCreateContact
                   ? newContact.name
@@ -1990,6 +2202,19 @@ export const LeadCreatePage: React.FC = () => {
             inputClassName={`${inputCls} text-xs`}
           />
         ) : null}
+
+        <ExtensionCreateFields
+          record="lead"
+          requestTypeKey={
+            requestTypes.find((rt) => rt._id === requestTypeId)?.key ||
+            requestType ||
+            fixedRequestTypeKey ||
+            activeExtension.requestTypeKey
+          }
+          values={extensionValues}
+          onChange={setExtensionValues}
+          disabled={saving}
+        />
 
         {/* Form Actions Footer */}
         <div className="flex items-center justify-end gap-3 pt-2">
@@ -2097,6 +2322,26 @@ export const LeadCreatePage: React.FC = () => {
         onConfirm={() => void handleConfirmDiscrepancyLeadCreate()}
         onCancel={handleCancelDiscrepancyLeadCreate}
         loading={saving}
+      />
+      <ClientCompanyMatchModal
+        open={clientMatch.open}
+        matches={clientMatch.matches}
+        selectedId={clientMatch.selectedId}
+        onSelect={clientMatch.select}
+        onAddSecondary={() => void handleClientMatchAddSecondary()}
+        onContinueLead={handleClientMatchContinue}
+        onClose={clientMatch.close}
+        loading={clientMatch.busy}
+        error={clientMatch.error}
+        continueLabel="Continue Creating Lead"
+        newContact={(() => {
+          const shown = clientMatch.resume === 'existing' ? matchContactRef.current : selectedContact;
+          return shown
+            ? { name: formatContactName(shown) || shown.name, email: shown.email, phone: shown.phone }
+            : { name: newContact.name, email: newContact.email, phone: newContact.phone };
+        })()}
+        sync={leadFormSync ? { label: leadFormSync.label, help: leadFormSync.help, available: syncAvailable, checked: syncChecked } : null}
+        onSyncChange={setSyncChecked}
       />
     </div>
   );

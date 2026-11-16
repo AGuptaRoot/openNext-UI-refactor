@@ -20,6 +20,7 @@ import { ClientSelect } from '../../components/clients/ClientSelect';
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
 import { useFinanceOptions } from '../../components/finance/useFinanceOptions';
 import { calculateFinanceTotals, clampDiscountValue } from '../../utils/financeTotals';
+import { useNotifyMessage } from '@/components/notifications';
 
 /** A draft invoice is still ours to correct; once it is sent, it is the client's copy. */
 const EDITABLE_STATUS = 'Draft';
@@ -69,6 +70,7 @@ export const InvoiceEditPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error');
 
   const [clientId, setClientId] = useState('');
   const [projectId, setProjectId] = useState('');
@@ -248,12 +250,6 @@ export const InvoiceEditPage: React.FC = () => {
         This invoice is still a draft, so it can be corrected freely. Once you send it, these
         figures are the client&apos;s copy and can only be changed with a credit note.
       </p>
-
-      {error ? (
-        <p className="m-0 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-semibold text-red-700">
-          {error}
-        </p>
-      ) : null}
 
       <form id="invoice-edit-form" onSubmit={submit} className="flex flex-col gap-5">
         <FormSection title="Billing">

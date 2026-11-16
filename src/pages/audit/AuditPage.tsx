@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
+import { useNotifyMessage } from '@/components/notifications';
 import { crmApi } from '../../services/api';
 import { TourButton } from '../../ui/tour';
 import type { AdminPagination, AuditEntry } from '../../types/admin';
@@ -41,6 +42,7 @@ export const AuditPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
 
   const load = useCallback(
     async (page = 1) => {
@@ -137,12 +139,6 @@ export const AuditPage: React.FC = () => {
           </button>
         </form>
       </section>
-
-      {error && (
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
 
       <section
         data-tour="audit-table"

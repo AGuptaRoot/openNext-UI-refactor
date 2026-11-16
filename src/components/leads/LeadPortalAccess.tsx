@@ -4,6 +4,7 @@ import { KeyRound, ShieldCheck, Clock, AlertCircle, CheckCircle, XCircle } from 
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import type { ClientPortalAccess } from '../../types/clients';
+import { useNotifyMessage } from '@/components/notifications';
 
 interface LeadPortalAccessButtonProps {
   leadId: string;
@@ -49,6 +50,7 @@ export const LeadPortalAccessButton: React.FC<LeadPortalAccessButtonProps> = ({
 
   const [access, setAccess] = useState<ClientPortalAccess[]>([]);
   const [blockedReason, setBlockedReason] = useState('');
+  const [contactPortalAssigned, setContactPortalAssigned] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -59,6 +61,8 @@ export const LeadPortalAccessButton: React.FC<LeadPortalAccessButtonProps> = ({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [sentTo, setSentTo] = useState('');
+  useNotifyMessage(formError, 'error', () => setFormError(''));
+  useNotifyMessage(sentTo ? `Sent to ${sentTo}.` : '', 'success', () => setSentTo(''));
 
   const [rejecting, setRejecting] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
@@ -69,6 +73,7 @@ export const LeadPortalAccessButton: React.FC<LeadPortalAccessButtonProps> = ({
       const res = await crmApi.getLeadPortalAccess(leadId);
       setAccess(res.data?.access || []);
       setBlockedReason(res.data?.blockedReason || '');
+      setContactPortalAssigned(res.data?.contactPortalAssigned === true);
     } catch {
       // Portal access is an extra; a failure here must not break the page.
     } finally {
@@ -86,6 +91,24 @@ export const LeadPortalAccessButton: React.FC<LeadPortalAccessButtonProps> = ({
   // If hiding on active portal records (e.g. opportunities of a portal lead), omit button once portal is active
   if (hideIfPortalActive && existing && (existing.status === 'Active' || existing.status === 'Invited')) {
     return null;
+  }
+  // The contact already has its portal user (from another lead, opportunity or client, or from a
+  // request of this lead that is not the active one): never offer Create / Request / Approve again —
+  // say so instead. The existing portal login is reused; the server refuses a second one (409).
+  const ownAssigned =
+    existing && (existing.status === 'Active' || existing.status === 'Invited' || existing.status === 'Suspended');
+  if (contactPortalAssigned && !ownAssigned) {
+    return (
+      <span
+        role="status"
+        data-testid="lead-contact-portal-assigned"
+        title="The existing portal login of this contact is reused for this record."
+        className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-semibold text-emerald-800"
+      >
+        <ShieldCheck className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        This contact already has portal access.
+      </span>
+    );
   }
   // No deal at Requirement Confirmed yet and nothing issued — nothing to show.
   if (blockedReason && !existing) return null;
@@ -410,16 +433,6 @@ export const LeadPortalAccessButton: React.FC<LeadPortalAccessButtonProps> = ({
               </>
             )}
 
-            {formError ? (
-              <p className="m-0 mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
-                {formError}
-              </p>
-            ) : null}
-            {sentTo ? (
-              <p className="m-0 mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
-                Sent to {sentTo}.
-              </p>
-            ) : null}
 
             <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-zinc-100 pt-3">
               {isActive && (

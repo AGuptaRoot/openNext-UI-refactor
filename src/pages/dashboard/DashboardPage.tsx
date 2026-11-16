@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -47,7 +47,11 @@ import { BlockedTasksCard } from '../../components/dashboard/BlockedTasksCard';
 import { WatchedTasksCard } from '../../components/dashboard/WatchedTasksCard';
 import { ExpensesApprovalsCard } from '../../components/dashboard/ExpensesApprovalsCard';
 import { CustomizeWidgetsDialog } from '../../components/dashboard/CustomizeWidgetsDialog';
+import { ExtensionDashboard } from '../../components/dashboard/ExtensionDashboard';
+import type { ExtensionReportDefinition } from '../../types/reports';
 import { UnmigratedModal } from '../../components/UnmigratedModal';
+import { ExtensionMount } from '../../components/extensions/ExtensionMount';
+import type { ExtensionTabDef } from '../../types/extensions';
 
 const SECTION_DEFS: SectionDefinition[] = [
   {
@@ -227,10 +231,49 @@ const STORAGE_PREFIX = 'opennext_crm_widgets_';
 /** Dashboard widgets that only make sense with Projects, Tasks and Time Logs enabled. */
 const PROJECT_SECTIONS = new Set(['my_tasks', 'time_log_report', 'blocked_client_tasks', 'watched_tasks']);
 
+/**
+ * Dashboard: the active extension's own overview when it declares one (json/dashboard.json, staff only),
+ * otherwise the CRM's widget dashboard. Client-portal logins always get the CRM's.
+ */
 export const DashboardPage: React.FC = () => {
+  const { isClient } = useAuth();
+  const [definition, setDefinition] = useState<ExtensionReportDefinition | null>(null);
+  const [checked, setChecked] = useState(false);
+  useEffect(() => {
+    if (isClient) {
+      setChecked(true);
+      return;
+    }
+    let alive = true;
+    crmApi
+      .getExtensionDashboard()
+      .then((res) => {
+        if (alive) setDefinition(res.data && res.data.available ? res.data : null);
+      })
+      .catch(() => {
+        if (alive) setDefinition(null);
+      })
+      .finally(() => {
+        if (alive) setChecked(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isClient]);
+  if (!checked) return null;
+  if (definition && !isClient) return <ExtensionDashboard definition={definition} />;
+  return <CoreDashboardPage />;
+};
+
+const CoreDashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const { activeRole, isClient } = useAuth();
-  const { showProjects, isModuleVisible } = useActiveExtension();
+  const { showProjects, isModuleVisible, declarations, canUse } = useActiveExtension();
+
+  const dashboardWidgets = useMemo(() => {
+    const list = declarations.tabs?.dashboard || [];
+    return list.filter((w) => canUse(w.permission));
+  }, [declarations.tabs?.dashboard, canUse]);
 
   const [period, setPeriod] = useState<DashboardPeriod>('month');
   const [data, setData] = useState<DashboardData | null>(null);
@@ -599,6 +642,26 @@ export const DashboardPage: React.FC = () => {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Extension Dashboard Widgets (Contract §8) */}
+      {dashboardWidgets.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-5 items-stretch">
+          {dashboardWidgets.map((widget: ExtensionTabDef) => {
+            const colClass =
+              widget.width === 'full'
+                ? 'col-span-1 md:col-span-2 lg:col-span-12'
+                : widget.width === 'half'
+                  ? 'col-span-1 md:col-span-1 lg:col-span-6'
+                  : 'col-span-1 md:col-span-1 lg:col-span-4';
+
+            return (
+              <div key={widget.id || widget.slot} className={`${colClass} flex flex-col`}>
+                <ExtensionMount slot={widget.slot || ''} />
+              </div>
+            );
+          })}
         </div>
       )}
 

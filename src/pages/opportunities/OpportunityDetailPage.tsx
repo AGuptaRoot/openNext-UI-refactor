@@ -8,10 +8,20 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
 
+import { useNotifyMessage } from '@/components/notifications';
 import { useAuth } from '../../context/AuthContext';
 import { useActiveExtension } from '../../hooks/useActiveExtension';
+import {
+  useExtensionTabs,
+  ExtensionTabContent,
+  ExtensionFieldsSection,
+} from '../../components/extensions';
 import { useDialog } from '../../context/DialogContext';
 import { ApiError, crmApi } from '../../services/api';
+import { useSalesFlowConfig } from '../../hooks/useSalesFlowConfig';
+import { leadTabHref } from '../../components/finance/SalesFlowQuotationParts';
+import { salesTerms } from '../../utils/salesTerms';
+import { ExtensionActions } from '../../components/extensions/ExtensionActions';
 import { LeadPortalAccessButton } from '../../components/leads/LeadPortalAccess';
 import { AssignableUser } from '../../types/leads';
 import {
@@ -77,7 +87,9 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
 export const OpportunityDetailPage: React.FC = () => {
   const { id = '' } = useParams();
   const navigate = useNavigate();
-  const { hasPermission, isClient, user, activeRole } = useAuth();
+  const { hasPermission, isClient, user, activeRole, isAdmin } = useAuth();
+  // Correcting a locked primary contact: admins and sales managers only (the server checks the same).
+  const canCorrectContact = !isClient && (isAdmin || activeRole === 'crm-manager' || activeRole === 'sales-manager');
   const { confirm } = useDialog();
 
   const canWrite =
@@ -100,12 +112,20 @@ export const OpportunityDetailPage: React.FC = () => {
   const canAssignOwner = canAssignOpportunityOwner(user, { isClient, activeRole });
   const opportunityStages = useOpportunityStages();
   const settingsCurrency = useDefaultCurrency();
+  const declTabs = useExtensionTabs('opportunityDetail');
+  const [activeTab, setActiveTab] = useState<string>('overview');
 
   const [item, setItem] = useState<OpportunityItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  /** The active extension builds quotations on the quotation page (sales flow). */
+  const salesFlowConfig = useSalesFlowConfig();
+  const terms = salesTerms(salesFlowConfig);
+  const quoteOnPage = Boolean(salesFlowConfig.quotationPrefill);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  useNotifyMessage(error, 'error');
+  useNotifyMessage(info, 'success', () => setInfo(''));
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [assignOwnerId, setAssignOwnerId] = useState('');
   /** Which section the edit modal is showing, or null when closed. */
@@ -240,6 +260,9 @@ export const OpportunityDetailPage: React.FC = () => {
   const currentUserId = String(user?.userId || '').trim();
 
   const products = item?.products || [];
+  // salesFlow.fixedLines: a lead deal's services come from the extension's records — prices only here.
+  const leadRef = String(item?.leadId || '').trim();
+  const fixedLines = Boolean(salesFlowConfig.fixedLines && salesFlowConfig.hideOpportunityLines && leadRef);
   const probability =
     item?.probability ?? stageProbability(item?.stage || 'Discovery', opportunityStages);
   const financials = useMemo(
@@ -280,6 +303,10 @@ export const OpportunityDetailPage: React.FC = () => {
 
   const runConvertQuotation = async () => {
     if (!item) return;
+    if (quoteOnPage) {
+      navigate(`/quotations/create?opportunityId=${encodeURIComponent(item._id)}&returnTo=${encodeURIComponent(`/opportunities/${item._id}`)}`);
+      return;
+    }
     if (!(await confirm(`Generate quotation from "${item.title}"?`))) return;
     setBusy(true);
     setInfo('');
@@ -309,6 +336,42 @@ export const OpportunityDetailPage: React.FC = () => {
     });
     if (open && salesOrderId && salesOrderId !== 'converted') {
       navigate(`/sales-orders/${salesOrderId}`);
+    }
+  };
+
+  /**
+   * A won deal with an accepted quotation is invoiced FROM that quotation, so an advance already paid
+   * on it moves onto the invoice (only the rest is due). Without one, the invoice form opens prefilled.
+   */
+  const runCreateInvoice = async () => {
+    if (!item) return;
+    const quotationId = String(item.acceptedQuotationId || '').trim();
+    if (!quotationId) {
+      navigate(`/invoices/create?opportunityId=${encodeURIComponent(item._id)}`);
+      return;
+    }
+    if (!(await confirm('Create the invoice from the accepted quotation? Any advance already paid is applied to it.'))) return;
+    setBusy(true);
+    setError('');
+    try {
+      const res = await crmApi.convertQuotationToInvoice(quotationId);
+      const data = res.data as unknown as { invoice?: { _id?: string }; _id?: string };
+      const invoiceId = String(data?.invoice?._id || data?._id || '');
+      if (invoiceId) navigate(`/invoices/${encodeURIComponent(invoiceId)}`);
+    } catch (reason) {
+      // Already invoiced: open that invoice instead.
+      try {
+        const quote = (await crmApi.getQuotation(quotationId)).data as { convertedInvoiceId?: string | null };
+        if (quote?.convertedInvoiceId) {
+          navigate(`/invoices/${encodeURIComponent(String(quote.convertedInvoiceId))}`);
+          return;
+        }
+      } catch {
+        /* show the original error */
+      }
+      setError(reason instanceof Error ? reason.message : 'The invoice could not be created');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -409,18 +472,6 @@ export const OpportunityDetailPage: React.FC = () => {
 
   return (
     <div data-tour="opportunities-detail" className="flex flex-col gap-5 pb-10">
-      {(error || info) && (
-        <div
-          className={`rounded-lg border px-4 py-2.5 text-xs font-semibold ${
-            error
-              ? 'border-red-200 bg-red-50 text-red-700'
-              : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-          }`}
-        >
-          {error || info}
-        </div>
-      )}
-
       <header
         data-tour="opportunities-detail-header"
         className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 pb-4 border-b border-zinc-200"
@@ -484,7 +535,7 @@ export const OpportunityDetailPage: React.FC = () => {
           {canWrite && canCreateOpportunityQuotation(item) && (
             <button
               type="button"
-              disabled={busy || Boolean(describeOpportunityAmountBlock(item))}
+              disabled={busy || (!quoteOnPage && Boolean(describeOpportunityAmountBlock(item)))}
               title={
                 describeOpportunityAmountBlock(item) || 'Create a quotation from this deal'
               }
@@ -495,6 +546,13 @@ export const OpportunityDetailPage: React.FC = () => {
               Create Quotation
             </button>
           )}
+          <ExtensionActions
+            page="opportunityDetail"
+            record={{ type: 'opportunity', id: item._id, data: item }}
+            state={{ stage: item.stage, stageType: item.stageType }}
+            onDone={setInfo}
+            onError={setError}
+          />
           {isOpportunityWonStage(item.stage, item.stageType) &&
             !item.generatedSalesOrderId &&
             canCreateSalesOrders && (
@@ -508,17 +566,36 @@ export const OpportunityDetailPage: React.FC = () => {
               Create Sales Order
             </button>
           )}
-          {isOpportunityWonStage(item.stage, item.stageType) && canCreateInvoices && (
+          {/* Strict rule: a paid invoice → Paid Invoice only; an invoice → Open Invoice only; none → Create Invoice. */}
+          {item.invoiceSummary?.paidInvoice ? (
+            <Link
+              to={`/invoices/${encodeURIComponent(item.invoiceSummary.paidInvoice._id)}`}
+              data-testid="opportunity-paid-invoice"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-semibold no-underline text-emerald-800 hover:bg-emerald-100"
+            >
+              <ReceiptLongOutlinedIcon sx={{ fontSize: 15 }} />
+              Paid Invoice{item.invoiceSummary.paidInvoice.invoiceNo ? ` · ${item.invoiceSummary.paidInvoice.invoiceNo}` : ''}
+            </Link>
+          ) : item.invoiceSummary?.openInvoice ? (
+            <Link
+              to={`/invoices/${encodeURIComponent(item.invoiceSummary.openInvoice._id)}`}
+              data-testid="opportunity-open-invoice"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold no-underline text-indigo-900 hover:bg-indigo-100"
+            >
+              <OpenInNewIcon sx={{ fontSize: 15 }} />
+              Open Invoice{item.invoiceSummary.openInvoice.invoiceNo ? ` · ${item.invoiceSummary.openInvoice.invoiceNo}` : ''}
+            </Link>
+          ) : isOpportunityWonStage(item.stage, item.stageType) && canCreateInvoices ? (
             <button
               type="button"
               disabled={busy}
-              onClick={() => navigate(`/invoices/create?opportunityId=${encodeURIComponent(item._id)}`)}
+              onClick={() => void runCreateInvoice()}
               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold text-indigo-900 cursor-pointer disabled:opacity-50 hover:bg-indigo-100"
             >
               <ReceiptLongOutlinedIcon sx={{ fontSize: 15 }} />
               Create Invoice
             </button>
-          )}
+          ) : null}
           {isOpportunityWonStage(item.stage, item.stageType) &&
             item.generatedSalesOrderId &&
             item.generatedSalesOrderId !== 'converted' &&
@@ -577,6 +654,52 @@ export const OpportunityDetailPage: React.FC = () => {
         ))}
       </div>
 
+      {declTabs.length > 0 && (
+        <div data-tour="opportunities-detail-tabs" className="flex items-center gap-1 overflow-x-auto border-b border-zinc-200">
+          <button
+            type="button"
+            onClick={() => setActiveTab('overview')}
+            className={`-mb-px cursor-pointer whitespace-nowrap border-none border-b-2 bg-transparent px-3 py-2.5 text-xs font-semibold ${
+              activeTab === 'overview'
+                ? 'border-zinc-950 text-zinc-950'
+                : 'border-transparent text-zinc-500 hover:text-zinc-800'
+            }`}
+          >
+            Overview
+          </button>
+          {declTabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setActiveTab(`decl_${t.id}`)}
+              className={`-mb-px cursor-pointer whitespace-nowrap border-none border-b-2 bg-transparent px-3 py-2.5 text-xs font-semibold ${
+                activeTab === `decl_${t.id}`
+                  ? 'border-zinc-950 text-zinc-950'
+                  : 'border-transparent text-zinc-500 hover:text-zinc-800'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {activeTab.startsWith('decl_') && (
+        (() => {
+          const activeDeclTab = declTabs.find((t) => t.id === activeTab.replace('decl_', ''));
+          if (!activeDeclTab) return null;
+          return (
+            <ExtensionTabContent
+              tab={activeDeclTab}
+              record="opportunity"
+              recordId={id!}
+              recordData={item}
+            />
+          );
+        })()
+      )}
+
+      {activeTab === 'overview' && (
       <div data-tour="opportunities-detail-sections" className="flex flex-col gap-5">
         {isOpportunityWonStage(item.stage, item.stageType) &&
           item.generatedSalesOrderId &&
@@ -737,13 +860,34 @@ export const OpportunityDetailPage: React.FC = () => {
           </div>
         </section>
 
+        <ExtensionFieldsSection record="opportunity" recordId={id!} />
+
         <section
           data-tour="opportunities-detail-contact"
           className="bg-white border border-zinc-300 rounded-xl p-5"
         >
           <div className="mb-4 flex items-start justify-between gap-3">
-            <h2 className="text-sm font-bold text-zinc-950 m-0">Primary contact</h2>
-            {canWrite && (
+            <div>
+              <h2 className="text-sm font-bold text-zinc-950 m-0">Primary contact</h2>
+              {terms.lockOpportunityContact ? (
+                <p className="m-0 mt-1 text-[11px] text-zinc-500" data-testid="opportunity-contact-locked">
+                  Fixed when the opportunity was created.
+                  {canCorrectContact ? ' An admin or manager can correct it, with a reason.' : ''}
+                </p>
+              ) : null}
+            </div>
+            {terms.lockOpportunityContact ? (
+              canCorrectContact ? (
+                <button
+                  type="button"
+                  onClick={() => setEditSection('contactCorrection')}
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-[11px] font-semibold text-zinc-800 cursor-pointer hover:bg-zinc-50"
+                >
+                  <EditOutlinedIcon sx={{ fontSize: 13 }} />
+                  Correct contact
+                </button>
+              ) : null
+            ) : canWrite && (
               <button
                 type="button"
                 onClick={() => setEditSection('contact')}
@@ -768,7 +912,7 @@ export const OpportunityDetailPage: React.FC = () => {
           <div className="px-5 py-4 border-b border-zinc-200 flex items-start justify-between gap-3">
             <div>
             <h2 className="text-sm font-bold text-zinc-950 m-0">
-              Proposed Products &amp; Line Items
+              {terms.proposedLines}
             </h2>
             <p className="text-xs text-zinc-500 m-0 mt-1">
               {products.length} line{products.length === 1 ? '' : 's'} · Subtotal{' '}
@@ -776,16 +920,28 @@ export const OpportunityDetailPage: React.FC = () => {
               {formatMoney(financials.taxTotal, item.currency)}
             </p>
             </div>
-            {canWrite && (
-              <button
-                type="button"
-                onClick={() => setEditSection('products')}
-                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-[11px] font-semibold text-zinc-800 cursor-pointer hover:bg-zinc-50"
-              >
-                <EditOutlinedIcon sx={{ fontSize: 13 }} />
-                Edit
-              </button>
-            )}
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              {fixedLines && salesFlowConfig.requirementLink && leadRef ? (
+                <Link
+                  to={leadTabHref(leadRef, salesFlowConfig.requirementLink.leadTab)}
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-[11px] font-semibold text-zinc-800 no-underline hover:bg-zinc-50"
+                  data-testid="opportunity-requirement-link"
+                >
+                  <EditOutlinedIcon sx={{ fontSize: 13 }} />
+                  {salesFlowConfig.requirementLink.label}
+                </Link>
+              ) : null}
+              {canWrite && (
+                <button
+                  type="button"
+                  onClick={() => setEditSection('products')}
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-[11px] font-semibold text-zinc-800 cursor-pointer hover:bg-zinc-50"
+                >
+                  <EditOutlinedIcon sx={{ fontSize: 13 }} />
+                  {fixedLines ? 'Edit prices' : 'Edit'}
+                </button>
+              )}
+            </div>
           </div>
           {products.length === 0 ? (
             <div className="p-8 text-center text-sm text-zinc-500">No proposed products on this deal.</div>
@@ -794,7 +950,7 @@ export const OpportunityDetailPage: React.FC = () => {
               <table className="w-full text-left min-w-[720px]">
                 <thead>
                   <tr className="bg-zinc-50 border-b border-zinc-200">
-                    {['#', 'Product / Service', 'Qty', 'Unit price', 'Tax %', 'Amount'].map((h) => (
+                    {['#', terms.line, 'Qty', terms.hideShipping ? 'Rate' : 'Unit price', 'Tax %', 'Amount'].map((h) => (
                       <th
                         key={h}
                         className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-zinc-500"
@@ -842,7 +998,7 @@ export const OpportunityDetailPage: React.FC = () => {
           className="bg-white border border-zinc-300 rounded-xl p-5"
         >
           <div className="mb-4 flex items-start justify-between gap-3">
-            <h2 className="text-sm font-bold text-zinc-950 m-0">Shipping &amp; financials</h2>
+            <h2 className="text-sm font-bold text-zinc-950 m-0">{terms.commercialSummary}</h2>
             {canWrite && (
               <button
                 type="button"
@@ -850,13 +1006,21 @@ export const OpportunityDetailPage: React.FC = () => {
                 className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-[11px] font-semibold text-zinc-800 cursor-pointer hover:bg-zinc-50"
               >
                 <EditOutlinedIcon sx={{ fontSize: 13 }} />
-                Edit currency &amp; charges
+                {terms.hideShipping ? 'Edit currency' : 'Edit currency & charges'}
               </button>
             )}
           </div>
+          {terms.hideShipping ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" data-testid="opportunity-commercial-summary">
+              <InfoRow label={terms.subtotal}>{formatMoney(financials.subtotal, item.currency)}</InfoRow>
+              <InfoRow label="Tax">{formatMoney(financials.taxTotal, item.currency)}</InfoRow>
+              <InfoRow label="Total value">{formatMoney(financials.subtotal + financials.taxTotal, item.currency)}</InfoRow>
+              <InfoRow label="Currency">{item.currency || settingsCurrency}</InfoRow>
+            </div>
+          ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <InfoRow label="Destination state">{item.shippingState || '—'}</InfoRow>
-            <InfoRow label="Products subtotal">
+            <InfoRow label={terms.subtotal}>
               {formatMoney(financials.subtotal, item.currency)}
             </InfoRow>
             <InfoRow label="Estimated GST">
@@ -864,6 +1028,7 @@ export const OpportunityDetailPage: React.FC = () => {
             </InfoRow>
             <InfoRow label="Estimated Deal Value">{formatMoney(dealValue, item.currency)}</InfoRow>
           </div>
+          )}
         </section>
 
         <section
@@ -929,11 +1094,14 @@ export const OpportunityDetailPage: React.FC = () => {
           </div>
         </section>
       </div>
+      )}
 
       {editSection && item ? (
         <OpportunityEditModal
           item={item}
           section={editSection}
+          fixedLines={fixedLines}
+          terms={terms}
           fallbackCurrency={settingsCurrency}
           showToast={(message, kind) => {
             if (kind === 'error') setError(message);

@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { notify } from '@/components/notifications';
 import { crmApi } from '../../services/api';
 import type { LeadEvent, ActivityLocation, ActivityLocationLog, LeadItem } from '../../types/crm';
 import {
@@ -287,7 +288,6 @@ export const ActivityDetailPage: React.FC = () => {
   const [locationLogs, setLocationLogs] = useState<ActivityLocationLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // Action busy states
   const [accepting, setAccepting] = useState(false);
@@ -303,8 +303,7 @@ export const ActivityDetailPage: React.FC = () => {
   const [detectingGoalLoc, setDetectingGoalLoc] = useState(false);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
-    setToastMsg({ text, type });
-    setTimeout(() => setToastMsg(null), 4000);
+    notify.show(type, text);
   };
 
   const loadData = async () => {
@@ -754,20 +753,6 @@ export const ActivityDetailPage: React.FC = () => {
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* Toast Notification */}
-      {toastMsg && (
-        <div
-          className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg text-xs font-semibold transition-all ${
-            toastMsg.type === 'error'
-              ? 'bg-rose-600 text-white'
-              : 'bg-emerald-600 text-white'
-          }`}
-        >
-          {toastMsg.type === 'error' ? <ShieldAlert className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
-          <span>{toastMsg.text}</span>
-        </div>
-      )}
-
       {/* Header Bar */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white p-6 rounded-2xl border border-[#e9edf4] shadow-sm">
         <div className="flex items-start gap-4">

@@ -29,6 +29,7 @@ import { canAssignToOtherUsers } from '../../utils/permissions';
 import { reverseGeocode } from '../../utils/reverseGeocode';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 import { getCurrencySymbol } from '../../utils/currency';
+import { useNotifyMessage } from '@/components/notifications';
 
 
 
@@ -124,6 +125,7 @@ export const LeadCreateModal: React.FC<LeadCreateModalProps> = ({
   const [saving, setSaving] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
 
   const [duplicateMatches, setDuplicateMatches] = useState<LeadItem[]>([]);
 
@@ -570,18 +572,6 @@ export const LeadCreateModal: React.FC<LeadCreateModalProps> = ({
 
 
       <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-5 max-h-[80vh] overflow-y-auto">
-
-        {/* Error message banner */}
-
-        {error && (
-
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 font-medium">
-
-            {error}
-
-          </div>
-
-        )}
 
 
 

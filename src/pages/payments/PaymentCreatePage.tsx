@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNotifyMessage } from '@/components/notifications';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -59,6 +61,8 @@ export const PaymentCreatePage: React.FC = () => {
   const canWriteFinance = hasPermission('crm.finance.write') && !isClient;
   const canRecordManualPayment = canWriteFinance && CrmFeatures.isManualPaymentEnabled();
   const { clients, projects, invoices } = useFinanceOptions();
+  const { isModuleVisible } = useActiveExtension();
+  const showProjects = isModuleVisible('projects');
   const settingsCurrency = useDefaultCurrency();
   const currencyLockedRef = useRef(false);
   const [clientId, setClientId] = useState(searchParams.get('clientId') || '');
@@ -76,6 +80,7 @@ export const PaymentCreatePage: React.FC = () => {
   const [rows, setRows] = useState<AllocRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
 
   const openInvoices = useMemo(
     () =>
@@ -264,7 +269,6 @@ export const PaymentCreatePage: React.FC = () => {
         </div>
       ) : (
         <>
-      {error && <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-xs font-semibold text-red-700">{error}</div>}
 
       <form id="payment-form" onSubmit={submit} className="flex flex-col gap-5" noValidate>
         <FormSection title="Customer & billing allocation">
@@ -283,6 +287,7 @@ export const PaymentCreatePage: React.FC = () => {
                 }}
               />
             </FormField>
+            {showProjects && (
             <FormField label="Project">
               <select className={financeFieldClass} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
                 <option value="">None</option>
@@ -293,6 +298,7 @@ export const PaymentCreatePage: React.FC = () => {
                   ))}
               </select>
             </FormField>
+            )}
             <FormField label="Invoice">
               <select
                 className={financeFieldClass}

@@ -19,6 +19,7 @@ import { CheckCircle2, Star } from 'lucide-react';
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useDialog } from '../../context/DialogContext';
+import { useNotifyMessage } from '@/components/notifications';
 import type { CrmSettings } from '../../types/admin';
 import type {
   SampleItem,
@@ -141,6 +142,8 @@ export const SampleRequestDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  useNotifyMessage(error, 'error');
+  useNotifyMessage(success, 'success', () => setSuccess(''));
   const [saving, setSaving] = useState(false);
 
   // Approval modal state
@@ -678,18 +681,6 @@ export const SampleRequestDetailPage: React.FC = () => {
         </div>
       </header>
 
-      {/* Notifications */}
-      {error && (
-        <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm font-medium text-zinc-900">
-          {error}
-        </div>
-      )}
-      {success && (
-        <div className="rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm font-medium text-zinc-900">
-          {success}
-        </div>
-      )}
-
       {/* KPI Highlights Summary Banner */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className={STAT_CARD}>
@@ -1069,11 +1060,6 @@ export const SampleRequestDetailPage: React.FC = () => {
               </button>
             </div>
             <form onSubmit={submitApprove} className="space-y-4 p-5">
-              {error && approveOpen && (
-                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm font-medium text-zinc-900">
-                  {error}
-                </div>
-              )}
               {approveAction === 'approve' ? (
                 <p className="m-0 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-800">
                   Confirm Sales Manager approval for this sample request. The team can prepare and dispatch it after approval.
@@ -1133,11 +1119,6 @@ export const SampleRequestDetailPage: React.FC = () => {
               </button>
             </div>
             <form onSubmit={submitDispatch} className="space-y-4 p-5">
-              {error && dispatchOpen && (
-                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">
-                  {error}
-                </div>
-              )}
               <label className="block">
                 <span className="mb-1.5 block text-xs font-semibold text-zinc-700">
                   Courier / Carrier *
@@ -1235,11 +1216,6 @@ export const SampleRequestDetailPage: React.FC = () => {
               </button>
             </div>
             <form onSubmit={submitEdit} className="space-y-4 p-5 max-h-[80vh] overflow-y-auto">
-              {error && editOpen && (
-                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm font-medium text-zinc-900">
-                  {error}
-                </div>
-              )}
 
               {sample.status !== 'Requested' && (
                 <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-800">
@@ -1447,11 +1423,6 @@ export const SampleRequestDetailPage: React.FC = () => {
               </button>
             </div>
             <form onSubmit={submitFeedback} className="space-y-4 p-5 max-h-[80vh] overflow-y-auto">
-              {error && feedbackOpen && (
-                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">
-                  {error}
-                </div>
-              )}
               <div>
                 <span className="mb-1.5 block text-xs font-semibold text-zinc-700">
                   Rating (1 to 5 Stars) *
@@ -1595,11 +1566,6 @@ export const SampleRequestDetailPage: React.FC = () => {
               </button>
             </div>
             <form onSubmit={submitStockAddress} className="space-y-4 p-5">
-              {error && stockAddressModalOpen && (
-                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">
-                  {error}
-                </div>
-              )}
 
               {officeLocations.length > 0 ? (
                 <div>

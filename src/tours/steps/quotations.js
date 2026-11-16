@@ -45,6 +45,11 @@ async function ensurePath(prefix) {
   else await waitForSelector(T('quotations-detail'), 10000);
 }
 
+/** The active extension left quotation templates out (salesFlow.hideQuotationTemplates): skip those steps. */
+function templatesHidden() {
+  return Boolean(document.querySelector('[data-quotation-templates="off"]'));
+}
+
 function hasQuotationRow() {
   return Boolean(document.querySelector(T('quotations-row-first')));
 }
@@ -338,6 +343,7 @@ export const quotationsTourSteps = [
       'Reusable proposal packages for retainers and fixed-scope work. Next opens the Templates list and New Template form.',
     before: async () => {
       await ensurePath('/quotations');
+      if (templatesHidden()) return;
       await waitForSelector(T('quotations-templates-btn'), 3000);
     },
   }),
@@ -350,6 +356,7 @@ export const quotationsTourSteps = [
       'Search templates. Columns: Name, Category, Currency, Tax mode, Lines. Delete removes a template. New Template opens the create form.',
     skipBeacon: true,
     before: async () => {
+      if (templatesHidden()) return;
       await ensurePath('/quotation-templates');
     },
   }),
@@ -360,6 +367,7 @@ export const quotationsTourSteps = [
     title: 'New Template',
     content: 'Create a named template with category, currency, tax mode, and default line items.',
     before: async () => {
+      if (templatesHidden()) return;
       await ensurePath('/quotation-templates');
     },
   }),
@@ -372,6 +380,7 @@ export const quotationsTourSteps = [
       'Fill template details and line items, then save. Templates appear in Load Template… on New Quotation. We skip saving during the tour.',
     skipBeacon: true,
     before: async () => {
+      if (templatesHidden()) return;
       await ensurePath('/quotation-templates/create');
     },
   }),

@@ -15,6 +15,7 @@ import { canChangeOpportunityStage } from '../../utils/permissions';
 import { TourButton } from '../../ui/tour';
 import { useDialog } from '../../context/DialogContext';
 import { ApiError, crmApi } from '../../services/api';
+import { useSalesFlowConfig } from '../../hooks/useSalesFlowConfig';
 import {
   OpportunityItem,
   OpportunityPaginationMeta,
@@ -32,6 +33,7 @@ import { OpportunityPipeline, OpportunityPipelineStage } from '../../types/oppor
 import { useOpportunityStages } from '../../hooks/useOpportunityStages';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 import { formatCrmMoney } from '../../utils/currency';
+import { notify } from '@/components/notifications';
 
 function formatMoney(value?: number, currency?: string) {
   if (value == null || Number.isNaN(Number(value))) return '—';
@@ -40,6 +42,8 @@ function formatMoney(value?: number, currency?: string) {
 
 export const OpportunitiesPage: React.FC = () => {
   const navigate = useNavigate();
+  /** The active extension builds quotations on the quotation page (sales flow). */
+  const quoteOnPage = Boolean(useSalesFlowConfig().quotationPrefill);
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasPermission, isClient, isAdmin, activeRole } = useAuth();
   const { confirm } = useDialog();
@@ -76,7 +80,6 @@ export const OpportunitiesPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
-  const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [lostModal, setLostModal] = useState<{ id: string; title: string; stage: string } | null>(
     null
   );
@@ -88,8 +91,7 @@ export const OpportunitiesPage: React.FC = () => {
     'h-9 px-3 text-sm border border-zinc-200 rounded-lg outline-none focus:border-zinc-400 w-full box-border bg-white';
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
-    setToast({ text, type });
-    setTimeout(() => setToast(null), 3500);
+    notify.show(type, text);
   };
 
   useEffect(() => {
@@ -288,6 +290,10 @@ export const OpportunitiesPage: React.FC = () => {
   };
 
   const handleConvertQuotation = async (item: OpportunityItem) => {
+    if (quoteOnPage) {
+      navigate(`/quotations/create?opportunityId=${encodeURIComponent(item._id)}&returnTo=${encodeURIComponent('/opportunities')}`);
+      return;
+    }
     if (!(await confirm(`Generate quotation from "${item.title}"?`))) return;
     setConvertingId(item._id);
     try {
@@ -407,18 +413,6 @@ export const OpportunitiesPage: React.FC = () => {
 
   return (
     <div data-tour="opportunities-tour-landing" className="flex flex-col gap-5">
-      {toast && (
-        <div
-          className={`fixed top-20 right-6 z-[80] px-4 py-2.5 rounded-lg text-xs font-semibold border ${
-            toast.type === 'error'
-              ? 'bg-red-50 text-red-700 border-red-200'
-              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-          }`}
-        >
-          {toast.text}
-        </div>
-      )}
-
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 pb-1 border-b border-zinc-200">
         <div data-tour="opportunities-title">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 m-0 mb-1">
@@ -704,7 +698,7 @@ export const OpportunitiesPage: React.FC = () => {
                           {canWrite && canCreateOpportunityQuotation(item) && (
                               <button
                                 type="button"
-                                disabled={busy || Boolean(describeOpportunityAmountBlock(item))}
+                                disabled={busy || (!quoteOnPage && Boolean(describeOpportunityAmountBlock(item)))}
                                 onClick={() => handleConvertQuotation(item)}
                                 title={
                                   describeOpportunityAmountBlock(item) || 'Create Quotation'
@@ -729,8 +723,26 @@ export const OpportunitiesPage: React.FC = () => {
                                 Create Sales Order
                               </button>
                             )}
-                          {isOpportunityWonStage(item.stage, item.stageType) &&
-                            canCreateInvoices && (
+                          {/* Strict rule: paid → Paid Invoice only; invoiced → Open Invoice only; none → Create Invoice. */}
+                          {item.invoiceSummary?.paidInvoice ? (
+                            <Link
+                              to={`/invoices/${encodeURIComponent(item.invoiceSummary.paidInvoice._id)}`}
+                              title={`Paid invoice ${item.invoiceSummary.paidInvoice.invoiceNo || ''}`.trim()}
+                              className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-[11px] font-semibold no-underline text-emerald-800"
+                            >
+                              <ReceiptLongOutlinedIcon sx={{ fontSize: 14 }} />
+                              Paid Invoice
+                            </Link>
+                          ) : item.invoiceSummary?.openInvoice ? (
+                            <Link
+                              to={`/invoices/${encodeURIComponent(item.invoiceSummary.openInvoice._id)}`}
+                              title={`Open invoice ${item.invoiceSummary.openInvoice.invoiceNo || ''}`.trim()}
+                              className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-[11px] font-semibold no-underline text-indigo-900"
+                            >
+                              <ReceiptLongOutlinedIcon sx={{ fontSize: 14 }} />
+                              Open Invoice
+                            </Link>
+                          ) : isOpportunityWonStage(item.stage, item.stageType) && canCreateInvoices ? (
                               <button
                                 type="button"
                                 disabled={busy}
@@ -743,7 +755,7 @@ export const OpportunitiesPage: React.FC = () => {
                                 <ReceiptLongOutlinedIcon sx={{ fontSize: 14 }} />
                                 Create Invoice
                               </button>
-                            )}
+                            ) : null}
                           {isOpportunityWonStage(item.stage, item.stageType) &&
                             item.generatedSalesOrderId &&
                             item.generatedSalesOrderId !== 'converted' &&

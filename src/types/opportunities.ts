@@ -63,6 +63,13 @@ export interface OpportunityItem {
   acceptedQuotationId?: string | null;
   acceptedQuotationNo?: string | null;
   generatedSalesOrderId?: string | null;
+  /** This deal's tax invoices (server): Create Invoice only when there are none. */
+  invoiceSummary?: {
+    count: number;
+    invoices: Array<{ _id: string; invoiceNo: string; status: string }>;
+    paidInvoice: { _id: string; invoiceNo: string; status: string } | null;
+    openInvoice: { _id: string; invoiceNo: string; status: string } | null;
+  } | null;
   generatedSalesOrderNo?: string | null;
   /** Linked sales order summary (1 Opportunity → 1 Sales Order). */
   generatedSalesOrderStatus?: string | null;

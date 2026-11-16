@@ -1,4 +1,15 @@
 import { useEffect, useCallback, useRef } from 'react';
+import {
+  crmPathFromExtensionRouteId,
+  extensionRouteIdFromCrmPath,
+  extensionRouteIdFromRuntimeParts,
+} from '../utils/extensionPageRoute';
+import { SETTINGS_TAB_ATTR, SETTINGS_TOGGLE_ATTR } from '../utils/cmsSidebarSettingsNav';
+
+/** CRM path for a sync route id: "extension/<id>/<page>" → "/ext/<id>/<page>", otherwise "/<id>". */
+function routeIdToCrmPath(routeId: string): string {
+  return crmPathFromExtensionRouteId(routeId) || `/${routeId}`;
+}
 import { useLocation, useNavigate } from 'react-router-dom';
 
 export const PLUGIN_ID = 'openext-crm-suite';
@@ -32,8 +43,11 @@ export interface SidebarSyncResult {
 export function extractRouteIdFromPath(path: string, defaultRoute = 'dashboard'): string {
   const clean = path.replace(/^#\/?/, '').replace(/^\/+/, '').trim();
   const parts = clean.split('?')[0].split('/').filter(Boolean);
+  // Workspace-extension page (/ext/<id>/<page>) keeps its full identity.
+  const extensionRoute = extensionRouteIdFromCrmPath(`/${parts.join('/')}`);
+  if (extensionRoute) return extensionRoute;
   if (parts[0] === 'ext') {
-    return parts[2] || parts[1] || 'travel-requirement';
+    return parts[2] || parts[1] || defaultRoute;
   }
   const segment = parts[0]?.trim();
   return segment && segment !== '' ? segment : defaultRoute;
@@ -49,8 +63,10 @@ export function extractRouteIdFromHref(href: string, pluginId = PLUGIN_ID): stri
     if (href.includes(runtimePath)) {
       const suffix = href.slice(href.indexOf(runtimePath) + runtimePath.length).replace(/^\/+/, '');
       const parts = suffix.split('?')[0].split('/').filter(Boolean);
+      const extensionRoute = extensionRouteIdFromRuntimeParts(parts);
+      if (extensionRoute) return extensionRoute;
       if (parts[0] === 'ext') {
-        return parts[2] || parts[1] || 'travel-requirement';
+        return parts[2] || parts[1] || '';
       }
       if (parts[0]) return decodeURIComponent(parts[0]);
     }
@@ -65,7 +81,7 @@ export function extractRouteIdFromHref(href: string, pluginId = PLUGIN_ID): stri
 
 /**
  * Hide specific CRM module links in the parent OpenNext CMS sidebar (e.g. Dashboard for clients).
- * Also matches by visible label text when `labels` is provided (extension pages like Travel).
+ * Also matches by visible label text when `labels` is provided.
  */
 export function hideParentSidebarRoutes(
   routeIds: string[],
@@ -99,16 +115,35 @@ export function hideParentSidebarRoutes(
         `a[href*="${pluginId}"], a[href*="/plugins/"], a[href*="/runtime/"], nav a, aside a, [role="navigation"] a, [class*="sidebar"] a`
       );
 
+      const runtimePath = `/dashboard/plugins/runtime/${pluginId}`.toLowerCase();
       anchors.forEach((anchor) => {
         const href = anchor.getAttribute('href') || '';
         const hrefLower = href.toLowerCase();
+        // Only the CRM's own links are ever touched — never the host's (Profile, other plugins, …).
+        // Every CRM link starts with /dashboard/plugins/runtime/…, so matching "/dashboard" anywhere in
+        // the href hid the whole menu for clients (who hide the CRM Dashboard) and made it flicker.
+        let pathOnly = hrefLower;
+        try {
+          pathOnly = new URL(href, 'http://localhost').pathname.toLowerCase().replace(/\/+$/, '');
+        } catch {
+          // keep the raw href
+        }
+        const isCrmLink = pathOnly.startsWith(runtimePath) || /[?&]view=/.test(hrefLower);
+        if (!isCrmLink) return;
         const extracted = extractRouteIdFromHref(href, pluginId);
-        const anchorRoute = extracted ? extracted.toLowerCase() : '';
+        // The runtime root itself is the CRM Dashboard.
+        const anchorRoute = extracted ? extracted.toLowerCase() : pathOnly === runtimePath ? 'dashboard' : '';
 
-        // Match href segments e.g. /expenses, ?view=expenses, etc.
-        const hasRouteInHref = [...hideSet].some(
-          (id) => hrefLower.includes(`/${id}`) || hrefLower.endsWith(`/${id}`) || hrefLower.includes(`view=${id}`)
-        );
+        // Workspace-extension pages (Settings → Extensions) are never hidden here:
+        // their visibility comes from the extension's navigation.json and permissions.
+        // Without this, a hide id equal to an extension id would match "/extension/<id>/<page>".
+        if (
+          anchor.hasAttribute('data-crm-extension-page') ||
+          anchor.hasAttribute(SETTINGS_TAB_ATTR) ||
+          anchorRoute.startsWith('extension/')
+        ) {
+          return;
+        }
 
         const rawText = String(anchor.textContent || '')
           .replace(/\s+/g, ' ')
@@ -124,22 +159,8 @@ export function hideParentSidebarRoutes(
           anchor.closest<HTMLElement>('[class*="nav-item"]') ||
           anchor;
 
-        // Never hide the Travel requirement extension module for Admin/Managers
-        const isTravelRequirement =
-          rawText === 'travel requirement' ||
-          cleanText === 'travel requirement' ||
-          anchorRoute === 'travel-requirement' ||
-          hrefLower.includes('/ext/crm-travel/travel-requirement') ||
-          hrefLower.includes('travel-requirement');
-
-        if (isTravelRequirement && !hideSet.has('travel-requirement') && !labelSet.has('travel requirement')) {
-          row.style.display = '';
-          row.removeAttribute('data-crm-nav-hidden');
-          row.removeAttribute('aria-hidden');
-          return;
-        }
-
-        const hideByRoute = (anchorRoute && hideSet.has(anchorRoute)) || hasRouteInHref;
+        // The module is the first path segment after the runtime root (e.g. "leads" for /leads/123).
+        const hideByRoute = Boolean(anchorRoute) && hideSet.has(anchorRoute);
         const hideByLabel =
           labelSet.has(rawText) ||
           labelSet.has(cleanText) ||
@@ -219,6 +240,8 @@ export const useSidebarSync = (
           const anchors = doc.querySelectorAll<HTMLAnchorElement>(`a[href*="${runtimePath}"]`);
 
           anchors.forEach((anchor) => {
+            // Settings sections under the Settings link mark their own active tab.
+            if (anchor.hasAttribute(SETTINGS_TAB_ATTR)) return;
             const href = anchor.getAttribute('href') || '';
             const anchorRoute = extractRouteIdFromHref(href, pluginId) || defaultRouteId;
             const isCurrent = anchorRoute.toLowerCase() === targetRouteId.toLowerCase();
@@ -273,14 +296,19 @@ export const useSidebarSync = (
         // Only synchronize if parent is in the plugin runtime path
         if (!parentUrl.pathname.startsWith(runtimePath)) return;
 
-        const currentSuffix = parentUrl.pathname.slice(runtimePath.length).replace(/^\/+/, '');
         let targetPath = `${runtimePath}/${encodeURIComponent(targetRouteId)}`;
-        if (targetRouteId === 'travel-requirement' && currentSuffix.startsWith('ext/')) {
-          targetPath = `${runtimePath}/${currentSuffix.split('?')[0]}`;
+        if (targetRouteId.startsWith('extension/')) {
+          // Workspace-extension page: /runtime/<plugin>/extension/<id>/<page> (slashes kept).
+          targetPath = `${runtimePath}/${targetRouteId}`;
+        } else if (targetRouteId.startsWith('ext/')) {
+          targetPath = `${runtimePath}/${targetRouteId}`;
         }
-        if (parentUrl.pathname !== targetPath || parentUrl.searchParams.has('view')) {
+        // ?tab= belongs to the Settings page only (utils/cmsSidebarSettingsNav).
+        const staleTab = targetRouteId !== 'settings' && parentUrl.searchParams.has('tab');
+        if (parentUrl.pathname !== targetPath || parentUrl.searchParams.has('view') || staleTab) {
           parentUrl.pathname = targetPath;
           parentUrl.searchParams.delete('view');
+          if (staleTab) parentUrl.searchParams.delete('tab');
 
           parentWindow.history.replaceState(
             parentWindow.history.state,
@@ -323,8 +351,10 @@ export const useSidebarSync = (
 
       const suffix = parentUrl.pathname.slice(runtimePath.length).replace(/^\/+/, '');
       const parts = suffix.split('?')[0].split('/').filter(Boolean);
+      const extensionRoute = extensionRouteIdFromRuntimeParts(parts);
+      if (extensionRoute) return extensionRoute;
       if (parts[0] === 'ext') {
-        return parts[2] || parts[1] || 'travel-requirement';
+        return parts[1] && parts[2] ? `ext/${parts[1]}/${parts[2]}` : (parts[2] || parts[1] || '');
       }
       const navId = parts[0];
       if (navId) return decodeURIComponent(navId);
@@ -340,7 +370,7 @@ export const useSidebarSync = (
   const syncParentToReact = useCallback(() => {
     const parentRoute = getParentRequestedRoute();
     if (parentRoute && parentRoute.toLowerCase() !== activeRouteRef.current.toLowerCase()) {
-      navigateRef.current(`/${parentRoute}`);
+      navigateRef.current(routeIdToCrmPath(parentRoute));
       highlightSidebarItem(parentRoute);
     }
   }, [getParentRequestedRoute, highlightSidebarItem]);
@@ -369,9 +399,15 @@ export const useSidebarSync = (
         const runtimePath = `/dashboard/plugins/runtime/${pluginId}`;
         const anchor = target.closest<HTMLAnchorElement>(`a[href*="${runtimePath}"]`);
         if (!anchor) return;
+        // Settings sections switch the tab themselves, and the arrow on Settings only
+        // opens / closes them (utils/cmsSidebarSettingsNav).
+        if (anchor.hasAttribute(SETTINGS_TAB_ATTR) || target.closest(`[${SETTINGS_TOGGLE_ATTR}]`)) return;
 
         const href = anchor.getAttribute('href') || '';
-        const targetRoute = extractRouteIdFromHref(href, pluginId) || defaultRouteId;
+        const extMatch = href.match(/\/ext\/([^/?#]+)\/([^/?#]+)/);
+        const targetRoute = extMatch
+          ? `ext/${extMatch[1]}/${extMatch[2]}`
+          : extractRouteIdFromHref(href, pluginId) || defaultRouteId;
         if (!targetRoute) return;
 
         // Prevent Next.js from intercepting and remounting the iframe
@@ -379,7 +415,7 @@ export const useSidebarSync = (
         e.stopPropagation();
 
         if (targetRoute.toLowerCase() !== activeRouteRef.current.toLowerCase()) {
-          navigateRef.current(`/${targetRoute}`);
+          navigateRef.current(routeIdToCrmPath(targetRoute));
           syncReactToParent(targetRoute);
           highlightSidebarItem(targetRoute);
         } else {
@@ -399,7 +435,7 @@ export const useSidebarSync = (
       const customEv = event as CustomEvent<CrmRouteChangeDetail>;
       const routeId = customEv?.detail?.routeId;
       if (routeId && routeId.toLowerCase() !== activeRouteRef.current.toLowerCase()) {
-        navigateRef.current(`/${routeId}`);
+        navigateRef.current(routeIdToCrmPath(routeId));
         highlightSidebarItem(routeId);
       }
     };

@@ -25,7 +25,7 @@ import {
   ProjectEditPage,
   ProjectDetailPage,
 } from './pages/projects';
-import { TasksPage, TaskCreatePage, TaskDetailPage } from './pages/tasks';
+import { TasksPage, TaskCreatePage, TaskDetailPage, EmployeeWorkReportPage } from './pages/tasks';
 import { TimeLogsPage } from './pages/time-logs';
 import { ExpensesPage, ExpenseCreatePage, ExpenseDetailPage } from './pages/expenses';
 import {
@@ -34,6 +34,7 @@ import {
   QuotationDetailPage,
   QuotationTemplatesPage,
   QuotationTemplateCreatePage,
+  QuotationTemplatesGate,
 } from './pages/quotations';
 import {
   InvoicesPage,
@@ -46,7 +47,7 @@ import {
 import { PaymentsPage, PaymentCreatePage, PaymentDetailPage } from './pages/payments';
 import { SalesOrdersPage, SalesOrderCreatePage, SalesOrderDetailPage } from './pages/sales-orders';
 import { SamplesPage, SampleCreatePage, SampleRequestDetailPage } from './pages/samples';
-import { AddOnsPage } from './pages/add-ons';
+import { ExtensionPage } from './pages/extensions/ExtensionPage';
 import { TicketsPage, TicketCreatePage, TicketDetailPage } from './pages/tickets';
 import { CustomerSuccessPage } from './pages/customer-success';
 import { MarketingPage } from './pages/marketing';
@@ -54,6 +55,7 @@ import { SettingsPage } from './pages/settings';
 import { AuditPage } from './pages/audit';
 import { DataQualityPage } from './pages/data-quality';
 import { AnalyticsAiPage } from './pages/analytics-ai';
+import { CrmSnackbarHost } from './components/notifications';
 
 function resolveClientHomeRoute(): string {
   return '/projects';
@@ -114,7 +116,7 @@ const UnmigratedRouteFallback: React.FC = () => {
   const location = useLocation();
   const rawSegment = location.pathname.replace(/^\/+/, '').split('/')[0] || '';
   if (rawSegment.toLowerCase() === 'ext') {
-    return <Navigate to="/travel-requirement" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
   const formattedModule = rawSegment
     ? rawSegment
@@ -209,6 +211,7 @@ export const App: React.FC<AppProps> = ({ router = 'hash', initialPath = '/' }) 
 
               <Route path="/tasks" element={<Guarded><TasksPage /></Guarded>} />
               <Route path="/tasks/create" element={<Guarded><TaskCreatePage /></Guarded>} />
+              <Route path="/tasks/reports/:userId" element={<Guarded><EmployeeWorkReportPage /></Guarded>} />
               <Route path="/tasks/:id" element={<Guarded><TaskDetailPage /></Guarded>} />
 
               <Route path="/time-logs" element={<Guarded><TimeLogsPage /></Guarded>} />
@@ -221,8 +224,8 @@ export const App: React.FC<AppProps> = ({ router = 'hash', initialPath = '/' }) 
               <Route path="/quotations/create" element={<Guarded><QuotationCreatePage /></Guarded>} />
               <Route path="/quotations/:id/edit" element={<Guarded><QuotationCreatePage /></Guarded>} />
               <Route path="/quotations/:id" element={<Guarded><QuotationDetailPage /></Guarded>} />
-              <Route path="/quotation-templates" element={<Guarded><QuotationTemplatesPage /></Guarded>} />
-              <Route path="/quotation-templates/create" element={<Guarded><QuotationTemplateCreatePage /></Guarded>} />
+              <Route path="/quotation-templates" element={<Guarded><QuotationTemplatesGate><QuotationTemplatesPage /></QuotationTemplatesGate></Guarded>} />
+              <Route path="/quotation-templates/create" element={<Guarded><QuotationTemplatesGate><QuotationTemplateCreatePage /></QuotationTemplatesGate></Guarded>} />
 
               <Route path="/invoices" element={<Guarded><InvoicesPage /></Guarded>} />
               <Route path="/invoices/create" element={<Guarded><InvoiceCreatePage /></Guarded>} />
@@ -243,12 +246,9 @@ export const App: React.FC<AppProps> = ({ router = 'hash', initialPath = '/' }) 
               <Route path="/samples/create" element={<Guarded><SampleCreatePage /></Guarded>} />
               <Route path="/samples/:id" element={<Guarded><SampleRequestDetailPage /></Guarded>} />
 
-              <Route path="/travel" element={<Guarded><AddOnsPage /></Guarded>} />
-              <Route path="/travel-requirement" element={<Guarded><AddOnsPage /></Guarded>} />
-              <Route path="/add-ons" element={<Guarded><AddOnsPage /></Guarded>} />
-              <Route path="/ext/:extensionId/:pageId" element={<Guarded><AddOnsPage /></Guarded>} />
-              <Route path="/ext/*" element={<Guarded><AddOnsPage /></Guarded>} />
-              <Route path="/ext" element={<Guarded><AddOnsPage /></Guarded>} />
+              {/* Workspace-extension pages (json/navigation.json of the active extension). */}
+              <Route path="/ext/:extensionId/:pageId" element={<Guarded><ExtensionPage /></Guarded>} />
+              <Route path="/ext/*" element={<Navigate to="/dashboard" replace />} />
               <Route path="/tickets" element={<Guarded><TicketsPage /></Guarded>} />
               <Route path="/tickets/create" element={<Guarded><TicketCreatePage /></Guarded>} />
               <Route path="/tickets/:id" element={<Guarded><TicketDetailPage /></Guarded>} />
@@ -268,6 +268,7 @@ export const App: React.FC<AppProps> = ({ router = 'hash', initialPath = '/' }) 
               </Layout>
             </Router>
           </TimerProvider>
+          <CrmSnackbarHost />
         </DialogProvider>
         </CurrencyProvider>
       </AuthProvider>

@@ -5,6 +5,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { crmApi } from '../../services/api';
 import { useDialog } from '../../context/DialogContext';
 import type { InvoiceTemplateItem } from '../../types/invoiceTemplates';
+import { useNotifyMessage } from '@/components/notifications';
 
 export const InvoiceTemplatesPage: React.FC = () => {
   const { confirm } = useDialog();
@@ -13,6 +14,7 @@ export const InvoiceTemplatesPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -71,7 +73,6 @@ export const InvoiceTemplatesPage: React.FC = () => {
         className="h-9 max-w-xl px-3 text-sm border border-zinc-200 rounded-lg"
       />
 
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
       <div className="bg-white border border-zinc-300 rounded-xl overflow-hidden">
         {loading ? (

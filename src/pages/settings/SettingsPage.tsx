@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { notifyHostNavChanged } from '../../utils/cmsSidebarExtensionPages';
+import { useSearchParams } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -7,10 +8,8 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined';
-import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import SearchIcon from '@mui/icons-material/Search';
 import { crmApi } from '../../services/api';
+import { resetSalesFlowConfig, useSalesFlowConfig } from '../../hooks/useSalesFlowConfig';
 import {
   CUSTOM_FIELD_TYPES,
   DESIGNATION_PRESETS,
@@ -47,9 +46,11 @@ import { OpportunityPipelinesPanel } from '../../components/settings/Opportunity
 import { RequestTypesPanel } from '../../components/settings/RequestTypesPanel';
 import { GroqIntegrationPanel } from '../../components/settings/GroqIntegrationPanel';
 import { GoogleMapsIntegrationPanel } from '../../components/settings/GoogleMapsIntegrationPanel';
+import { PrivateStoragePanel } from '../../components/settings/PrivateStoragePanel';
 import { INDIAN_STATES } from '../../types/opportunities';
 import { SettingsTabIcon } from '../../components/icons/SettingsTabIcon';
 import { ExtensionIframe } from '../../components/extensions/ExtensionIframe';
+import { ExtensionSettingsTab } from '../../components/extensions/ExtensionSettingsTab';
 import { useExtensions } from '../../hooks/useExtensions';
 import {
   Megaphone,
@@ -74,17 +75,14 @@ import {
   Zap,
   Pencil,
   Check,
-  ExternalLink,
-  MapPin,
-  Navigation,
-  Plane,
-  Luggage,
   HeartHandshake,
   Blocks,
 } from 'lucide-react';
 import { ExtensionsPanel } from '../../components/settings/ExtensionsPanel';
 import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { CRM_UI_VERSION } from '../../buildInfo';
+import { notify } from '@/components/notifications';
+import { readCmsSettingsTab, writeCmsSettingsTab } from '../../utils/cmsSidebarSettingsNav';
 
 const inputClass =
   'h-9 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-400';
@@ -1010,17 +1008,18 @@ const SETTINGS_TAB_GROUPS: SettingsTabGroup[] = [
   },
 ];
 
-export const SettingsPage: React.FC = () => {
-  const { hasPermission, loading: authLoading, refreshAuth } = useAuth();
-  const canManageSettings = useMemo(() => hasPermission('crm.settings.manage'), [hasPermission]);
-  const { settingsTabs } = useExtensions();
-  /*
-   * The active CRM extension (Settings → Extensions) decides which settings
-   * tabs make sense: Product Sales has no Projects/Tasks/Time Logs, so the
-   * project tabs go; Project Delivery has no Sales Orders or shipments, so
-   * Shipping & Logistics goes.
-   */
-  const { extension: activeExtension, showProjects, showSalesOrders } = useActiveExtension();
+/**
+ * Settings sections this workspace shows, grouped. Used by the Settings page's
+ * own menu and by the CRM's Settings sub-menu in the CMS sidebar (Layout).
+ *
+ * The active CRM extension (Settings → Extensions) decides which settings
+ * tabs make sense: Product Sales has no Projects/Tasks/Time Logs, so the
+ * project tabs go; Project Delivery has no Sales Orders or shipments, so
+ * Shipping & Logistics goes.
+ */
+export function useSettingsTabGroups(settingsTabs: ReturnType<typeof useExtensions>['settingsTabs']) {
+  const { extension: activeExtension, declarations, showProjects, showSalesOrders } = useActiveExtension();
+  const extSettingsTab = declarations.settingsTab;
   const hiddenSettingsTabs = useMemo(() => {
     const hidden = new Set<string>();
     if (!showProjects) {
@@ -1028,26 +1027,81 @@ export const SettingsPage: React.FC = () => {
       hidden.add('project-statuses');
     }
     if (!showSalesOrders) hidden.add('shipping');
+    // Tabs the active extension declares it has no use for (manifest hiddenSettingsTabs).
+    // General and Extensions always stay (the server refuses hiding them too).
+    for (const id of activeExtension.hiddenSettingsTabs || []) {
+      if (id !== 'general' && id !== 'extensions') hidden.add(id);
+    }
     return hidden;
-  }, [showProjects, showSalesOrders]);
+  }, [showProjects, showSalesOrders, activeExtension.hiddenSettingsTabs]);
+
+  const allTabGroups = useMemo(() => {
+    const declaredExtTabMeta: SettingsTabMeta | null = extSettingsTab
+      ? {
+          id: 'ext-settings' as SettingsTabId,
+          label: extSettingsTab.label || `${activeExtension.name} Settings`,
+          subtitle: extSettingsTab.description || `Configuration for ${activeExtension.name}`,
+          keywords: `extension ${activeExtension.name} settings config fields`,
+        }
+      : null;
+
+    const extensionGroupTabs: SettingsTabMeta[] = [
+      ...settingsTabs.map((tab) => ({
+        id: tab.tabId as SettingsTabId,
+        label: tab.label.replace(/^ext__[^_]+__/, ''),
+        subtitle: `From ${tab.extensionId}`,
+        keywords: `extension add-on ${tab.extensionId} ${tab.label} ${tab.key}`,
+      })),
+      ...(declaredExtTabMeta ? [declaredExtTabMeta] : []),
+    ];
+
+    const extensionGroup =
+      extensionGroupTabs.length > 0
+        ? {
+            groupId: 'extensions',
+            title: 'Extensions',
+            tabs: extensionGroupTabs,
+          }
+        : null;
+
+    const allGroups = extensionGroup
+      ? [...SETTINGS_TAB_GROUPS, extensionGroup]
+      : SETTINGS_TAB_GROUPS;
+
+    // Drop the tabs the active CRM extension has no use for, then empty groups.
+    const base = allGroups
+      .map((group) => ({
+        ...group,
+        tabs: group.tabs.filter((t) => !hiddenSettingsTabs.has(String(t.id))),
+      }))
+      .filter((group) => group.tabs.length > 0);
+
+    return base;
+  }, [settingsTabs, hiddenSettingsTabs, extSettingsTab, activeExtension.name]);
+
+  return { allTabGroups, hiddenSettingsTabs };
+}
+
+export const SettingsPage: React.FC = () => {
+  const { hasPermission, loading: authLoading, refreshAuth } = useAuth();
+  const canManageSettings = useMemo(() => hasPermission('crm.settings.manage'), [hasPermission]);
+  const { settingsTabs } = useExtensions();
+  const { extension: activeExtension, declarations, showProjects, showSalesOrders, isModuleVisible } = useActiveExtension();
+  // Sample units and couriers only matter while Sample Requests are part of the active extension.
+  const showSampleSettings = isModuleVisible('samples');
+  const extSettingsTab = declarations.settingsTab;
+  const { hiddenSettingsTabs } = useSettingsTabGroups(settingsTabs);
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab') as SettingsTabId | null;
   const knownCoreTabs =
     SETTINGS_TABS.some((tab) => tab.id === tabParam) && !hiddenSettingsTabs.has(String(tabParam));
-  const knownExtTab = settingsTabs.some(
-    (tab) => tab.tabId === tabParam || (tab.key === 'travel' && tabParam === 'travel')
-  );
+  const knownExtTab = settingsTabs.some((tab) => tab.tabId === tabParam);
+  const knownDeclaredExtTab = Boolean(extSettingsTab && tabParam === ('ext-settings' as any));
   const activeTab: SettingsTabId =
-    tabParam && (knownCoreTabs || knownExtTab || tabParam === 'travel' || String(tabParam).includes('travel'))
+    tabParam && (knownCoreTabs || knownExtTab || knownDeclaredExtTab)
       ? (tabParam as SettingsTabId)
       : 'general';
 
-  const isTravelTab =
-    activeTab === 'travel' ||
-    (typeof activeTab === 'string' && (activeTab.includes('crm-travel') || activeTab.includes('travel')));
-
-  const [tabFilter, setTabFilter] = useState('');
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const [settings, setSettings] = useState<CrmSettings | null>(null);
   const [users, setUsers] = useState<SettingsWorkspaceUser[]>([]);
@@ -1061,55 +1115,42 @@ export const SettingsPage: React.FC = () => {
   const [permsUser, setPermsUser] = useState<SettingsWorkspaceUser | null>(null);
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
-
-  // Travel Tab: Locations (From / To / Destination)
-  const [travelLocations, setTravelLocations] = useState<{
-    from: string[];
-    to: string[];
-    destination: string[];
-  }>({
-    from: [],
-    to: [],
-    destination: [],
-  });
-  const [savingTravelLocations, setSavingTravelLocations] = useState(false);
-  const [travelLocationsDirty, setTravelLocationsDirty] = useState(false);
-
-  // Travel Tab: Service Requirements
-  const [travelServices, setTravelServices] = useState<string[]>([]);
-  const [savingTravelServices, setSavingTravelServices] = useState(false);
-  const [savingQualifyPrompt, setSavingQualifyPrompt] = useState(false);
-  const [travelServicesDirty, setTravelServicesDirty] = useState(false);
-
+  // Each new save/load result shows as a snackbar; the sticky save bar still reads `message`.
   useEffect(() => {
-    let cancelled = false;
-    crmApi.getTravelLocations().then((res) => {
-      if (cancelled) return;
-      if (res.data) {
-        setTravelLocations({
-          from: Array.isArray(res.data.from) ? res.data.from.map(toItemString).filter(Boolean) : [],
-          to: Array.isArray(res.data.to) ? res.data.to.map(toItemString).filter(Boolean) : [],
-          destination: Array.isArray(res.data.destination) ? res.data.destination.map(toItemString).filter(Boolean) : [],
-        });
-      }
-    });
-    crmApi.getTravelServices().then((res) => {
-      if (cancelled) return;
-      if (res.data && Array.isArray(res.data)) {
-        setTravelServices(res.data.map(toItemString).filter(Boolean));
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (message) notify.show(message.kind, message.text);
+  }, [message]);
 
-  const updateTravelLocations = (key: 'from' | 'to' | 'destination', values: string[]) => {
-    setTravelLocations((prev) => ({ ...prev, [key]: values }));
-    setTravelLocationsDirty(true);
-    setDirty(true);
+  const [savingQualifyPrompt, setSavingQualifyPrompt] = useState(false);
+  const [savingLeadWorkflow, setSavingLeadWorkflow] = useState(false);
+  /** Lead workflow rules; the defaults match the backend's (services/lead-workflow.service.js). */
+  const leadWorkflow = {
+    opportunityButton: 'qualified_or_ready' as const,
+    hideReplacedCommercialRequirement: true,
+    autoQualifyReadyLeads: true,
+    opportunityLeads: 'qualified_or_ready' as const,
+    quotationNeedsOpportunity: 'extension' as 'extension' | 'always' | 'never',
+    ...(settings?.lead_workflow || {}),
   };
-
+  const updateLeadWorkflow = (patch: Partial<typeof leadWorkflow>) => {
+    if (!settings) return;
+    setSettings({ ...settings, lead_workflow: { ...leadWorkflow, ...patch } });
+  };
+  const handleSaveLeadWorkflow = async () => {
+    if (!settings) return;
+    setSavingLeadWorkflow(true);
+    try {
+      await crmApi.updateSettings({ lead_workflow: leadWorkflow });
+      resetSalesFlowConfig();
+      setMessage({ kind: 'success', text: 'Lead workflow saved' });
+    } catch (err) {
+      setMessage({
+        kind: 'error',
+        text: err instanceof Error ? err.message : 'Failed to save the lead workflow',
+      });
+    } finally {
+      setSavingLeadWorkflow(false);
+    }
+  };
   /**
    * The Qualification Match tab hides the global Save bar (its panels save
    * themselves), so this one checkbox carries its own save.
@@ -1133,114 +1174,19 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleSaveTravelLocations = async () => {
-    setSavingTravelLocations(true);
-    try {
-      await crmApi.saveTravelLocations(travelLocations);
-      setTravelLocationsDirty(false);
-      setMessage({ kind: 'success', text: 'Travel locations saved successfully' });
-    } catch (err) {
-      setMessage({
-        kind: 'error',
-        text: err instanceof Error ? err.message : 'Failed to save travel locations',
-      });
-    } finally {
-      setSavingTravelLocations(false);
-    }
-  };
-
-  const updateTravelServices = (values: string[]) => {
-    setTravelServices(values);
-    setTravelServicesDirty(true);
-    setDirty(true);
-  };
-
-  const handleSaveTravelServices = async () => {
-    setSavingTravelServices(true);
-    try {
-      await crmApi.saveTravelServices(travelServices);
-      setTravelServicesDirty(false);
-      setMessage({ kind: 'success', text: 'Travel service requirements saved successfully' });
-    } catch (err) {
-      setMessage({
-        kind: 'error',
-        text: err instanceof Error ? err.message : 'Failed to save travel service requirements',
-      });
-    } finally {
-      setSavingTravelServices(false);
-    }
-  };
-
-  const filteredTabGroups = useMemo(() => {
-    const query = tabFilter.trim().toLowerCase();
-    const extensionGroup =
-      settingsTabs.length > 0
-        ? {
-            groupId: 'extensions',
-            title: 'Extensions',
-            tabs: settingsTabs.map((tab) => {
-              const isThisTravel =
-                tab.key === 'travel' ||
-                tab.extensionId === 'crm-travel' ||
-                /travel/i.test(tab.tabId);
-              const label = isThisTravel ? 'Travel' : tab.label.replace(/^ext__[^_]+__/, '');
-              return {
-                id: tab.tabId as SettingsTabId,
-                label,
-                subtitle: isThisTravel ? 'Locations (To/From/Destination) & options' : `From ${tab.extensionId}`,
-                keywords: `extension add-on ${tab.extensionId} ${tab.label} ${tab.key} travel locations to from destination`,
-              };
-            }),
-          }
-        : null;
-
-    const allGroups = extensionGroup
-      ? [...SETTINGS_TAB_GROUPS, extensionGroup]
-      : SETTINGS_TAB_GROUPS;
-
-    // Drop the tabs the active CRM extension has no use for, then empty groups.
-    const base = allGroups
-      .map((group) => ({
-        ...group,
-        tabs: group.tabs.filter((t) => !hiddenSettingsTabs.has(String(t.id))),
-      }))
-      .filter((group) => group.tabs.length > 0);
-
-    if (!query) return base;
-    return base
-      .map((group) => ({
-        ...group,
-        tabs: group.tabs.filter(
-          (t) =>
-            t.label.toLowerCase().includes(query) ||
-            t.subtitle.toLowerCase().includes(query) ||
-            t.keywords.toLowerCase().includes(query)
-        ),
-      }))
-      .filter((group) => group.tabs.length > 0);
-  }, [tabFilter, settingsTabs, hiddenSettingsTabs]);
-
-  const filteredTabsCount = useMemo(() => {
-    return filteredTabGroups.reduce((acc, g) => acc + g.tabs.length, 0);
-  }, [filteredTabGroups]);
+  const { allTabGroups } = useSettingsTabGroups(settingsTabs);
 
   const currentTabMeta = useMemo(() => {
     for (const group of SETTINGS_TAB_GROUPS) {
       const found = group.tabs.find((t) => t.id === activeTab);
       if (found) return found;
     }
-    const extTab = settingsTabs.find(
-      (t) =>
-        t.tabId === activeTab ||
-        (activeTab === 'travel' && (t.key === 'travel' || t.extensionId === 'crm-travel'))
-    );
-    if (extTab || isTravelTab) {
+    const extTab = settingsTabs.find((t) => t.tabId === activeTab);
+    if (extTab) {
       return {
-        id: (extTab?.tabId || activeTab) as SettingsTabId,
-        label: isTravelTab ? 'Travel' : (extTab?.label || String(activeTab)).replace(/^ext__[^_]+__/, ''),
-        subtitle: isTravelTab
-          ? 'Configure Travel locations (From, To, Destination) and booking options'
-          : `Settings owned by extension ${extTab?.extensionId || 'extension'}`,
+        id: extTab.tabId as SettingsTabId,
+        label: (extTab.label || String(activeTab)).replace(/^ext__[^_]+__/, ''),
+        subtitle: `Settings owned by extension ${extTab.extensionId || 'extension'}`,
         keywords: '',
       };
     }
@@ -1253,15 +1199,15 @@ export const SettingsPage: React.FC = () => {
           keywords: '',
         }
       : null;
-  }, [activeTab, settingsTabs, isTravelTab]);
+  }, [activeTab, settingsTabs]);
 
   const currentGroupTitle = useMemo(() => {
-    for (const group of filteredTabGroups) {
+    for (const group of allTabGroups) {
       if (group.tabs.some((t) => t.id === activeTab)) return group.title;
     }
-    if (String(activeTab).startsWith('ext__') || activeTab === 'travel') return 'Extensions';
+    if (String(activeTab).startsWith('ext__') || activeTab === ('ext-settings' as SettingsTabId)) return 'Extensions';
     return 'Configuration';
-  }, [activeTab, filteredTabGroups]);
+  }, [activeTab, allTabGroups]);
 
   const setTab = useCallback(
     (tab: SettingsTabId) => {
@@ -1271,6 +1217,20 @@ export const SettingsPage: React.FC = () => {
     },
     [searchParams, setSearchParams]
   );
+
+  // Sections are switched from the Settings sub-menu in the CMS sidebar (Layout); the page has no menu of its own.
+
+  // A CMS link such as …/settings?tab=pipelines opens that tab; afterwards the CMS URL follows the open tab.
+  useEffect(() => {
+    if (tabParam) return;
+    const fromCms = readCmsSettingsTab();
+    if (fromCms) setTab(fromCms as SettingsTabId);
+    // Only on first open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (tabParam) writeCmsSettingsTab(activeTab);
+  }, [tabParam, activeTab]);
 
   useEffect(() => {
     const onTab = (e: Event) => {
@@ -1318,6 +1278,8 @@ export const SettingsPage: React.FC = () => {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const bookingAfterAdvanceShown = Boolean(useSalesFlowConfig().bookingAfterAdvance);
 
   const update = <K extends keyof CrmSettings>(key: K, value: CrmSettings[K]) => {
     setSettings((current) => (current ? { ...current, [key]: value } : current));
@@ -1389,6 +1351,8 @@ export const SettingsPage: React.FC = () => {
       payload.proforma_advance_enabled = Boolean(settings.proforma_advance_enabled);
       payload.quotation_auto_accept_on_payment = Boolean(settings.quotation_auto_accept_on_payment);
       payload.auto_convert_proforma_on_delivery = Boolean(settings.auto_convert_proforma_on_delivery);
+      payload.auto_invoice_on_full_payment = Boolean(settings.auto_invoice_on_full_payment);
+      payload.allow_booking_after_advance = Boolean(settings.allow_booking_after_advance);
       payload.proforma_prefix = String(settings.proforma_prefix || 'PI-').trim();
       payload.default_advance_percent = Number(settings.default_advance_percent) || 30;
       payload.sample_units_of_measure = (settings.sample_units_of_measure || [])
@@ -1457,9 +1421,6 @@ export const SettingsPage: React.FC = () => {
       payload.lead_custom_fields = settings.lead_custom_fields;
     } else if (activeTab === 'clients') {
       payload.client_categories = settings.client_categories;
-    } else if (isTravelTab) {
-      await Promise.all([handleSaveTravelLocations(), handleSaveTravelServices()]);
-      return;
     } else {
       payload.company_name = settings.company_name;
       payload.company_state = settings.company_state;
@@ -1468,6 +1429,7 @@ export const SettingsPage: React.FC = () => {
     setSaving(true);
     try {
       await crmApi.updateSettings(payload);
+      notifyHostNavChanged(); // CRM 3.50.0: the CMS menu follows the change at once
       // Re-load from API so UI reflects what was actually persisted (not stale INR).
       const refreshed = await crmApi.getSettings();
       const data = refreshed.data;
@@ -1602,7 +1564,8 @@ export const SettingsPage: React.FC = () => {
   const hideGlobalSave =
     activeTab === 'opportunities' ||
     activeTab === 'qualification-match' ||
-    activeTab === 'extensions';
+    activeTab === 'extensions' ||
+    (activeTab as string) === 'ext-settings';
 
   return (
     <div
@@ -1644,198 +1607,8 @@ export const SettingsPage: React.FC = () => {
         </div>
       </header>
 
-      {message && (
-        <div
-          role="alert"
-          className={`rounded-lg border p-3 text-sm ${
-            message.kind === 'success'
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-              : 'border-red-200 bg-red-50 text-red-700'
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
-
       <div className="flex flex-col lg:flex-row items-start gap-6">
-        {/* Left: Vertical Navigation Sidebar */}
-        <aside
-          data-tour="settings-tabs"
-          className="w-full lg:w-72 xl:w-80 shrink-0 lg:sticky lg:top-4 z-20 space-y-3"
-        >
-          {/* Mobile Collapsible Header Bar (visible on < lg screens) */}
-          <div className="block lg:hidden rounded-2xl border border-zinc-200/90 bg-white p-3 shadow-xs">
-            <button
-              type="button"
-              onClick={() => setMobileNavOpen((prev) => !prev)}
-              className="flex w-full items-center justify-between gap-3 text-left cursor-pointer"
-            >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-950 text-base text-white">
-                  <SettingsTabIcon tabId={activeTab} className="h-[18px] w-[18px] shrink-0 text-white" />
-                </span>
-                <div className="min-w-0">
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                    Active Section ({currentGroupTitle})
-                  </span>
-                  <span className="block truncate text-sm font-bold text-zinc-900">
-                    {currentTabMeta?.label || activeTab}
-                  </span>
-                </div>
-              </div>
-              <span className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700">
-                {mobileNavOpen ? 'Close Menu' : 'Switch Section'}
-                <KeyboardArrowDownIcon
-                  sx={{ fontSize: 18 }}
-                  className={`transition-transform duration-200 ${mobileNavOpen ? 'rotate-180' : ''}`}
-                />
-              </span>
-            </button>
-          </div>
-
-          {/* Full Vertical Navigation Card */}
-          <div
-            className={`${
-              mobileNavOpen ? 'block' : 'hidden'
-            } lg:block rounded-2xl border border-zinc-200/90 bg-white p-3 shadow-xs space-y-3`}
-          >
-            {/* Header & Filter Search */}
-            <div className="space-y-2 pb-2 border-b border-zinc-100">
-              <div className="flex items-center justify-between px-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-                  Navigation
-                </span>
-                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600">
-                  {filteredTabsCount} / {SETTINGS_TABS.length} tabs
-                </span>
-              </div>
-              <div className="relative">
-                <SearchIcon
-                  sx={{ fontSize: 16 }}
-                  className="absolute left-2.5 top-2.5 text-zinc-400"
-                />
-                <input
-                  type="text"
-                  placeholder="Filter settings..."
-                  value={tabFilter}
-                  onChange={(e) => setTabFilter(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-200 bg-zinc-50/70 pl-8 pr-7 py-1.5 text-xs text-zinc-900 placeholder:text-zinc-400 outline-none focus:border-zinc-400 focus:bg-white transition-colors"
-                />
-                {tabFilter && (
-                  <button
-                    type="button"
-                    onClick={() => setTabFilter('')}
-                    className="absolute right-2 top-2 text-zinc-400 hover:text-zinc-600 cursor-pointer"
-                    title="Clear filter"
-                  >
-                    <CloseIcon sx={{ fontSize: 14 }} />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Grouped Vertical Tabs */}
-            <nav className="space-y-3.5 max-h-[calc(100vh-230px)] overflow-y-auto pr-0.5">
-              {filteredTabGroups.length === 0 ? (
-                <div className="p-4 text-center text-xs text-zinc-400">
-                  No settings match &ldquo;{tabFilter}&rdquo;.
-                </div>
-              ) : (
-                filteredTabGroups.map((group) => (
-                  <div key={group.groupId} className="space-y-1">
-                    <div className="px-2 pt-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                      {group.title}
-                    </div>
-                    <div className="space-y-0.5">
-                      {group.tabs.map((tab) => {
-                        const isActive = activeTab === tab.id;
-                        return (
-                          <button
-                            key={tab.id}
-                            type="button"
-                            data-tour={`settings-tab-${tab.id}`}
-                            onClick={() => {
-                              setTab(tab.id);
-                              setMobileNavOpen(false);
-                            }}
-                            className={`group relative flex w-full items-center justify-between gap-2.5 rounded-xl px-2.5 py-2 text-left transition-all cursor-pointer ${
-                              isActive
-                                ? 'bg-zinc-950 text-white shadow-xs'
-                                : 'bg-transparent text-zinc-700 hover:bg-zinc-100/90 hover:text-zinc-950'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <span
-                                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm transition-colors ${
-                                  isActive
-                                    ? 'bg-white/15 text-white'
-                                    : 'bg-zinc-100 text-zinc-700 group-hover:bg-zinc-200/80 group-hover:text-zinc-950'
-                                }`}
-                              >
-                                <SettingsTabIcon tabId={tab.id} className="h-4 w-4 shrink-0" />
-                              </span>
-                              <div className="min-w-0">
-                                <span
-                                  className={`block truncate text-xs font-semibold ${
-                                    isActive ? 'text-white' : 'text-zinc-900'
-                                  }`}
-                                >
-                                  {tab.label}
-                                </span>
-                                <span
-                                  className={`block truncate text-[10px] ${
-                                    isActive
-                                      ? 'text-zinc-300'
-                                      : 'text-zinc-400 group-hover:text-zinc-500'
-                                  }`}
-                                >
-                                  {tab.subtitle}
-                                </span>
-                              </div>
-                            </div>
-                            <span
-                              className={`shrink-0 transition-transform ${
-                                isActive
-                                  ? 'text-white opacity-100 translate-x-0'
-                                  : 'text-zinc-400 opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5'
-                              }`}
-                            >
-                              <ChevronRightIcon sx={{ fontSize: 16 }} />
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))
-              )}
-            </nav>
-
-            {/* Footer status / quick save */}
-            <div className="pt-2.5 border-t border-zinc-100 flex items-center justify-between text-[11px] text-zinc-500 px-1">
-              <span className="flex items-center gap-1.5">
-                <span
-                  className={`h-2 w-2 rounded-full ${
-                    dirty ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
-                  }`}
-                />
-                {dirty ? 'Unsaved changes' : 'All synced'}
-              </span>
-              {!hideGlobalSave && dirty && (
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => void save()}
-                  className="text-xs font-semibold text-zinc-950 hover:underline cursor-pointer disabled:opacity-50"
-                >
-                  {saving ? 'Saving...' : 'Save now'}
-                </button>
-              )}
-            </div>
-          </div>
-        </aside>
-
-        {/* Right: Active Settings Section Content */}
+        {/* Active Settings Section Content */}
         <main className="flex-1 min-w-0 w-full space-y-5">
           {/* Active Tab Hero / Context Banner */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs">
@@ -1880,6 +1653,8 @@ export const SettingsPage: React.FC = () => {
           }}
         />
       )}
+
+      {(activeTab as string) === 'ext-settings' && <ExtensionSettingsTab />}
 
       {activeTab === 'modules' && (() => {
         const isExpEnabled = Boolean(settings.enabled_modules?.expenses);
@@ -2313,6 +2088,45 @@ export const SettingsPage: React.FC = () => {
                   </div>
                 </div>
 
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 rounded-lg border border-zinc-200 bg-white p-3">
+                  <div className="flex-1">
+                    <span className="block text-sm font-semibold text-zinc-950">
+                      Raise the tax invoice when the quotation is accepted and paid in full
+                    </span>
+                    <span className="mt-0.5 block text-xs text-zinc-600">
+                      As soon as an accepted quotation is fully paid (online or entered by staff), its proforma becomes the
+                      tax invoice, marked Paid, with the payment moved onto it. Use this when there is no delivery step,
+                      e.g. sales orders are not used. An advance alone never raises the invoice.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 rounded-lg border border-zinc-200 bg-zinc-50 p-1">
+                    <label className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold cursor-pointer transition-colors ${
+                      settings.auto_invoice_on_full_payment ? 'bg-blue-600 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
+                    }`}>
+                      <input
+                        type="radio"
+                        name="auto_invoice_on_full_payment"
+                        className="sr-only"
+                        checked={Boolean(settings.auto_invoice_on_full_payment)}
+                        onChange={() => update('auto_invoice_on_full_payment', true)}
+                      />
+                      <span>ON</span>
+                    </label>
+                    <label className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold cursor-pointer transition-colors ${
+                      !settings.auto_invoice_on_full_payment ? 'bg-zinc-800 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
+                    }`}>
+                      <input
+                        type="radio"
+                        name="auto_invoice_on_full_payment"
+                        className="sr-only"
+                        checked={!settings.auto_invoice_on_full_payment}
+                        onChange={() => update('auto_invoice_on_full_payment', false)}
+                      />
+                      <span>OFF</span>
+                    </label>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <label>
                     <span className={labelClass}>Proforma Number Prefix</span>
@@ -2350,6 +2164,42 @@ export const SettingsPage: React.FC = () => {
               </p>
             )}
           </section>
+          {/* salesFlow.bookingAfterAdvance: the active extension creates bookings from paid quotations. */}
+          {bookingAfterAdvanceShown ? (
+            <section data-testid="settings-booking-after-advance" className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                <div className="flex-1">
+                  <span className="block text-sm font-semibold text-zinc-950">Allow Booking Creation After Advance Payment</span>
+                  <span className="mt-0.5 block text-xs text-zinc-600">
+                    Yes: a booking can be created once the required advance of an accepted quotation is verified.
+                    No: only once the whole quotation amount is verified as paid. Checked on the server from
+                    verified payments only.
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 rounded-lg border border-zinc-200 bg-white p-1" role="radiogroup" aria-label="Allow Booking Creation After Advance Payment">
+                  {[true, false].map((value) => (
+                    <label
+                      key={String(value)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer transition-colors ${
+                        Boolean(settings.allow_booking_after_advance) === value
+                          ? value ? 'bg-blue-600 text-white shadow-xs' : 'bg-zinc-800 text-white shadow-xs'
+                          : 'text-zinc-600 hover:text-zinc-900'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="allow_booking_after_advance"
+                        className="sr-only"
+                        checked={Boolean(settings.allow_booking_after_advance) === value}
+                        onChange={() => update('allow_booking_after_advance', value)}
+                      />
+                      <span>{value ? 'Yes' : 'No'}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </section>
+          ) : null}
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <label>
               <span className={labelClass}>Registered Company Name *</span>
@@ -2488,7 +2338,8 @@ export const SettingsPage: React.FC = () => {
                 onChange={(e) => update('tax_rate', Number(e.target.value))}
               />
             </label>
-            <div className="sm:col-span-2 lg:col-span-3 border-t border-zinc-100 pt-4 mt-2">
+            {showSampleSettings ? (<>
+            <div className="sm:col-span-2 lg:col-span-3 border-t border-zinc-100 pt-4 mt-2" data-testid="settings-sample-uom">
               <ChipListEditor
                 icon={<Ruler className="h-[18px] w-[18px] shrink-0" aria-hidden />}
                 title="Sample Request - Units of Measure (UoM)"
@@ -2520,6 +2371,7 @@ export const SettingsPage: React.FC = () => {
                 accent="bg-sky-50 text-sky-800"
               />
             </div>
+            </>) : null}
           </div>
         </section>
       )}
@@ -2822,6 +2674,7 @@ export const SettingsPage: React.FC = () => {
         <div className="space-y-5" data-tour="settings-integrations">
           <GroqIntegrationPanel />
           <GoogleMapsIntegrationPanel />
+          <PrivateStoragePanel />
         </div>
       )}
 
@@ -3062,6 +2915,86 @@ export const SettingsPage: React.FC = () => {
             </div>
           </section>
 
+          <section className={cardClass} data-tour="settings-lead-workflow">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 space-y-3">
+                <div>
+                  <h2 className="m-0 text-base font-bold text-zinc-950">Lead workflow</h2>
+                  <p className="mb-0 mt-1 text-xs text-zinc-500">
+                    The active extension can tell the CRM when a lead is <strong>ready</strong> (for
+                    example: its requirements are complete and the people involved are added). These rules
+                    decide what that changes. Without such an extension the CRM works as before.
+                  </p>
+                </div>
+                <label className="flex flex-col gap-1 text-xs font-semibold text-zinc-700">
+                  Show “Create Opportunity” on a lead when it is
+                  <select
+                    className="h-9 max-w-sm rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900"
+                    value={leadWorkflow.opportunityButton}
+                    onChange={(e) => updateLeadWorkflow({ opportunityButton: e.target.value as typeof leadWorkflow.opportunityButton })}
+                  >
+                    <option value="qualified_or_ready">Qualified or ready</option>
+                    <option value="ready">Ready</option>
+                    <option value="qualified">Qualified</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs font-semibold text-zinc-700">
+                  Leads offered when creating an opportunity
+                  <select
+                    className="h-9 max-w-sm rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900"
+                    value={leadWorkflow.opportunityLeads}
+                    onChange={(e) => updateLeadWorkflow({ opportunityLeads: e.target.value as typeof leadWorkflow.opportunityLeads })}
+                  >
+                    <option value="qualified_or_ready">Qualified or ready leads only</option>
+                    <option value="all">All open leads</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs font-semibold text-zinc-700">
+                  A new quotation needs an opportunity
+                  <select
+                    className="h-9 max-w-sm rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900"
+                    data-testid="settings-quotation-needs-opportunity"
+                    value={leadWorkflow.quotationNeedsOpportunity || 'extension'}
+                    onChange={(e) =>
+                      updateLeadWorkflow({ quotationNeedsOpportunity: e.target.value as 'extension' | 'always' | 'never' })
+                    }
+                  >
+                    <option value="extension">Follow the workspace extension</option>
+                    <option value="always">Always</option>
+                    <option value="never">Never</option>
+                  </select>
+                </label>
+                <label className="flex cursor-pointer items-start gap-2 text-sm font-semibold text-zinc-800">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={leadWorkflow.autoQualifyReadyLeads}
+                    onChange={(e) => updateLeadWorkflow({ autoQualifyReadyLeads: e.target.checked })}
+                  />
+                  <span>Move a lead to Qualified as soon as it is ready</span>
+                </label>
+                <label className="flex cursor-pointer items-start gap-2 text-sm font-semibold text-zinc-800">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={leadWorkflow.hideReplacedCommercialRequirement}
+                    onChange={(e) => updateLeadWorkflow({ hideReplacedCommercialRequirement: e.target.checked })}
+                  />
+                  <span>Hide “Commercial Requirement” when the extension has its own requirement tab</span>
+                </label>
+              </div>
+              <button
+                type="button"
+                onClick={handleSaveLeadWorkflow}
+                disabled={savingLeadWorkflow}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-zinc-900 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-50 transition-colors shadow-none cursor-pointer"
+              >
+                <Check className="h-3.5 w-3.5" />
+                <span>{savingLeadWorkflow ? 'Saving…' : 'Save lead workflow'}</span>
+              </button>
+            </div>
+          </section>
+
           <RequestTypesPanel />
           <div className={`${cardClass} text-xs text-zinc-500`}>
             Tip: open a Request Type and use <strong className="text-zinc-800">Match catalog</strong>{' '}
@@ -3072,149 +3005,7 @@ export const SettingsPage: React.FC = () => {
         </div>
       )}
 
-      {isTravelTab && (
-        <div className="space-y-6" data-tour="settings-travel-tab">
-          <section className={cardClass}>
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                  <Plane className="h-5 w-5" aria-hidden />
-                </div>
-                <div>
-                  <h2 className="m-0 text-base font-bold text-zinc-950">Travel Locations & Routing</h2>
-                  <p className="mb-0 mt-1 text-xs text-zinc-500">
-                    Configure origin ('From'), arrival ('To'), and holiday tour ('Destination') options.
-                    These options populate dropdown selectors on Lead Travel forms and Travel requirement modules.
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Link
-                  to="/travel-requirement"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900 no-underline transition-colors shadow-none"
-                >
-                  <span>Travel requirement module</span>
-                  <ExternalLink className="h-3.5 w-3.5 text-zinc-400" />
-                </Link>
-                <button
-                  type="button"
-                  onClick={handleSaveTravelLocations}
-                  disabled={savingTravelLocations}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-50 transition-colors shadow-none cursor-pointer"
-                >
-                  <Check className="h-3.5 w-3.5" />
-                  <span>
-                    {savingTravelLocations
-                      ? 'Saving…'
-                      : travelLocationsDirty
-                        ? 'Save Locations *'
-                        : 'Save Locations'}
-                  </span>
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <section
-            data-tour="settings-travel-locations-chips"
-            className="grid grid-cols-1 gap-5 xl:grid-cols-3"
-          >
-            <ChipListEditor
-              title="From Locations"
-              description="Departure cities & pickup points (e.g. Mumbai, Delhi, Bengaluru, Chennai…)"
-              icon={<Compass className="h-[18px] w-[18px] shrink-0" aria-hidden />}
-              accent="bg-blue-50 text-blue-600"
-              value={travelLocations.from}
-              placeholder="e.g. Mumbai"
-              onChange={(value) => updateTravelLocations('from', value)}
-            />
-            <ChipListEditor
-              title="To Locations"
-              description="Arrival cities & transit hubs (e.g. Goa, Dubai, Bangkok, London…)"
-              icon={<Navigation className="h-[18px] w-[18px] shrink-0" aria-hidden />}
-              accent="bg-emerald-50 text-emerald-600"
-              value={travelLocations.to}
-              placeholder="e.g. Goa"
-              onChange={(value) => updateTravelLocations('to', value)}
-            />
-            <ChipListEditor
-              title="Destination Options"
-              description="Tour circuits & popular travel destinations (e.g. Kerala, Kashmir, Maldives…)"
-              icon={<MapPin className="h-[18px] w-[18px] shrink-0" aria-hidden />}
-              accent="bg-purple-50 text-purple-600"
-              value={travelLocations.destination}
-              placeholder="e.g. Kerala"
-              onChange={(value) => updateTravelLocations('destination', value)}
-            />
-          </section>
-
-          {/* Travel Service Requirements Section */}
-          <section className={cardClass}>
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-50 text-purple-600">
-                  <Luggage className="h-5 w-5" aria-hidden />
-                </div>
-                <div>
-                  <h2 className="m-0 text-base font-bold text-zinc-950">Travel Service Requirements</h2>
-                  <p className="mb-0 mt-1 text-xs text-zinc-500">
-                    Configure available travel services (e.g. Hotel, Air Ticket / Flight, Bus Ticket, Cab / Transport, Tour Package, Visa Assistance, Cruise).
-                    These service options display as checkboxes in the Travel Requirement module page and on lead detail forms.
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSaveTravelServices}
-                  disabled={savingTravelServices}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-50 transition-colors shadow-none cursor-pointer"
-                >
-                  <Check className="h-3.5 w-3.5" />
-                  <span>
-                    {savingTravelServices
-                      ? 'Saving…'
-                      : travelServicesDirty
-                        ? 'Save Services *'
-                        : 'Save Services'}
-                  </span>
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <section
-            data-tour="settings-travel-services-chips"
-            className="grid grid-cols-1 gap-5"
-          >
-            <ChipListEditor
-              title="Service Requirements"
-              description="Services that clients or leads can request (e.g. Hotel, Air Ticket / Flight, Bus Ticket, Cab / Transport, Tour Package, Visa Assistance, Cruise…)"
-              icon={<Luggage className="h-[18px] w-[18px] shrink-0" aria-hidden />}
-              accent="bg-purple-50 text-purple-600"
-              value={travelServices}
-              placeholder="e.g. Travel Insurance"
-              onChange={(value) => updateTravelServices(value)}
-            />
-          </section>
-
-          <div className={`${cardClass} text-xs text-zinc-500`}>
-            Tip: Locations and Service Requirements configured here directly sync to{' '}
-            <code className="text-zinc-800 font-mono">/travel/settings/locations</code> and{' '}
-            <code className="text-zinc-800 font-mono">/travel/settings/services</code> and populate dropdown selectors
-            and service checkboxes across the CRM and the{' '}
-            <Link to="/travel-requirement" className="font-semibold text-zinc-900 underline">
-              Travel requirement
-            </Link>{' '}
-            module.
-          </div>
-        </div>
-      )}
-
       {settingsTabs.map((tab) => {
-        const isThisTravel =
-          tab.key === 'travel' || tab.extensionId === 'crm-travel' || /travel/i.test(tab.tabId);
-        if (isThisTravel) return null;
         return (
           activeTab === tab.tabId && (
             <div key={tab.tabId} className="space-y-4" data-tour={`settings-ext-${tab.key}`}>

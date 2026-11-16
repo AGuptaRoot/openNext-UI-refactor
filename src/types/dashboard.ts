@@ -24,6 +24,8 @@ export interface CrmFeatureFlags {
   /** Only ever true while `proformaAdvance` is on. */
   quotationAutoAcceptOnPayment: boolean;
   defaultAdvancePercent: number;
+  /** Workspace default currency (Settings → General), for users who cannot read the settings. */
+  defaultCurrency?: string | null;
   /** Optional module toggles (Settings -> Modules). */
   modules?: {
     expenses?: boolean;

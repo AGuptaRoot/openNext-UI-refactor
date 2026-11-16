@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { SearchableSelect } from '../common/SearchableSelect';
+import { extensionDataApi } from '../../services/extensionDataApi';
+import { emitSettingsChanged } from '../../utils/extensionFieldLogic';
+import { notify, errorMessage } from '@/components/notifications';
 
 export type ExtensionFieldOptionsSource = {
   /** Absolute or same-origin API URL that returns { data: { [key]: OptionRow[] } } or OptionRow[]. */
@@ -19,7 +23,7 @@ export type ExtensionFieldDef = {
   layoutRow?: string | null;
   order?: number;
   options?: Array<{ value?: string; label?: string; optionKey?: string }>;
-  /** Load select options from an API (e.g. Travel Settings → Locations). */
+  /** Load select options from an API declared by the extension. */
   optionsSource?: ExtensionFieldOptionsSource | null;
   /** Optional default when seeding empty values (e.g. Settings default currency). */
   defaultValue?: string;
@@ -114,19 +118,19 @@ function rowsToSelectOptions(
         label?: string;
         optionKey?: string;
         value?: string;
-        serviceId?: string;
-        serviceKey?: string;
+        id?: string;
+        key?: string;
         name?: string;
       };
-      // Travel services use stable serviceId (not display name)
-      const serviceId = String(o.serviceId || '').trim();
-      const label = String(o.name || o.label || o.serviceKey || o.optionKey || '').trim();
-      const optionKey = String(o.serviceKey || o.optionKey || label)
+      // An option may carry a stable id; it wins over the display name.
+      const stableId = String(o.id || '').trim();
+      const label = String(o.name || o.label || o.key || o.optionKey || '').trim();
+      const optionKey = String(o.key || o.optionKey || label)
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '_')
         .replace(/^_|_$/g, '');
-      const value = serviceId || String(o.value || '').trim() || label || optionKey;
+      const value = stableId || String(o.value || '').trim() || label || optionKey;
       return { value, label: label || value, optionKey: optionKey || value };
     })
     .filter((o) => o.value);
@@ -282,7 +286,7 @@ function matchesRequestType(
 type Props = {
   groups: ExtensionFieldGroup[];
   requestType?: { key?: string | null; name?: string | null } | null;
-  meta?: { preparedBy?: string; primaryTraveller?: string; defaultCurrency?: string };
+  meta?: { preparedBy?: string; primaryContact?: string; defaultCurrency?: string };
   valuesByExtension: Record<string, Record<string, unknown>>;
   onChange: (extensionId: string, values: Record<string, unknown>) => void;
   sectionClassName?: string;
@@ -369,16 +373,13 @@ export function ExtensionFieldsSlot({
       let changed = false;
       const seed: Record<string, unknown> = { ...current };
 
-      // Auto-fill: Prepared By = lead creator; Primary Traveller = contact person
+      // Auto-fill: Prepared By = lead creator; Primary Contact = contact person
       if (meta?.preparedBy && seed['prepared-by'] !== meta.preparedBy) {
         seed['prepared-by'] = meta.preparedBy;
         changed = true;
       }
-      if (
-        meta?.primaryTraveller != null &&
-        seed['primary-traveller'] !== meta.primaryTraveller
-      ) {
-        seed['primary-traveller'] = meta.primaryTraveller;
+      if (meta?.primaryContact != null && seed['primary-contact'] !== meta.primaryContact) {
+        seed['primary-contact'] = meta.primaryContact;
         changed = true;
       }
       // Currency defaults from Settings → General → Default Currency
@@ -403,7 +404,7 @@ export function ExtensionFieldsSlot({
     logicByExt,
     schemaFieldsByExt,
     meta?.preparedBy,
-    meta?.primaryTraveller,
+    meta?.primaryContact,
     meta?.defaultCurrency,
   ]);
 
@@ -516,7 +517,7 @@ export function ExtensionFieldsSlot({
                             })
                           ) : (
                             <span className="text-[11px] text-zinc-500">
-                              No services available. Enable services in Settings → Travel.
+                              No options available.
                             </span>
                           )}
                         </div>
@@ -527,22 +528,49 @@ export function ExtensionFieldsSlot({
                           value={value != null ? String(value) : ''}
                           onChange={(e) => setField(group.extensionId, field.id, e.target.value)}
                         />
-                      ) : field.fieldType === 'select' ? (
-                        <select
-                          {...common}
-                          value={value != null ? String(value) : ''}
-                          onChange={(e) => setField(group.extensionId, field.id, e.target.value)}
-                        >
-                          <option value="">Select…</option>
-                          {opts.map((o) => {
+                      ) : field.fieldType === 'select' || field.fieldType === 'searchable_select' ? (
+                        <SearchableSelect
+                          options={opts.map((o) => {
                             const v = String(o.value || o.optionKey || '');
-                            return (
-                              <option key={v} value={v}>
-                                {o.label || v}
-                              </option>
-                            );
+                            return { label: o.label || v, value: v };
                           })}
-                        </select>
+                          value={value != null ? String(value) : ''}
+                          onChange={(val) => setField(group.extensionId, field.id, val)}
+                          onAddOption={async (newVal) => {
+                            if (field.id === 'from' || field.id === 'to' || field.id === 'destination') {
+                              const settingMap: Record<string, string> = {
+                                from: 'from_places',
+                                to: 'to_places',
+                                destination: 'destinations',
+                              };
+                              const settingKey = settingMap[field.id];
+                              try {
+                                const current = await extensionDataApi.getSettings();
+                                const prevList = Array.isArray(current?.values?.[settingKey])
+                                  ? (current.values[settingKey] as string[])
+                                  : [];
+                                if (!prevList.includes(newVal)) {
+                                  const updated = [...prevList, newVal];
+                                  await extensionDataApi.setSettings({ [settingKey]: updated });
+                                  emitSettingsChanged(group.extensionId, {
+                                    ...(current?.values || {}),
+                                    [settingKey]: updated,
+                                  });
+                                }
+                              } catch (err) {
+                                // CRM 3.43.1: the name did not join the list, so the field keeps its value.
+                                notify.error(`"${newVal}" was not added to the ${field.label} list: ${errorMessage(err, 'the settings could not be saved.')}`);
+                                return;
+                              }
+                            }
+                            setField(group.extensionId, field.id, newVal);
+                          }}
+                          placeholder={field.placeholder || `Type or select ${field.label.toLowerCase()}`}
+                          disabled={!!field.readOnly}
+                          readOnly={!!field.readOnly}
+                          required={!!field.required}
+                          id={common.id}
+                        />
                       ) : field.fieldType === 'number' ? (
                         <input
                           {...common}
@@ -584,7 +612,7 @@ export function ExtensionFieldsSlot({
 
                 if (block.layoutRow && block.fields.length > 1) {
                   const rowClass =
-                    block.layoutRow === 'travellers'
+                    block.fields.length >= 3
                       ? 'sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3'
                       : 'sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3';
                   return (
@@ -652,7 +680,7 @@ export async function buildExtensionPayloadFromFields(
   groups: ExtensionFieldGroup[],
   valuesByExtension: Record<string, Record<string, unknown>>,
   requestType?: { key?: string | null; name?: string | null } | null,
-  meta?: { preparedBy?: string; primaryTraveller?: string; defaultCurrency?: string }
+  meta?: { preparedBy?: string; primaryContact?: string; defaultCurrency?: string }
 ): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   for (const group of groups || []) {
@@ -662,7 +690,7 @@ export async function buildExtensionPayloadFromFields(
     if (logic?.toExtensionBag) {
       const bag = logic.toExtensionBag(values, {
         preparedBy: meta?.preparedBy || '',
-        primaryTraveller: meta?.primaryTraveller || '',
+        primaryContact: meta?.primaryContact || '',
         defaultCurrency: meta?.defaultCurrency || '',
       });
       if (bag && typeof bag === 'object') {

@@ -1,3 +1,4 @@
+import { useNotifyMessage } from '@/components/notifications';
 import { displayLabel } from '../../utils/displayLabels';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -17,6 +18,7 @@ import { ListPager, type ListPaginationMeta } from '../../components/common/List
 import { FinancePdfScanModal } from '../../components/finance/FinancePdfScanModal';
 import { QUOTATION_STATUSES, type QuotationItem } from '../../types/quotations';
 import { triggerFileDownload } from '../../utils/fileDownload';
+import { useSalesFlowConfig } from '../../hooks/useSalesFlowConfig';
 
 function statusClass(status: string): string {
   const map: Record<string, string> = {
@@ -24,6 +26,7 @@ function statusClass(status: string): string {
     Sent: 'bg-sky-50 text-sky-800',
     Accepted: 'bg-emerald-50 text-emerald-800',
     Rejected: 'bg-rose-50 text-rose-800',
+    Closed: 'bg-zinc-100 text-zinc-600',
     Expired: 'bg-amber-50 text-amber-800',
     Converted: 'bg-indigo-50 text-indigo-800',
   };
@@ -41,6 +44,8 @@ export const QuotationsPage: React.FC = () => {
   const { hasAnyPermission, isClient } = useAuth();
   const canWriteQuotes =
     hasAnyPermission('crm.quotes.write', 'crm.finance.write') && !isClient;
+  // The active extension can leave quotation templates out (salesFlow.hideQuotationTemplates).
+  const hideTemplates = Boolean(useSalesFlowConfig().hideQuotationTemplates);
   const [items, setItems] = useState<QuotationItem[]>([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState(() => searchParams.get('status') || '');
@@ -50,6 +55,7 @@ export const QuotationsPage: React.FC = () => {
   const [pagination, setPagination] = useState<ListPaginationMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
   const [busyId, setBusyId] = useState('');
   const [pdfScanOpen, setPdfScanOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -170,7 +176,11 @@ export const QuotationsPage: React.FC = () => {
   };
 
   return (
-    <div data-tour="quotations-tour-landing" className="flex flex-col gap-5">
+    <div
+      data-tour="quotations-tour-landing"
+      data-quotation-templates={hideTemplates ? 'off' : 'on'}
+      className="flex flex-col gap-5"
+    >
       <header className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 pb-4 border-b border-zinc-200">
         <div data-tour="quotations-title">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 m-0 mb-1">
@@ -238,7 +248,7 @@ export const QuotationsPage: React.FC = () => {
               </div>
             )}
           </div>
-          {canWriteQuotes && (
+          {canWriteQuotes && !hideTemplates && (
             <button
               type="button"
               data-tour="quotations-templates-btn"
@@ -336,10 +346,6 @@ export const QuotationsPage: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-      )}
 
       <div
         data-tour="quotations-table"

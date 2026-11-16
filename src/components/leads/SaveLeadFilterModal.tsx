@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import CloseIcon from '@mui/icons-material/Close';
 import { crmApi } from '../../services/api';
 import { SavedLeadFilter } from '../../types/leads';
+import { useNotifyMessage } from '@/components/notifications';
 
 interface SaveLeadFilterModalProps {
   open: boolean;
@@ -29,6 +30,7 @@ export const SaveLeadFilterModal: React.FC<SaveLeadFilterModalProps> = ({
   const [isShared, setIsShared] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
 
   useEffect(() => {
     if (open) {
@@ -120,12 +122,6 @@ export const SaveLeadFilterModal: React.FC<SaveLeadFilterModalProps> = ({
             <CloseIcon sx={{ fontSize: 18 }} />
           </button>
         </div>
-
-        {error && (
-          <div className="mb-4 p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg">
-            {error}
-          </div>
-        )}
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div>

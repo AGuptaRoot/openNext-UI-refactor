@@ -19,6 +19,10 @@ export interface PersonContact {
   pan?: string;
   companyName?: string;
   jobTitle?: string;
+  /** CRM 3.36.0: a client portal user was created for this contact. */
+  IsportalAssigned?: boolean;
+  /** When the portal user was created (null once released by a revoke). */
+  portalAssignedAt?: string | null;
   /** Ids of leads linked to this contact */
   leadIds?: string[];
   leadsCount?: number;

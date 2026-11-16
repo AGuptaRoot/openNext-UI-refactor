@@ -8,6 +8,7 @@ import { crmApi } from '../../services/api';
 import { AddLeadItemModal } from '../leads/AddLeadItemModal';
 import { PhoneNumberField } from '../common/PhoneNumberField';
 import { splitPhoneNumber, validateNationalNumber } from '../../utils/phoneCountryCodes';
+import { useNotifyMessage } from '@/components/notifications';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^[+]?[\d\s().-]{7,20}$/;
@@ -63,6 +64,7 @@ export const ClientCreateModal: React.FC<ClientCreateModalProps> = ({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
   const [duplicateResult, setDuplicateResult] = useState<ClientDuplicateCheckResult | null>(null);
 
   useEffect(() => {
@@ -243,12 +245,6 @@ export const ClientCreateModal: React.FC<ClientCreateModalProps> = ({
       </div>
 
       <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-5 max-h-[80vh] overflow-y-auto">
-        {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 font-medium">
-            {error}
-          </div>
-        )}
-
         {/* Duplicate detection warning */}
         {duplicateResult && duplicateResult.hasDuplicates && (
           <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2.5">

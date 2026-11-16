@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { useNavigate } from 'react-router-dom';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import PeopleAltOutlinedIcon from '@mui/icons-material/PeopleAltOutlined';
@@ -37,9 +38,16 @@ export const KpiScorecards: React.FC<KpiScorecardsProps> = ({
   void _onNavigateUnmigrated;
   const navigate = useNavigate();
   const { activeRole } = useAuth();
+  const { isModuleVisible } = useActiveExtension();
   const visibleKpis = useMemo(
-    () => ROLE_KPIS[activeRole] || ROLE_KPIS['crm-manager'],
-    [activeRole]
+    () =>
+      (ROLE_KPIS[activeRole] || ROLE_KPIS['crm-manager']).filter((id) => {
+        if (id === 'projects') return isModuleVisible('projects');
+        if (id === 'tasks') return isModuleVisible('tasks');
+        if (id === 'hours') return isModuleVisible('time-logs');
+        return true;
+      }),
+    [activeRole, isModuleVisible]
   );
 
   const currency = data.defaultCurrency || getRuntimeDefaultCurrency();

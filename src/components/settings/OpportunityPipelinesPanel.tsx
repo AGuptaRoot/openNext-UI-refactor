@@ -7,18 +7,17 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd';
-import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined';
 import { SwapDropGrid } from '../dndkit';
 import { Briefcase, Lock } from 'lucide-react';
+import { useNotifyMessage } from '@/components/notifications';
 import { crmApi } from '../../services/api';
 import { useActiveExtension } from '../../hooks/useActiveExtension';
 import {
   DEFAULT_STAGE_CATALOG,
   STAGE_TYPE_LABELS,
   OPPORTUNITY_STAGE_TYPES,
-  buildDefaultPipelineStages,
   isProtectedStageType,
   makeLocalStageId,
   validatePipelineStagesClient,
@@ -32,7 +31,7 @@ const inputClass =
 const labelClass = 'mb-1.5 block text-xs font-semibold text-zinc-700';
 const cardClass = 'rounded-xl border border-zinc-300 bg-white p-5';
 
-type EditorMode = 'create' | 'edit' | null;
+type EditorMode = 'edit' | null;
 
 type EditorState = {
   id?: string;
@@ -43,23 +42,13 @@ type EditorState = {
   stages: OpportunityPipelineStage[];
 };
 
-function emptyEditor(): EditorState {
-  return {
-    name: '',
-    description: '',
-    quotationWorkflowEnabled: true,
-    isEnabled: true,
-    stages: buildDefaultPipelineStages(),
-  };
-}
-
 function fromPipeline(pipeline: OpportunityPipeline): EditorState {
   return {
     id: pipeline._id,
     name: pipeline.name,
     description: pipeline.description || '',
     quotationWorkflowEnabled: pipeline.quotationWorkflowEnabled !== false,
-    isEnabled: pipeline.isEnabled !== false,
+    isEnabled: true,
     stages: (pipeline.stages || []).map((s, index) => ({
       id: s.id || makeLocalStageId(index),
       label: s.label,
@@ -75,10 +64,10 @@ export function OpportunityPipelinesPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  useNotifyMessage(message?.text, message?.kind === 'success' ? 'success' : 'error', () => setMessage(null));
   const [mode, setMode] = useState<EditorMode>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [catalogMenuOpen, setCatalogMenuOpen] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState<OpportunityPipeline | null>(null);
 
   const load = useCallback(async (opts?: { clearMessage?: boolean }) => {
     setLoading(true);
@@ -100,17 +89,18 @@ export function OpportunityPipelinesPanel() {
     void load();
   }, [load]);
 
-  const activeId = useMemo(
-    () => pipelines.find((p) => p.isActive)?._id || '',
-    [pipelines]
-  );
+  const displayedPipelines = useMemo(() => {
+    const matched = pipelines.filter((p) => p.pipelineKey === activeExtension.pipelineKey);
+    if (matched.length > 0) return matched;
+    const active = pipelines.filter((p) => p.isActive);
+    if (active.length > 0) return active;
+    return pipelines.slice(0, 1);
+  }, [pipelines, activeExtension.pipelineKey]);
 
-  const openCreate = () => {
-    setMode('create');
-    setEditor(emptyEditor());
-    setCatalogMenuOpen(false);
-    setMessage(null);
-  };
+  const activeId = useMemo(
+    () => displayedPipelines.find((p) => p.isActive)?._id || displayedPipelines[0]?._id || '',
+    [displayedPipelines]
+  );
 
   const openEdit = (pipeline: OpportunityPipeline) => {
     setMode('edit');
@@ -241,7 +231,7 @@ export function OpportunityPipelinesPanel() {
         name,
         description: editor.description.trim(),
         quotationWorkflowEnabled: editor.quotationWorkflowEnabled,
-        isEnabled: editor.isEnabled,
+        isEnabled: true,
         stages: editor.stages.map((s) => ({
           id: s.id,
           label: s.label.trim(),
@@ -249,16 +239,7 @@ export function OpportunityPipelinesPanel() {
           probability: s.probability,
         })),
       };
-      if (mode === 'create') {
-        const created = await crmApi.createOpportunityPipeline(payload);
-        if (created.data?._id) {
-          setPipelines((prev) => {
-            const without = prev.filter((p) => p._id !== created.data._id);
-            return [created.data, ...without];
-          });
-        }
-        setMessage({ kind: 'success', text: 'Pipeline created.' });
-      } else if (editor.id) {
+      if (editor.id) {
         const updated = await crmApi.updateOpportunityPipeline(editor.id, payload);
         if (updated.data?._id) {
           setPipelines((prev) =>
@@ -267,7 +248,7 @@ export function OpportunityPipelinesPanel() {
         }
         setMessage({ kind: 'success', text: 'Pipeline updated.' });
       } else {
-        setMessage({ kind: 'error', text: 'Nothing to save — open Create or Edit first.' });
+        setMessage({ kind: 'error', text: 'Nothing to save — open Edit first.' });
         return;
       }
       closeEditor();
@@ -279,98 +260,6 @@ export function OpportunityPipelinesPanel() {
       });
     } finally {
       setSaving(false);
-    }
-  };
-
-  const activate = async (pipeline: OpportunityPipeline) => {
-    if (pipeline.isActive) return;
-    if (!pipeline.isEnabled) {
-      setMessage({ kind: 'error', text: 'Enable the pipeline before activating it.' });
-      return;
-    }
-    setSaving(true);
-    try {
-      await crmApi.activateOpportunityPipeline(pipeline._id);
-      setMessage({
-        kind: 'success',
-        text: `"${pipeline.name}" is now the active pipeline.`,
-      });
-      await load();
-    } catch (reason) {
-      setMessage({
-        kind: 'error',
-        text: reason instanceof Error ? reason.message : 'Failed to activate pipeline',
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const toggleEnabled = async (pipeline: OpportunityPipeline) => {
-    if (pipeline.isActive && pipeline.isEnabled) {
-      const other = pipelines.find((p) => p._id !== pipeline._id && p.isEnabled);
-      if (!other) {
-        setMessage({
-          kind: 'error',
-          text: 'Cannot disable the only enabled pipeline. Enable another pipeline first.',
-        });
-        return;
-      }
-    }
-    setSaving(true);
-    try {
-      await crmApi.updateOpportunityPipeline(pipeline._id, {
-        isEnabled: !pipeline.isEnabled,
-      });
-      setMessage({
-        kind: 'success',
-        text: `"${pipeline.name}" ${pipeline.isEnabled ? 'disabled' : 'enabled'}.`,
-      });
-      await load();
-    } catch (reason) {
-      setMessage({
-        kind: 'error',
-        text: reason instanceof Error ? reason.message : 'Failed to update pipeline',
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const confirmDelete = async () => {
-    if (!deleteConfirm) return;
-    if (deleteConfirm.isDefault) {
-      setMessage({ kind: 'error', text: 'The default pipeline cannot be deleted.' });
-      setDeleteConfirm(null);
-      return;
-    }
-    if ((deleteConfirm.opportunityCount || 0) > 0) {
-      setMessage({
-        kind: 'error',
-        text: `Cannot delete "${deleteConfirm.name}" — ${deleteConfirm.opportunityCount} opportunit${
-          deleteConfirm.opportunityCount === 1 ? 'y is' : 'ies are'
-        } linked. Move those opportunities to another pipeline first.`,
-      });
-      setDeleteConfirm(null);
-      return;
-    }
-    setSaving(true);
-    try {
-      await crmApi.deleteOpportunityPipeline(deleteConfirm._id);
-      setMessage({ kind: 'success', text: `Pipeline "${deleteConfirm.name}" deleted.` });
-      setDeleteConfirm(null);
-      await load();
-    } catch (reason) {
-      const err = reason as Error & { opportunityCount?: number; code?: string };
-      setMessage({
-        kind: 'error',
-        text:
-          err.message ||
-          'Cannot delete this pipeline. Move linked opportunities to another pipeline first.',
-      });
-    } finally {
-      setSaving(false);
-      setDeleteConfirm(null);
     }
   };
 
@@ -408,9 +297,7 @@ export function OpportunityPipelinesPanel() {
         <div className={`${cardClass} space-y-4`}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h3 className="m-0 text-sm font-bold text-zinc-950">
-                {mode === 'create' ? 'Create Pipeline' : 'Edit Pipeline'}
-              </h3>
+              <h3 className="m-0 text-sm font-bold text-zinc-950">Edit Pipeline</h3>
               <p className="mb-0 mt-1 text-xs text-zinc-500">
                 Minimum 5 stages. Won and Lost are required and cannot be removed. Rename labels
                 freely — internal types power quotation and close workflows.
@@ -424,18 +311,6 @@ export function OpportunityPipelinesPanel() {
               <CloseIcon sx={{ fontSize: 16 }} /> Cancel
             </button>
           </div>
-
-          {message && (
-            <div
-              className={`rounded-lg px-3 py-2 text-xs font-medium ${
-                message.kind === 'success'
-                  ? 'bg-emerald-50 text-emerald-800'
-                  : 'bg-red-50 text-red-700'
-              }`}
-            >
-              {message.text}
-            </div>
-          )}
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="block">
@@ -468,14 +343,6 @@ export function OpportunityPipelinesPanel() {
                 }
               />
               CRM Quotation workflow (requires Quotation Sent + Negotiation types)
-            </label>
-            <label className="inline-flex items-center gap-2 text-xs font-semibold text-zinc-700">
-              <input
-                type="checkbox"
-                checked={editor.isEnabled}
-                onChange={(e) => setEditor({ ...editor, isEnabled: e.target.checked })}
-              />
-              Enabled
             </label>
             <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] font-semibold text-zinc-600">
               {editor.stages.length} stage{editor.stages.length === 1 ? '' : 's'}
@@ -642,7 +509,7 @@ export function OpportunityPipelinesPanel() {
               className="inline-flex h-9 items-center gap-1 rounded-lg border-0 bg-zinc-950 px-4 text-xs font-semibold text-white disabled:opacity-50"
             >
               <SaveOutlinedIcon sx={{ fontSize: 16 }} />
-              {saving ? 'Saving…' : mode === 'create' ? 'Create pipeline' : 'Save pipeline'}
+              {saving ? 'Saving…' : 'Save pipeline'}
             </button>
           </div>
         </div>
@@ -676,13 +543,6 @@ export function OpportunityPipelinesPanel() {
             >
               <RefreshIcon sx={{ fontSize: 16 }} /> Refresh
             </button>
-            <button
-              type="button"
-              onClick={openCreate}
-              className="inline-flex h-9 items-center gap-1 rounded-lg border-0 bg-zinc-950 px-4 text-xs font-semibold text-white hover:bg-zinc-800"
-            >
-              <AddIcon sx={{ fontSize: 16 }} /> Add Pipeline
-            </button>
           </div>
         </div>
 
@@ -704,22 +564,10 @@ export function OpportunityPipelinesPanel() {
           );
         })()}
 
-        {message && (
-          <div
-            className={`rounded-lg px-3 py-2 text-xs font-medium ${
-              message.kind === 'success'
-                ? 'bg-emerald-50 text-emerald-800'
-                : 'bg-red-50 text-red-700'
-            }`}
-          >
-            {message.text}
-          </div>
-        )}
-
         {loading ? (
           <p className="m-0 text-xs text-zinc-500">Loading pipelines…</p>
-        ) : pipelines.length === 0 ? (
-          <p className="m-0 text-xs text-zinc-500">No pipelines yet. Create your first pipeline.</p>
+        ) : displayedPipelines.length === 0 ? (
+          <p className="m-0 text-xs text-zinc-500">No pipelines yet.</p>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-zinc-200">
             <table className="w-full min-w-[720px] border-collapse text-left text-sm">
@@ -728,12 +576,11 @@ export function OpportunityPipelinesPanel() {
                   <th className="px-4 py-3 font-semibold">Pipeline</th>
                   <th className="px-4 py-3 font-semibold">Stages</th>
                   <th className="px-4 py-3 font-semibold">Opportunities</th>
-                  <th className="px-4 py-3 font-semibold">Status</th>
                   <th className="px-4 py-3 font-semibold text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {pipelines.map((pipeline) => (
+                {displayedPipelines.map((pipeline) => (
                   <tr key={pipeline._id} className="border-b border-zinc-100 last:border-0">
                     <td className="px-4 py-3">
                       <div className="font-semibold text-zinc-900">{pipeline.name}</div>
@@ -765,39 +612,7 @@ export function OpportunityPipelinesPanel() {
                       {pipeline.opportunityCount ?? 0}
                     </td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                          pipeline.isEnabled
-                            ? 'bg-emerald-50 text-emerald-700'
-                            : 'bg-zinc-100 text-zinc-500'
-                        }`}
-                      >
-                        {pipeline.isEnabled ? 'Enabled' : 'Disabled'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
                       <div className="flex flex-wrap items-center justify-end gap-1.5">
-                        {!pipeline.isActive && pipeline.isEnabled && (
-                          <button
-                            type="button"
-                            disabled={saving}
-                            onClick={() => void activate(pipeline)}
-                            className="inline-flex h-8 items-center rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-semibold text-emerald-800 disabled:opacity-50"
-                            title="Make this the only active pipeline"
-                          >
-                            Set Active
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          disabled={saving}
-                          onClick={() => void toggleEnabled(pipeline)}
-                          className="inline-flex h-8 items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2.5 text-[11px] font-semibold text-zinc-700 disabled:opacity-50"
-                          title={pipeline.isEnabled ? 'Disable' : 'Enable'}
-                        >
-                          <PowerSettingsNewIcon sx={{ fontSize: 14 }} />
-                          {pipeline.isEnabled ? 'Disable' : 'Enable'}
-                        </button>
                         <button
                           type="button"
                           onClick={() => openEdit(pipeline)}
@@ -805,27 +620,6 @@ export function OpportunityPipelinesPanel() {
                         >
                           <EditOutlinedIcon sx={{ fontSize: 14 }} /> Edit
                         </button>
-                        {!pipeline.isDefault && (
-                          <button
-                            type="button"
-                            disabled={saving}
-                            onClick={() => {
-                              if ((pipeline.opportunityCount || 0) > 0) {
-                                setMessage({
-                                  kind: 'error',
-                                  text: `Cannot delete "${pipeline.name}" — ${pipeline.opportunityCount} opportunit${
-                                    pipeline.opportunityCount === 1 ? 'y is' : 'ies are'
-                                  } linked. Move those opportunities to another pipeline first.`,
-                                });
-                                return;
-                              }
-                              setDeleteConfirm(pipeline);
-                            }}
-                            className="inline-flex h-8 items-center gap-1 rounded-lg border border-red-100 bg-white px-2.5 text-[11px] font-semibold text-red-600 disabled:opacity-50"
-                          >
-                            <DeleteOutlineIcon sx={{ fontSize: 14 }} /> Delete
-                          </button>
-                        )}
                       </div>
                     </td>
                   </tr>
@@ -841,35 +635,6 @@ export function OpportunityPipelinesPanel() {
           </p>
         ) : null}
       </div>
-
-      {deleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl">
-            <h4 className="m-0 text-sm font-bold text-zinc-950">Delete pipeline?</h4>
-            <p className="mt-2 text-xs leading-relaxed text-zinc-600">
-              Delete <strong>{deleteConfirm.name}</strong>? This cannot be undone. Pipelines with
-              linked opportunities cannot be deleted — move those deals first.
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setDeleteConfirm(null)}
-                className="inline-flex h-9 items-center rounded-lg border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => void confirmDelete()}
-                className="inline-flex h-9 items-center rounded-lg border-0 bg-red-600 px-3 text-xs font-semibold text-white disabled:opacity-50"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

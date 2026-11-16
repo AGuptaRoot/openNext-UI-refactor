@@ -4,6 +4,9 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DocumentScannerOutlinedIcon from '@mui/icons-material/DocumentScannerOutlined';
 
 import { useAuth } from '../../context/AuthContext';
+import { useNotifyMessage, notify } from '@/components/notifications';
+import { ClientCompanyMatchModal } from '../../components/leads/ClientCompanyMatchModal';
+import { useExistingClientMatch } from '../../hooks/useExistingClientMatch';
 import { ApiError, crmApi } from '../../services/api';
 import { PersonContact } from '../../types/contacts';
 import type { LeadOcrExtractResult } from '../../types/leads';
@@ -36,10 +39,20 @@ export const ContactCreatePage: React.FC = () => {
   const [values, setValues] = useState<ContactFormValues>({ ...EMPTY_CONTACT_FORM });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
   const [showOcrModal, setShowOcrModal] = useState(false);
   const [showDiscrepancyModal, setShowDiscrepancyModal] = useState(false);
 
   const { duplicates, setDuplicates, checkValues, clear, checking } = useContactDuplicates();
+
+  /**
+   * CRM 3.48.0: the shared Existing Client Found flow — the typed company is an existing Client.
+   * Not asked when this form was opened from a client (the contact is being added to that client anyway).
+   * The resume step remembers how the user was creating: normal, duplicate kept, or different company.
+   */
+  type CreateStep = 'normal' | 'duplicate' | 'differentCompany';
+  const clientMatch = useExistingClientMatch<CreateStep>();
+  const askForClient = !(returnTo && returnTo.startsWith('/clients/'));
 
   // Debounced check for company discrepancy (different company but same email / phone / name)
   const { discrepancy, checkNow, clear: clearDiscrepancy } = useCompanyDiscrepancyCheck({
@@ -81,6 +94,8 @@ export const ContactCreatePage: React.FC = () => {
       setError(validationError);
       return;
     }
+    const step: CreateStep = confirmDifferentCompany ? 'differentCompany' : allowDuplicate ? 'duplicate' : 'normal';
+    if (askForClient && (await clientMatch.ask({ company: values.companyName.trim() }, step))) return;
     setSaving(true);
     try {
       const created = await crmApi.createContact({
@@ -156,6 +171,52 @@ export const ContactCreatePage: React.FC = () => {
         setShowDiscrepancyModal(true);
       }
     });
+  };
+
+  const handleClientMatchContinue = () => {
+    const step = clientMatch.continueAnyway();
+    if (step === 'normal') void createContact(false);
+    else if (step === 'duplicate') void createContact(true);
+    else if (step === 'differentCompany') void createContact(true, true);
+  };
+
+  /** "Add as Secondary Contact": the contact (reused when it already exists once) joins the existing Client. */
+  const handleClientMatchAddSecondary = async () => {
+    const match = clientMatch.selected;
+    if (!match || !match.canAddContact || clientMatch.busy) return;
+    const keepDuplicate = clientMatch.resume === 'duplicate' || clientMatch.resume === 'differentCompany';
+    clientMatch.setBusy(true);
+    clientMatch.setError(null);
+    try {
+      const res = await crmApi.addSecondaryClientContact(match.id, {
+        ...contactFormToInput(values),
+        // The user already chose to keep a duplicate; otherwise one existing contact is reused.
+        allowDuplicate: keepDuplicate,
+        reuseExisting: !keepDuplicate,
+        source: 'contact',
+      });
+      const clientName = res.data?.client?.name || match.name;
+      const personName = res.data?.contact?.name || values.name;
+      notify.success(
+        res.data?.alreadyLinked
+          ? `${personName} is already a contact of ${clientName}.`
+          : `${personName} was added to ${clientName} as a Secondary Contact.`
+      );
+      clientMatch.close();
+      clear();
+      clearDiscrepancy();
+      navigate(`/clients/${encodeURIComponent(match.id)}?tab=contacts`);
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 409 && Array.isArray(err.duplicates)) {
+        // Several contacts match: the duplicate banner lets the user pick one (or keep a new one).
+        clientMatch.close();
+        setDuplicates(err.duplicates as PersonContact[]);
+      } else {
+        clientMatch.setError(err instanceof Error ? err.message : 'Failed to add the contact to the client');
+      }
+    } finally {
+      clientMatch.setBusy(false);
+    }
   };
 
   /** Option 2 — force create a new contact with the same email / phone / PAN. */
@@ -258,12 +319,6 @@ export const ContactCreatePage: React.FC = () => {
         onDismiss={clear}
       />
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold p-3.5 rounded-xl">
-          {error}
-        </div>
-      )}
-
       <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-6">
         <section
           data-tour="contacts-create-fields"
@@ -305,6 +360,21 @@ export const ContactCreatePage: React.FC = () => {
         onConfirm={() => void handleConfirmDiscrepancyCreate()}
         onCancel={handleCancelDiscrepancyCreate}
         loading={saving}
+      />
+      <ClientCompanyMatchModal
+        open={clientMatch.open}
+        matches={clientMatch.matches}
+        selectedId={clientMatch.selectedId}
+        onSelect={clientMatch.select}
+        onAddSecondary={() => void handleClientMatchAddSecondary()}
+        onContinueLead={handleClientMatchContinue}
+        onClose={clientMatch.close}
+        loading={clientMatch.busy}
+        error={clientMatch.error}
+        continueLabel="Continue Creating Contact"
+        addNote="the contact is saved (an existing one with the same email / mobile / PAN is reused) and joins this client as a Secondary Contact. No client is created."
+        continueNote="the same name does not always mean the same client. The contact is created as usual, without a client."
+        newContact={{ name: values.name, email: values.email, phone: values.phone }}
       />
 
       {/* OCR Scan Visiting Card Modal */}

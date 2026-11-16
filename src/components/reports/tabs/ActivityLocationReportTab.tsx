@@ -90,7 +90,7 @@ const MapPanel: React.FC<{ title: string; point: ActivityLocationPoint }> = ({ t
  * Activity Location report — which rep did what, on which lead, and where they
  * were. A row expands to show the map(s) for its captured coordinates.
  */
-export const ActivityLocationReportTab: React.FC<ActivityLocationReportTabProps> = ({ data }) => {
+export const ActivityLocationReportTab: React.FC<ActivityLocationReportTabProps & { initialRep?: string }> = ({ data, initialRep }) => {
   const rows = data.rows || [];
   const summary = data.summary || {
     total: 0,
@@ -102,7 +102,8 @@ export const ActivityLocationReportTab: React.FC<ActivityLocationReportTabProps>
   };
 
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [repFilter, setRepFilter] = useState('');
+  // ?rep= (e.g. a sales person opened from an extension's report): that rep's activities.
+  const [repFilter, setRepFilter] = useState(initialRep || '');
   const [kindFilter, setKindFilter] = useState<'all' | 'logged' | 'scheduled'>('all');
   const [typeFilter, setTypeFilter] = useState('');
   const [onlyLocated, setOnlyLocated] = useState(false);

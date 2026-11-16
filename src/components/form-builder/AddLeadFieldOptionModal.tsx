@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import CloseIcon from '@mui/icons-material/Close';
+import { useNotifyMessage } from '@/components/notifications';
 
 export interface AddLeadFieldOptionModalProps {
   open: boolean;
@@ -31,6 +32,7 @@ export const AddLeadFieldOptionModal: React.FC<AddLeadFieldOptionModalProps> = (
   const [addToGlobalCatalog, setAddToGlobalCatalog] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
 
   useEffect(() => {
     if (!open) return;
@@ -137,12 +139,6 @@ export const AddLeadFieldOptionModal: React.FC<AddLeadFieldOptionModalProps> = (
               </span>
             </span>
           </label>
-        ) : null}
-
-        {error ? (
-          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
-            {error}
-          </div>
         ) : null}
 
         <div className="flex justify-end gap-2">

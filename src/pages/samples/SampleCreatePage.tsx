@@ -28,6 +28,7 @@ import {
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 import { getCurrencySymbol, normalizeCurrencyCode } from '../../utils/currency';
 import { CURRENCY_OPTIONS } from '../../components/finance/FinanceFormElements';
+import { useNotifyMessage } from '@/components/notifications';
 
 const fieldClass =
   'h-10 w-full box-border rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-950 focus:ring-1 focus:ring-zinc-950 transition-colors';
@@ -80,6 +81,7 @@ export const SampleCreatePage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
   const [items, setItems] = useState<SampleProductItem[]>([
     { productName: '', quantity: 1, unit: 'pcs' },
   ]);
@@ -428,12 +430,6 @@ export const SampleCreatePage: React.FC = () => {
           Draft Request
         </span>
       </div>
-
-      {error && (
-        <div className="mb-4 rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm font-medium text-zinc-900">
-          {error}
-        </div>
-      )}
 
       {loading ? (
         <div className="rounded-xl border border-zinc-200 bg-white p-10 text-center text-sm text-zinc-500">

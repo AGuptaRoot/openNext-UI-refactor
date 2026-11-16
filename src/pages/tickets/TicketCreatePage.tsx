@@ -4,8 +4,11 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import { crmApi } from '../../services/api';
+import { useNotifyMessage } from '@/components/notifications';
 import { useAuth } from '../../context/AuthContext';
 import { useActiveExtension } from '../../hooks/useActiveExtension';
+import { ExtensionCreateFields } from '../../components/extensions';
+import { extensionDataApi } from '../../services/extensionDataApi';
 import type { AssignableUser } from '../../types/leads';
 import type { ProjectItem } from '../../types/projects';
 import {
@@ -127,6 +130,8 @@ export const TicketCreatePage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
+  const [extensionValues, setExtensionValues] = useState<Record<string, unknown>>({});
 
   const [assignGroup, setAssignGroup] = useState('');
   const [assignedTo, setAssignedTo] = useState('');
@@ -254,7 +259,11 @@ export const TicketCreatePage: React.FC = () => {
         requesterName: creatorName,
         clientId: user?.clientId || undefined,
       });
-      navigate(`/tickets/${response.data._id}`);
+      const ticketId = response.data._id;
+      if (ticketId && Object.keys(extensionValues).length > 0) {
+        await extensionDataApi.setValues('ticket', ticketId, extensionValues).catch((err) => console.warn('Extension values save error:', err));
+      }
+      navigate(`/tickets/${ticketId}`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Failed to create ticket');
     } finally {
@@ -309,10 +318,6 @@ export const TicketCreatePage: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-      )}
 
       <div className={`${sectionClass} mb-4 flex items-center gap-3`}>
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-zinc-900 text-sm font-bold text-white">
@@ -596,6 +601,13 @@ export const TicketCreatePage: React.FC = () => {
               </div>
             </div>
           </section>
+
+          <ExtensionCreateFields
+            record="ticket"
+            values={extensionValues}
+            onChange={setExtensionValues}
+            disabled={saving}
+          />
 
           <div data-tour="tickets-create-actions" className="flex justify-end gap-3 pb-6">
             <Link

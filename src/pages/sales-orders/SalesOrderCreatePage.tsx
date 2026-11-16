@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
+import { useNotifyMessage } from '@/components/notifications';
 import { crmApi } from '../../services/api';
 import {
   DEFAULT_SALES_ORDER_SOURCES,
@@ -68,6 +69,7 @@ export const SalesOrderCreatePage: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
   const [currency, setCurrency] = useState(settingsCurrency);
   const [exchangeRate, setExchangeRate] = useState(1);
   const [currencyLocked, setCurrencyLocked] = useState(false);
@@ -312,11 +314,6 @@ export const SalesOrderCreatePage: React.FC = () => {
         saving={saving}
         formId="sales-order-form"
       />
-      {error && (
-        <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-xs font-semibold text-red-700">
-          {error}
-        </div>
-      )}
       <form id="sales-order-form" onSubmit={submit} className="flex flex-col gap-5" noValidate>
         <div data-tour="sales-orders-create-order-client">
         <FormSection title="Order & client details">

@@ -36,8 +36,7 @@ function extensionFingerprint(ext: unknown): string {
 
 /**
  * Generic Lead Detail extension tab.
- * CRM hosts the tab chrome; the extension package supplies the iframe form
- * (e.g. Travel Requirement when request type is Travel).
+ * CRM hosts the tab chrome; the extension package supplies the iframe form.
  */
 export function ExtensionTab({
   active = true,
@@ -81,8 +80,6 @@ export function ExtensionTab({
         requestId,
       };
       target.postMessage(msg, '*');
-      // Legacy travel alias until all extension pages migrate.
-      target.postMessage({ ...msg, type: 'crm-travel-hydrate' }, '*');
     },
     [leadId, tab.extensionId]
   );
@@ -101,9 +98,7 @@ export function ExtensionTab({
 
       if (
         type === 'extension-lead-ready' ||
-        type === 'crm-travel-ready' ||
-        type === 'extension-lead-get' ||
-        type === 'crm-travel-get-extension'
+        type === 'extension-lead-get'
       ) {
         postHydrate(
           event.source as Window | null,
@@ -113,7 +108,7 @@ export function ExtensionTab({
         return;
       }
 
-      if (type === 'extension-lead-sync' || type === 'crm-travel-sync') {
+      if (type === 'extension-lead-sync') {
         const ext = asExtensionBag(data.extension);
         if (!ext || !Object.keys(ext).length) return;
         const fp = extensionFingerprint(ext);

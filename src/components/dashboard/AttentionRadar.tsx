@@ -1,4 +1,5 @@
 import React from 'react';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { useNavigate } from 'react-router-dom';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
@@ -30,15 +31,19 @@ export const AttentionRadar: React.FC<AttentionRadarProps> = ({ data }) => {
       ).length ||
       0
     : 0;
-  const overdueTasksCount = data.overdueTasks || (data.overdueTasksList || []).length || 0;
-  const urgentTicketsCount =
+  // Task alerts only when the active extension shows Tasks.
+  const { isModuleVisible } = useActiveExtension();
+  const tasksVisible = isModuleVisible('tasks');
+  const overdueTasksCount = tasksVisible ? data.overdueTasks || (data.overdueTasksList || []).length || 0 : 0;
+  const ticketsVisible = isModuleVisible('tickets');
+  const urgentTicketsCount = !ticketsVisible ? 0 :
     Number(
       (data.opportunitiesSummary as { ticketStats?: { urgentTickets?: number } } | null)?.ticketStats
         ?.urgentTickets
     ) ||
     (data.urgentTicketsList || []).length ||
     0;
-  const blockedTasksCount = data.blockedAwaitingClientTasks?.length || 0;
+  const blockedTasksCount = tasksVisible ? data.blockedAwaitingClientTasks?.length || 0 : 0;
   const pendingPortalApprovals = Number(data.pendingPortalApprovals) || 0;
 
   const hasAlerts =
@@ -61,8 +66,8 @@ export const AttentionRadar: React.FC<AttentionRadarProps> = ({ data }) => {
           </h4>
           <p className="text-xs text-zinc-500 m-0 mt-0.5">
             {activeRole === 'project-manager' || activeRole === 'crm-employee'
-              ? 'No overdue tasks, blocked deliverables, or critical tickets needing attention.'
-              : 'No overdue invoices, blocked deliverables, or critical tickets requiring immediate escalation.'}
+              ? `No overdue tasks${ticketsVisible ? ', blocked deliverables, or critical tickets' : ' or blocked deliverables'} needing attention.`
+              : `No overdue invoices${ticketsVisible ? ', blocked deliverables, or critical tickets' : ' or blocked deliverables'} requiring immediate escalation.`}
           </p>
         </div>
       </div>

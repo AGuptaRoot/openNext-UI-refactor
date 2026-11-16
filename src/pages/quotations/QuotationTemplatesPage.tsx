@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import { useNotifyMessage } from '@/components/notifications';
 import { crmApi } from '../../services/api';
 import { useDialog } from '../../context/DialogContext';
 import type { QuotationTemplateItem } from '../../types/quotations';
@@ -13,6 +14,7 @@ export const QuotationTemplatesPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,10 +75,6 @@ export const QuotationTemplatesPage: React.FC = () => {
         placeholder="Search templates…"
         className="h-9 max-w-xl px-3 text-sm border border-zinc-200 rounded-lg"
       />
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-      )}
 
       <div className="bg-white border border-zinc-300 rounded-xl overflow-hidden">
         {loading ? (

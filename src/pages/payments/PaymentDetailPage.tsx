@@ -1,3 +1,4 @@
+import { useNotifyMessage } from '@/components/notifications';
 import { displayLabel } from '../../utils/displayLabels';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -34,6 +35,7 @@ export const PaymentDetailPage: React.FC = () => {
   const [payment, setPayment] = useState<PaymentItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error');
   const [busy, setBusy] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
   const [refundAmount, setRefundAmount] = useState('');
@@ -182,7 +184,6 @@ export const PaymentDetailPage: React.FC = () => {
         </div>
       </header>
 
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[

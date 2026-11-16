@@ -13,6 +13,10 @@ interface ContactDuplicateBannerProps {
   onCreateNewLead?: () => void;
   /** Button label for each duplicate row (Option 1). */
   actionLabel?: string;
+  /** Optional second button on each duplicate row: edit that existing contact (e.g. its Company Name). */
+  onEditContact?: (contact: PersonContact) => void;
+  /** Label of the edit button. */
+  editLabel?: string;
   /** Button label for Option 2. */
   createNewLabel?: string;
   /** Section heading for Option 1. */
@@ -44,6 +48,8 @@ export const ContactDuplicateBanner: React.FC<ContactDuplicateBannerProps> = ({
   onUseContact,
   onCreateNewLead,
   actionLabel = 'Use existing contact',
+  onEditContact,
+  editLabel = 'Edit Contact',
   createNewLabel = 'Add as new contact',
   option1Title = 'Option 1 — Use existing contact',
   option2Title = 'Option 2 — Add as new contact',
@@ -133,14 +139,26 @@ export const ContactDuplicateBanner: React.FC<ContactDuplicateBannerProps> = ({
                       </div>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onUseContact(contact)}
-                    className="shrink-0 px-3.5 py-2 text-[11px] font-semibold rounded-lg border border-zinc-950 bg-zinc-950 text-white hover:bg-zinc-800 disabled:opacity-50 cursor-pointer"
-                  >
-                    {actionLabel}
-                  </button>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    {onEditContact ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onEditContact(contact)}
+                        className="px-3.5 py-2 text-[11px] font-semibold rounded-lg border border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-50 disabled:opacity-50 cursor-pointer"
+                      >
+                        {editLabel}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onUseContact(contact)}
+                      className="px-3.5 py-2 text-[11px] font-semibold rounded-lg border border-zinc-950 bg-zinc-950 text-white hover:bg-zinc-800 disabled:opacity-50 cursor-pointer"
+                    >
+                      {actionLabel}
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>

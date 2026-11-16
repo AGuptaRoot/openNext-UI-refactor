@@ -27,6 +27,7 @@ import {
 } from '../../types/marketing';
 import { Mail, Megaphone, Play, Target, Zap } from 'lucide-react';
 import { triggerFileDownload } from '../../utils/fileDownload';
+import { useNotifyMessage } from '@/components/notifications';
 
 type MainTab = 'campaigns' | 'analytics';
 
@@ -69,6 +70,8 @@ export const MarketingPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
+  useNotifyMessage(success, 'success', () => setSuccess(''));
   const [busyId, setBusyId] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
 
@@ -418,15 +421,6 @@ export const MarketingPage: React.FC = () => {
           <TourButton moduleId="marketing" />
         </div>
       </header>
-
-      {error && !createOpen && !testOpen && !winBackOpen && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-      )}
-      {success && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
-          {success}
-        </div>
-      )}
 
       <section data-tour="mkt-audience-kpis" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
@@ -852,11 +846,6 @@ export const MarketingPage: React.FC = () => {
               </button>
             </div>
             <form data-tour="mkt-create-form" onSubmit={submitCreate} className="space-y-4 p-5">
-              {error && createOpen && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  {error}
-                </div>
-              )}
               <label className="block">
                 <span className="mb-1.5 block text-xs font-semibold text-zinc-700">Campaign Name *</span>
                 <input
@@ -979,11 +968,6 @@ export const MarketingPage: React.FC = () => {
               </button>
             </div>
             <form onSubmit={submitTest} className="space-y-4 p-5">
-              {error && testOpen && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  {error}
-                </div>
-              )}
               <label className="block">
                 <span className="mb-1.5 block text-xs font-semibold text-zinc-700">
                   Recipient Test Email *
@@ -1035,11 +1019,6 @@ export const MarketingPage: React.FC = () => {
               </button>
             </div>
             <form onSubmit={submitWinBack} className="space-y-4 p-5">
-              {error && winBackOpen && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  {error}
-                </div>
-              )}
               <label className="block">
                 <span className="mb-1.5 block text-xs font-semibold text-zinc-700">
                   Select Lost / Inactive Lead *

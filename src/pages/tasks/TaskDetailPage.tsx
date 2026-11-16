@@ -38,6 +38,7 @@ import { displayUserLabel } from '../../utils/displayLabels';
 import { formatCrmMoney, getRuntimeDefaultCurrency } from '../../utils/currency';
 import { crmApi } from '../../services/api';
 import { useDialog } from '../../context/DialogContext';
+import { notify } from '@/components/notifications';
 import { useTimer } from '../../context/TimerContext';
 import {
   TaskComment,
@@ -205,14 +206,12 @@ export const TaskDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   const subtaskInputRef = useRef<HTMLInputElement>(null);
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
-    setToast({ text, type });
-    setTimeout(() => setToast(null), 3500);
+    notify.show(type, text);
   };
 
   // Load main task data
@@ -797,19 +796,6 @@ export const TaskDetailPage: React.FC = () => {
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Toast Notification */}
-      {toast && (
-        <div
-          className={`fixed bottom-5 right-5 z-50 rounded-lg border px-4 py-2.5 text-xs font-semibold shadow-lg ${
-            toast.type === 'error'
-              ? 'border-red-200 bg-red-50 text-red-800'
-              : 'border-emerald-200 bg-emerald-50 text-emerald-800'
-          }`}
-        >
-          {toast.text}
-        </div>
-      )}
-
       {/* Header */}
       <header data-tour="tasks-detail-hero" className="flex flex-col gap-4 border-b border-zinc-200 pb-4">
         <Link

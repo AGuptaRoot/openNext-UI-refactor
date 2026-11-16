@@ -8,6 +8,7 @@ import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { TourButton } from '../../ui/tour';
 import { useDialog } from '../../context/DialogContext';
+import { useNotifyMessage } from '@/components/notifications';
 import { ListPager, type ListPaginationMeta } from '../../components/common/ListPager';
 import type { CrmSettings } from '../../types/admin';
 import {
@@ -74,6 +75,8 @@ export const SamplesPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
+  useNotifyMessage(success, 'success', () => setSuccess(''));
   const [busyId, setBusyId] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
 
@@ -462,15 +465,6 @@ export const SamplesPage: React.FC = () => {
         </div>
       </header>
 
-      {error && !approveOpen && !dispatchOpen && !feedbackOpen && (
-        <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">{error}</div>
-      )}
-      {success && (
-        <div className="rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">
-          {success}
-        </div>
-      )}
-
       <div
         data-tour="samples-filters"
         className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-3 sm:flex-row sm:flex-wrap sm:items-end"
@@ -652,11 +646,6 @@ export const SamplesPage: React.FC = () => {
               </button>
             </div>
             <form onSubmit={submitApprove} className="space-y-4 p-5">
-              {error && approveOpen && (
-                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">
-                  {error}
-                </div>
-              )}
               {approveAction === 'approve' ? (
                 <p className="m-0 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-800">
                   Confirm Sales Manager approval for this sample request. The team can prepare and dispatch it after approval.
@@ -714,11 +703,6 @@ export const SamplesPage: React.FC = () => {
               </button>
             </div>
             <form onSubmit={submitDispatch} className="space-y-4 p-5">
-              {error && dispatchOpen && (
-                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">
-                  {error}
-                </div>
-              )}
               <label className="block">
                 <span className="mb-1.5 block text-xs font-semibold text-zinc-700">
                   Courier / Carrier *
@@ -800,11 +784,6 @@ export const SamplesPage: React.FC = () => {
               </button>
             </div>
             <form onSubmit={submitFeedback} className="space-y-4 p-5">
-              {error && feedbackOpen && (
-                <div className="rounded-lg border border-zinc-950 bg-zinc-50 p-3 text-sm text-zinc-900 font-medium">
-                  {error}
-                </div>
-              )}
               <label className="block">
                 <span className="mb-1.5 block text-xs font-semibold text-zinc-700">Rating *</span>
                 <select

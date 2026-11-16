@@ -76,6 +76,8 @@ interface ClientSelectProps {
   className?: string;
   id?: string;
   emptyLabel?: string;
+  /** CRM 3.44.0: a short tag shown on a client (e.g. "not ready for a quotation"); '' = none. */
+  optionNote?: (client: ClientSelectOption) => string;
 }
 
 export const ClientSelect: React.FC<ClientSelectProps> = ({
@@ -89,6 +91,7 @@ export const ClientSelect: React.FC<ClientSelectProps> = ({
   className = '',
   id,
   emptyLabel = 'No clients found',
+  optionNote,
 }) => {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -186,6 +189,9 @@ export const ClientSelect: React.FC<ClientSelectProps> = ({
               <div className="truncate text-[11px] text-zinc-500">
                 {selected.email || 'No email'}
               </div>
+              {optionNote && optionNote(selected) ? (
+                <div className="truncate text-[11px] font-semibold text-amber-700" data-testid="client-select-note">{optionNote(selected)}</div>
+              ) : null}
             </div>
           </>
         ) : (
@@ -238,6 +244,9 @@ export const ClientSelect: React.FC<ClientSelectProps> = ({
                       <div className="truncate text-[11px] text-zinc-500">
                         {client.email || 'No email'}
                       </div>
+                      {optionNote && optionNote(client) ? (
+                        <div className="truncate text-[11px] font-semibold text-amber-700">{optionNote(client)}</div>
+                      ) : null}
                     </div>
                     {active ? (
                       <Check className="h-4 w-4 shrink-0 text-emerald-700" aria-hidden />

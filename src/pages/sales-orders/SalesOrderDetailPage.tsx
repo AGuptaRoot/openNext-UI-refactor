@@ -1,3 +1,4 @@
+import { useNotifyMessage } from '@/components/notifications';
 import { displayLabel } from '../../utils/displayLabels';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -114,6 +115,8 @@ export const SalesOrderDetailPage: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  useNotifyMessage(error, 'error');
+  useNotifyMessage(info, 'success', () => setInfo(''));
 
   const [shipmentOpen, setShipmentOpen] = useState(false);
   const [shipSelection, setShipSelection] = useState<ShipSelection>({});
@@ -717,15 +720,6 @@ export const SalesOrderDetailPage: React.FC = () => {
           )}
         </div>
       </header>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-      )}
-      {info && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-          {info}
-        </div>
-      )}
 
       {order.opportunityId && (
         <section

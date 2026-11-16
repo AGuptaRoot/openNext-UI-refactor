@@ -10,6 +10,7 @@ import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { TourButton } from '../../ui/tour';
 import { useDialog } from '../../context/DialogContext';
+import { useNotifyMessage } from '@/components/notifications';
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
 import { ListPager, type ListPaginationMeta } from '../../components/common/ListPager';
 import {
@@ -70,6 +71,7 @@ export const SalesOrdersPage: React.FC = () => {
   const [pagination, setPagination] = useState<ListPaginationMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
   const [busyId, setBusyId] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -291,10 +293,6 @@ export const SalesOrdersPage: React.FC = () => {
           className="h-9 w-full px-3 text-sm border border-zinc-200 rounded-lg outline-none focus:border-zinc-400"
         />
       </div>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-      )}
 
       <div data-tour="sales-orders-table" className="bg-white border border-zinc-300 rounded-xl overflow-hidden">
         {loading ? (

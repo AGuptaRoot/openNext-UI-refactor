@@ -6,6 +6,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
 
+import { useNotifyMessage } from '@/components/notifications';
 import { ApiError, crmApi } from '../../services/api';
 import type { GroqIntegrationStatus } from '../../types/admin';
 
@@ -31,6 +32,7 @@ export const GroqIntegrationPanel: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  useNotifyMessage(message?.text, message?.kind === 'ok' ? 'success' : 'error', () => setMessage(null));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -250,19 +252,6 @@ export const GroqIntegrationPanel: React.FC = () => {
               or Qwen). Choose <strong>Auto</strong> to try them in order.
             </span>
           </label>
-
-          {message ? (
-            <div
-              role="alert"
-              className={`rounded-lg border px-3 py-2.5 text-xs font-semibold ${
-                message.kind === 'ok'
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                  : 'border-red-200 bg-red-50 text-red-700'
-              }`}
-            >
-              {message.text}
-            </div>
-          ) : null}
 
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <button

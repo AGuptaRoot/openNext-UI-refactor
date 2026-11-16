@@ -347,15 +347,6 @@ export const clientsTourSteps = [
     },
   }),
   step({
-    id: 'clients-edit-overview-btn',
-    target: T('clients-edit-overview-btn'),
-    title: 'Edit overview',
-    content: 'Jumps to the Overview editor so you can update company profile fields quickly.',
-    before: async () => {
-      if (!(await guardClientDetail())) return;
-    },
-  }),
-  step({
     id: 'clients-delete-btn',
     target: T('clients-delete-btn'),
     title: 'Delete',

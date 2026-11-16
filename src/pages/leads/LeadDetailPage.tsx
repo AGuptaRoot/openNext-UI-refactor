@@ -7,8 +7,6 @@ import BusinessIcon from '@mui/icons-material/Business';
 import PublicIcon from '@mui/icons-material/Public';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import CloseIcon from '@mui/icons-material/Close';
 import AddIcon from '@mui/icons-material/Add';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
 import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined';
@@ -29,6 +27,7 @@ import {
 
 import { crmApi } from '../../services/api';
 import { isLeadConvertibleStage, resolveWonStage } from '../../utils/leadPipeline';
+import { useSalesFlowConfig } from '../../hooks/useSalesFlowConfig';
 import { displayLabel, displayUserLabel } from '../../utils/displayLabels';
 import { reverseGeocode } from '../../utils/reverseGeocode';
 import { useAuth } from '../../context/AuthContext';
@@ -55,8 +54,13 @@ import {
   validateExtensionFields,
 } from '../../components/extensions/ExtensionFieldsSlot';
 import { ExtensionTab } from '../../components/extensions/ExtensionTab';
-import { LeadTravelRequirementTab } from '../../components/leads/LeadTravelRequirementTab';
+import {
+  useExtensionTabs,
+  ExtensionTabContent,
+  ExtensionFieldsSection,
+} from '../../components/extensions';
 import { useExtensions } from '../../hooks/useExtensions';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 import {
   asExtensionBag,
@@ -81,6 +85,7 @@ import {
   LeadAuditEntry,
   LeadCustomFieldDef,
   AssignableUser,
+  LeadWorkflowFacts,
 } from '../../types/leads';
 import type { QuotationItem } from '../../types/quotations';
 import type { OpportunityItem } from '../../types/opportunities';
@@ -94,7 +99,9 @@ import {
 } from '../../services/mockLeadData';
 import type { RequestType } from '../../types/request-types';
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
-import { getRuntimeDefaultCurrency } from '../../utils/currency';
+import { formatCrmMoney, getCurrencySymbol, getRuntimeDefaultCurrency } from '../../utils/currency';
+import { ExtensionActions } from '../../components/extensions/ExtensionActions';
+import { notify } from '@/components/notifications';
 
 const LEAD_DOC_ACCEPT =
   '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.md,.markdown,.txt,.csv,.rtf,image/jpeg,image/png,image/webp,image/gif,application/pdf';
@@ -196,6 +203,7 @@ function quotationStatusClass(status: string): string {
     Sent: 'bg-blue-50 text-blue-800 border-blue-200',
     Accepted: 'bg-emerald-50 text-emerald-800 border-emerald-200',
     Rejected: 'bg-red-50 text-red-700 border-red-200',
+    Closed: 'bg-zinc-100 text-zinc-600 border-zinc-200',
     Expired: 'bg-amber-50 text-amber-800 border-amber-200',
     Converted: 'bg-violet-50 text-violet-800 border-violet-200',
   };
@@ -230,6 +238,7 @@ function resolveLeadTab(raw: string | null): DetailTab {
   if (lower === 'deals' || lower === 'opportunity' || lower === 'opportunities') return 'deal';
   if (lower === 'sample' || lower === 'sample-requests') return 'samples';
   if (value.startsWith('ext__')) return value;
+  if (value.startsWith('decl_')) return value;
   if (LEAD_TABS.includes(lower)) return lower as DetailTab;
   return 'details';
 }
@@ -237,13 +246,31 @@ function resolveLeadTab(raw: string | null): DetailTab {
 export const LeadDetailPage: React.FC = () => {
   const { confirm } = useDialog();
   const { hasPermission, isClient, activeRole, user, isAdmin } = useAuth();
+  // The active extension can leave Samples out (manifest hiddenModules); the tab follows the sidebar.
+  const { isModuleVisible } = useActiveExtension();
+  const samplesModuleVisible = isModuleVisible('samples');
   const {
     leadTabsForRequestType,
     createFieldsForRequestType,
     extensionPageUrl,
   } = useExtensions();
   const settingsCurrency = useDefaultCurrency();
-  const canWrite = hasPermission('crm.leads.write') && !isClient;
+  const declTabs = useExtensionTabs('leadDetail');
+  const [lead, setLead] = useState<LeadItem | null>(null);
+  const [pipelineStages, setPipelineStages] = useState<string[]>([]);
+  /**
+   * salesFlow.lockWonLead (CRM 3.34.0): a Won or converted lead is read-only — every edit control is off
+   * (the server refuses changes too); converting a Won lead into a client stays possible.
+   */
+  const salesFlowRules = useSalesFlowConfig();
+  const leadLocked = Boolean(
+    salesFlowRules.lockWonLead &&
+      lead &&
+      (lead.convertedClientId ||
+        String(lead.stage || '').trim().toLowerCase() === resolveWonStage(pipelineStages).toLowerCase() ||
+        /^won$/i.test(String(lead.stage || '').trim()))
+  );
+  const canWrite = hasPermission('crm.leads.write') && !isClient && !leadLocked;
   /** Only a manager moves the lead along the pipeline by hand. */
   const canChangeStage = canWrite && canChangeLeadStage({ isAdmin, isClient, activeRole });
   const stageLockedHint =
@@ -252,36 +279,40 @@ export const LeadDetailPage: React.FC = () => {
   const currentUserId = String(user?.userId || '').trim();
   /** Sales managers (and other lead editors) may assign activities to employees / sales reps. */
   const canAssignActivities =
-    canWrite ||
-    (!isClient &&
-      (activeRole === 'sales-manager' ||
-        activeRole === 'crm-manager' ||
-        activeRole === 'sales-representative'));
-  const canDelete = hasPermission('crm.leads.delete') && !isClient;
+    !leadLocked &&
+    (canWrite ||
+      (!isClient &&
+        (activeRole === 'sales-manager' ||
+          activeRole === 'crm-manager' ||
+          activeRole === 'sales-representative')));
+  const canDelete = hasPermission('crm.leads.delete') && !isClient && !leadLocked;
   const canConvert = hasPermission('crm.leads.convert') && !isClient;
   const canReadQuotations =
     (hasPermission('crm.finance.read') || hasPermission('crm.quotes.write')) && !isClient;
   const canWriteQuotations =
-    (hasPermission('crm.quotes.write') || hasPermission('crm.finance.write')) && !isClient;
+    (hasPermission('crm.quotes.write') || hasPermission('crm.finance.write')) && !isClient && !leadLocked;
   const canReadOpportunities =
     (hasPermission('crm.opportunities.read') ||
       hasPermission('crm.opportunities.write') ||
       hasPermission('crm.leads.read')) &&
     !isClient;
   const canWriteOpportunities =
-    (hasPermission('crm.opportunities.write') || hasPermission('crm.leads.write')) && !isClient;
+    (hasPermission('crm.opportunities.write') || hasPermission('crm.leads.write')) && !isClient && !leadLocked;
   const canReadSamples =
+    samplesModuleVisible &&
     (hasPermission('crm.samples.read') ||
       hasPermission('crm.samples.write') ||
       hasPermission('crm.leads.read')) &&
     !isClient;
   const canWriteSamples =
-    (hasPermission('crm.samples.write') || hasPermission('crm.leads.write')) && !isClient;
+    samplesModuleVisible &&
+    (hasPermission('crm.samples.write') || hasPermission('crm.leads.write')) &&
+    !isClient &&
+    !leadLocked;
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  const [lead, setLead] = useState<LeadItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>(() =>
@@ -302,7 +333,6 @@ export const LeadDetailPage: React.FC = () => {
   }, []);
 
   // Metadata
-  const [pipelineStages, setPipelineStages] = useState<string[]>([]);
   /** Settings → Qualification Match: ask to move to Qualified after a requirement save. */
   const [askQualifyOnRequirementSave, setAskQualifyOnRequirementSave] = useState(false);
   const [leadStatuses, setLeadStatuses] = useState<string[]>([]);
@@ -334,11 +364,8 @@ export const LeadDetailPage: React.FC = () => {
   const [loadingSamples, setLoadingSamples] = useState(false);
 
   // Feedback notifications
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
+    notify.show(type, message);
   };
 
   // Modals state
@@ -363,6 +390,7 @@ export const LeadDetailPage: React.FC = () => {
     phone: '',
     company: '',
     pan: '',
+    value: '' as number | '',
     source: '',
     stage: '',
     status: '',
@@ -545,6 +573,7 @@ export const LeadDetailPage: React.FC = () => {
         phone: leadData.phone || '',
         company: leadData.company || '',
         pan: leadData.pan || '',
+        value: leadData.value !== undefined && leadData.value !== null ? Number(leadData.value) : '',
         source: leadData.source || '',
         stage: leadData.stage || '',
         status: leadData.status || 'New',
@@ -589,6 +618,54 @@ export const LeadDetailPage: React.FC = () => {
   useEffect(() => {
     loadLeadData();
   }, [loadLeadData]);
+
+  /*
+   * Lead workflow (Settings → Qualification Match): whether Create Opportunity shows and whether
+   * the Commercial Requirement tab is replaced by the active extension's own requirement tab.
+   * null = not loaded / not available → the old rule (Qualified stage) applies.
+   */
+  const [workflow, setWorkflow] = useState<LeadWorkflowFacts | null>(null);
+  const loadWorkflow = useCallback(async () => {
+    if (!id) return;
+    try {
+      const res = await crmApi.getLeadWorkflow(id);
+      setWorkflow(res.data || null);
+    } catch {
+      setWorkflow(null);
+    }
+  }, [id]);
+
+  // An extension tab changed something that affects this lead (e.g. the CRM moved it to Qualified).
+  useEffect(() => {
+    const onChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ type?: string; id?: string }>).detail || {};
+      if (detail.type === 'lead' && String(detail.id) === String(id)) {
+        loadLeadData();
+        void loadWorkflow();
+      }
+    };
+    window.addEventListener('crm-record-changed', onChanged);
+    return () => window.removeEventListener('crm-record-changed', onChanged);
+  }, [id, loadLeadData, loadWorkflow]);
+
+  // Readiness: once when the lead is loaded and on stage changes; it can also change inside an
+  // extension tab (requirements, travellers), so ask again when the user leaves one.
+  const leadStage = lead?.stage;
+  const leadLoaded = Boolean(lead);
+  useEffect(() => {
+    if (leadLoaded) void loadWorkflow();
+  }, [loadWorkflow, leadLoaded, leadStage]);
+  const previousTabRef = useRef(activeTab);
+  useEffect(() => {
+    const previous = previousTabRef.current;
+    previousTabRef.current = activeTab;
+    if (previous !== activeTab && previous.startsWith('decl_')) void loadWorkflow();
+  }, [activeTab, loadWorkflow]);
+
+  // The Commercial Requirement tab is replaced by the extension's own tab: never leave it open.
+  useEffect(() => {
+    if (workflow?.hideCommercialRequirement && activeTab === 'qualification') setActiveTab('details');
+  }, [workflow?.hideCommercialRequirement, activeTab]);
 
   /**
    * Tab status colours need to be right on first paint, but activities and
@@ -792,7 +869,7 @@ export const LeadDetailPage: React.FC = () => {
    */
   const firstOpportunity = opportunities[0] || null;
   const hasOpportunity = Boolean(firstOpportunity);
-  const showSamplesTab = showProposalTab;
+  const showSamplesTab = showProposalTab && samplesModuleVisible;
 
   const selectedRequestType = useMemo(() => {
     const byId = requestTypes.find((rt) => rt._id === detailsForm.requestTypeId);
@@ -840,45 +917,17 @@ export const LeadDetailPage: React.FC = () => {
     };
   }, [lead, selectedRequestType, detailsForm.requestType]);
 
-  const isTravelLead = useMemo(() => {
-    const key = String(selectedRequestType?.key || '').trim().toLowerCase();
-    const name = String(selectedRequestType?.name || detailsForm.requestType || lead?.requestType || '').trim().toLowerCase();
-    return key === 'travel' || name === 'travel' || /travel/i.test(name) || /travel/i.test(key);
-  }, [selectedRequestType, detailsForm.requestType, lead?.requestType]);
-
   const extensionLeadTabs = useMemo(() => {
     const tabs = leadTabsForRequestType({
       key: selectedRequestType?.key,
       name: selectedRequestType?.name || detailsForm.requestType || lead?.requestType,
     });
-    const isTravel =
-      isTravelLead ||
-      Boolean(lead?.extension && (lead.extension as Record<string, unknown>)['crm-travel']);
-    if (isTravel && !tabs.some((t) => t.id === 'travel-requirement')) {
-      tabs.push({
-        extensionId: 'crm-travel',
-        id: 'travel-requirement',
-        tabId: 'ext__crm-travel__travel-requirement',
-        title: 'Travel Requirement',
-        label: 'Travel Requirement',
-        entry: 'ui/pages/travel-requirement.html',
-        url: '/extensions/crm-travel/ui/pages/travel-requirement.html',
-        slot: 'lead.detail.tab',
-        whenRequestTypeKey: 'travel',
-        whenRequestTypeName: 'travel',
-        appendLeadId: true,
-        openOnCreate: false,
-        order: 20,
-        hintMessage: 'Travel Requirement',
-      });
-    }
     return tabs;
   }, [
     leadTabsForRequestType,
     selectedRequestType,
     detailsForm.requestType,
     lead?.requestType,
-    lead?.extension,
   ]);
 
   const detailRequestType = useMemo(
@@ -897,7 +946,7 @@ export const LeadDetailPage: React.FC = () => {
   const extensionDetailMeta = useMemo(
     () => ({
       preparedBy: displayUserLabel(lead?.createdByUsername, lead?.createdBy, ''),
-      primaryTraveller: String(lead?.name || detailsForm.name || '').trim(),
+      primaryContact: String(lead?.name || detailsForm.name || '').trim(),
       defaultCurrency: settingsCurrency,
     }),
     [
@@ -909,7 +958,7 @@ export const LeadDetailPage: React.FC = () => {
     ]
   );
 
-  // Hydrate native Travel (etc.) fields from Lead.extension — same slot as Create Lead.
+  // Hydrate native extension fields from Lead.extension — same slot as Create Lead.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -994,6 +1043,11 @@ export const LeadDetailPage: React.FC = () => {
     }
   }, [activeTab, lead, showProposalTab]);
 
+  // A ?tab=samples link while the active extension hides Samples
+  useEffect(() => {
+    if (activeTab === 'samples' && !samplesModuleVisible) setActiveTab('details');
+  }, [activeTab, samplesModuleVisible]);
+
   useEffect(() => {
     if (
       String(activeTab).startsWith('ext__') &&
@@ -1002,13 +1056,6 @@ export const LeadDetailPage: React.FC = () => {
       setActiveTab('details');
     }
   }, [activeTab, extensionLeadTabs]);
-
-  // If request type is travel, hide commercial requirement and switch to details
-  useEffect(() => {
-    if (activeTab === 'qualification' && isTravelLead) {
-      setActiveTab('details');
-    }
-  }, [activeTab, isTravelLead]);
 
   /**
    * Host bridge for extension detail TABS (separate tab iframes only).
@@ -1258,6 +1305,7 @@ export const LeadDetailPage: React.FC = () => {
         phone: detailsForm.phone.trim(),
         company: detailsForm.company.trim(),
         pan: detailsForm.pan.trim(),
+        value: detailsForm.value === '' ? null : Number(detailsForm.value),
         source: detailsForm.source,
         // A rep may edit everything else on the lead, but not move its stage —
         // sending the unchanged value keeps the server's rule from firing.
@@ -1684,27 +1732,6 @@ export const LeadDetailPage: React.FC = () => {
 
   return (
     <div className="flex flex-col gap-5 pb-20">
-      {/* Toast Notification */}
-      {toast && (
-        <div
-          className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-lg border text-sm font-medium ${
-            toast.type === 'success'
-              ? 'bg-zinc-950 text-white border-zinc-900'
-              : 'bg-red-600 text-white border-red-700'
-          }`}
-        >
-          {toast.type === 'success' ? <CheckCircleOutlineIcon sx={{ fontSize: 18 }} /> : <WarningAmberIcon sx={{ fontSize: 18 }} />}
-          <span>{toast.message}</span>
-          <button
-            type="button"
-            onClick={() => setToast(null)}
-            className="ml-2 text-zinc-400 hover:text-white bg-transparent border-0 cursor-pointer p-0"
-          >
-            <CloseIcon sx={{ fontSize: 16 }} />
-          </button>
-        </div>
-      )}
-
       {/* Hero Header */}
       <div className="bg-white border border-zinc-300 rounded-xl px-5 py-6">
         {/* Breadcrumb & Back */}
@@ -1717,10 +1744,11 @@ export const LeadDetailPage: React.FC = () => {
           <span className="text-zinc-950 font-semibold truncate max-w-sm">{titleString}</span>
         </div>
 
-        {/* Identity, Info & Actions Bar (3-column responsive layout) */}
-        <div className="grid grid-cols-1 lg:grid-cols-[20%_minmax(0,1fr)_auto] gap-4 items-center">
-          {/* LEFT — Lead Identity (20% width) */}
-          <div className="flex items-center gap-3 min-w-0">
+        {/* Identity & actions on one row; the lead information chips get the full width below. */}
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          {/* Lead identity */}
+          <div className="flex items-center gap-3 min-w-0 lg:flex-1">
             {lead.photoUrl ? (
               <img
                 src={lead.photoUrl}
@@ -1744,8 +1772,17 @@ export const LeadDetailPage: React.FC = () => {
                     Converted Client
                   </span>
                 )}
+                {leadLocked && (
+                  <span
+                    className="text-[10px] font-bold bg-zinc-100 text-zinc-700 border border-zinc-300 px-1.5 py-0.5 rounded inline-flex items-center gap-1"
+                    title="This lead is Won: its details, activities, notes and travel data can be viewed but not changed."
+                    data-testid="lead-locked-badge"
+                  >
+                    Won · Read-only
+                  </span>
+                )}
               </div>
-              <h1 className="text-base lg:text-lg font-bold text-zinc-950 m-0 tracking-tight leading-snug truncate" title={lead.title?.trim() || titleString}>
+              <h1 className="text-base lg:text-lg font-bold text-zinc-950 m-0 tracking-tight leading-snug line-clamp-2 break-words" title={lead.title?.trim() || titleString}>
                 {lead.title?.trim() || titleString}
               </h1>
               {lead.title?.trim() && titleString !== 'Lead Details' && (
@@ -1766,115 +1803,8 @@ export const LeadDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {/* CENTER — All Lead Information (55% width) */}
-          <div className="flex flex-col justify-center gap-1.5 min-w-0">
-            {/* Row 1: Priority, Contact & Source Info */}
-            {(lead.priority || lead.email || lead.phone || lead.company || lead.source) && (
-              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-600">
-                {lead.priority && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-50 border border-zinc-200 rounded font-medium">
-                    <span className="text-zinc-400">Priority:</span>
-                    <span className="text-zinc-900 font-semibold">{lead.priority}</span>
-                  </span>
-                )}
-                {lead.email && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-50 border border-zinc-200 rounded font-medium">
-                    <EmailOutlinedIcon sx={{ fontSize: 13 }} />
-                    <span className="truncate max-w-[150px]" title={lead.email}>{lead.email}</span>
-                  </span>
-                )}
-                {lead.phone && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-50 border border-zinc-200 rounded font-medium">
-                    <PhoneIcon sx={{ fontSize: 13 }} />
-                    <span>{lead.phone}</span>
-                  </span>
-                )}
-                {lead.company && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-50 border border-zinc-200 rounded font-medium">
-                    <BusinessIcon sx={{ fontSize: 13 }} />
-                    <span className="truncate max-w-[140px]" title={lead.company}>{lead.company}</span>
-                  </span>
-                )}
-                {lead.source && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-50 border border-zinc-200 rounded font-medium">
-                    <PublicIcon sx={{ fontSize: 13 }} />
-                    <span className="truncate max-w-[120px]" title={lead.source}>{lead.source}</span>
-                  </span>
-                )}
-              </div>
-            )}
-
-            {/* Row 2: Lifecycle, Ageing, Follow-up & Quality */}
-            {(lead.ageing || lead.followUpSummary?.hasOverdue || lead.followUpSummary?.openCount || !lead.assignedTo || lead.dataQuality) && (
-              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-600">
-                {lead.ageing && (
-                  <span
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 border rounded font-semibold ${
-                      lead.ageing.status === 'Stale'
-                        ? 'bg-red-50 text-red-700 border-red-200'
-                        : lead.ageing.status === 'Attention'
-                        ? 'bg-amber-50 text-amber-800 border-amber-200'
-                        : 'bg-zinc-50 text-zinc-700 border-zinc-200'
-                    }`}
-                  >
-                    <AccessTimeIcon sx={{ fontSize: 13 }} />
-                    <span>{lead.ageing.stageAgeDays}d in stage · {lead.ageing.totalAgeDays}d total</span>
-                  </span>
-                )}
-                {lead.followUpSummary?.hasOverdue ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 text-red-700 border border-red-200 rounded font-bold">
-                    <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    <span>Follow-up Overdue ({lead.followUpSummary.overdueDays}d)</span>
-                  </span>
-                ) : lead.followUpSummary?.openCount ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded font-medium">
-                    <Calendar className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    <span>{lead.followUpSummary.openCount} Open Follow-up(s)</span>
-                  </span>
-                ) : null}
-                {!lead.assignedTo && (
-                  <span
-                    data-testid="lead-unassigned-badge"
-                    className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded font-semibold"
-                  >
-                    <WarningAmberIcon sx={{ fontSize: 13 }} />
-                    <span>This lead is not assigned</span>
-                  </span>
-                )}
-                {lead.dataQuality && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-100 border border-zinc-300 rounded font-bold text-zinc-800">
-                    Quality {lead.dataQuality.score}/100 · {lead.dataQuality.label}
-                  </span>
-                )}
-              </div>
-            )}
-
-            {/* Row 3: Tags & Segmentation */}
-            {((Array.isArray(lead.tags) && lead.tags.length > 0) || (!lead.convertedClientId && canWrite)) && (
-              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-600">
-                {Array.isArray(lead.tags) &&
-                  lead.tags.map((t) => (
-                    <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-50 border border-zinc-200 rounded text-zinc-700 font-medium">
-                      <Tag className="h-3 w-3 shrink-0 text-zinc-400" aria-hidden />
-                      <span>{t}</span>
-                    </span>
-                  ))}
-                {!lead.convertedClientId && canWrite && (
-                  <button
-                    type="button"
-                    onClick={() => setShowAddTagModal(true)}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 bg-white border border-dashed border-zinc-300 text-zinc-600 hover:border-zinc-500 rounded text-[11px] cursor-pointer"
-                  >
-                    <AddIcon sx={{ fontSize: 12 }} />
-                    <span>Tag</span>
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* RIGHT — Lead Stage and Actions (25% width) */}
-          <div className="flex flex-wrap items-center justify-start lg:justify-end gap-2">
+          {/* Lead stage and actions */}
+          <div className="flex flex-wrap items-center justify-start gap-2 min-w-0 lg:max-w-[62%] lg:justify-end">
             {!lead.convertedClientId && (
               <>
                 {/* Stage Quick Select */}
@@ -1893,10 +1823,11 @@ export const LeadDetailPage: React.FC = () => {
                   data-tour="leads-stage-select"
                   value={lead.stage || ''}
                   onChange={(e) => handleQuickStageChange(e.target.value)}
+                  aria-label="Lead stage"
                   className="bg-white border border-zinc-300 text-zinc-800 text-xs font-semibold px-2.5 py-1.5 rounded-lg cursor-pointer hover:border-zinc-400 transition-colors focus:outline-none focus:ring-1 focus:ring-zinc-950"
                   title="Change stage directly"
                 >
-                  {pipelineStages.map((s) => (
+                  {(lead.stage && !pipelineStages.includes(lead.stage) ? [lead.stage, ...pipelineStages] : pipelineStages).map((s) => (
                     <option key={s} value={s}>
                       Stage: {s}
                     </option>
@@ -1909,10 +1840,11 @@ export const LeadDetailPage: React.FC = () => {
                 <select
                   value={lead.status || 'New'}
                   onChange={(e) => handleQuickStatusChange(e.target.value)}
+                  aria-label="Lead status"
                   className="bg-zinc-50 border border-zinc-300 text-zinc-800 text-xs font-semibold px-2.5 py-1.5 rounded-lg cursor-pointer hover:border-zinc-400 transition-colors focus:outline-none focus:ring-1 focus:ring-zinc-950"
                   title="Change lifecycle status"
                 >
-                  {leadStatuses.map((st) => (
+                  {(lead.status && !leadStatuses.includes(lead.status) ? [lead.status, ...leadStatuses] : leadStatuses).map((st) => (
                     <option key={st} value={st}>
                       Status: {st}
                     </option>
@@ -1920,9 +1852,9 @@ export const LeadDetailPage: React.FC = () => {
                 </select>
                 )}
 
-                {/* Create Opportunity Option — Qualified stage, and only until
-                    the first deal exists. */}
-                {canWriteOpportunities && !hasOpportunity && /qualif/i.test(lead.stage || '') && (
+                {/* Create Opportunity — the lead workflow decides (Qualified and/or ready, see
+                    Settings → Qualification Match), and only until the first deal exists. */}
+                {canWriteOpportunities && !hasOpportunity && !lead.convertedClientId && (workflow ? workflow.canCreateOpportunity : /qualif/i.test(lead.stage || '')) && (
                   <button
                     type="button"
                     data-tour="leads-create-opportunity-btn"
@@ -1939,6 +1871,41 @@ export const LeadDetailPage: React.FC = () => {
                   </button>
                 )}
 
+                {id ? (
+                  <ExtensionActions
+                    page="leadDetail"
+                    record={{ type: 'lead', id: String(id), data: lead }}
+                    state={{ stage: lead.stage, status: lead.status }}
+                    onDone={(message) => showToast(message)}
+                    onError={(message) => showToast(message, 'error')}
+                  />
+                ) : null}
+
+              </>
+            )}
+
+                {/* A lead converted into a client never gets a new opportunity (the server refuses it too). */}
+                {canWriteOpportunities && !hasOpportunity && lead.convertedClientId ? (
+                  <span
+                    data-testid="lead-converted-no-opportunity"
+                    title="This lead is already a client — a new opportunity cannot be created from it"
+                    className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-xs font-semibold text-zinc-600"
+                  >
+                    Already a client — no new opportunity
+                  </span>
+                ) : null}
+
+                {!lead.convertedClientId && canWriteOpportunities && !hasOpportunity && workflow && workflow.hasReadiness && !workflow.canCreateOpportunity && (
+                  <span
+                    data-testid="lead-not-ready"
+                    title={workflow.readyReasons.length ? `Still needed: ${workflow.readyReasons.join('; ')}` : 'Not ready for an opportunity yet'}
+                    className="inline-flex min-h-8 max-w-full items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-left text-xs font-semibold leading-snug text-amber-800 sm:max-w-[420px]"
+                  >
+                    Not ready for an opportunity
+                    {workflow.readyReasons.length ? ` — ${workflow.readyReasons[0]}` : ''}
+                  </span>
+                )}
+
                 {canReadOpportunities && hasOpportunity && firstOpportunity ? (
                   <Link
                     to={`/opportunities/${firstOpportunity._id}`}
@@ -1951,6 +1918,8 @@ export const LeadDetailPage: React.FC = () => {
                   </Link>
                 ) : null}
 
+            {!lead.convertedClientId && (
+              <>
                 {/* Client portal — offered once a deal reaches Requirement
                     Confirmed. Never converts the lead. */}
                 {id && (
@@ -1988,6 +1957,114 @@ export const LeadDetailPage: React.FC = () => {
               </>
             )}
           </div>
+          </div>
+          {/* Lead information */}
+          <div className="flex flex-col gap-1.5 min-w-0 border-t border-zinc-100 pt-3">
+            {/* Row 1: Priority, Contact & Source Info */}
+            {(lead.priority || lead.email || lead.phone || lead.company || lead.source) && (
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-600">
+                {lead.priority && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-50 border border-zinc-200 rounded font-medium">
+                    <span className="text-zinc-400">Priority:</span>
+                    <span className="text-zinc-900 font-semibold">{lead.priority}</span>
+                  </span>
+                )}
+                {lead.email && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-50 border border-zinc-200 rounded font-medium">
+                    <EmailOutlinedIcon sx={{ fontSize: 13 }} />
+                    <span className="truncate max-w-[220px]" title={lead.email}>{lead.email}</span>
+                  </span>
+                )}
+                {lead.phone && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-50 border border-zinc-200 rounded font-medium">
+                    <PhoneIcon sx={{ fontSize: 13 }} />
+                    <span className="whitespace-nowrap">{lead.phone}</span>
+                  </span>
+                )}
+                {lead.company && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-50 border border-zinc-200 rounded font-medium">
+                    <BusinessIcon sx={{ fontSize: 13 }} />
+                    <span className="truncate max-w-[220px]" title={lead.company}>{lead.company}</span>
+                  </span>
+                )}
+                {lead.source && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-50 border border-zinc-200 rounded font-medium">
+                    <PublicIcon sx={{ fontSize: 13 }} />
+                    <span className="truncate max-w-[180px]" title={lead.source}>{lead.source}</span>
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Row 2: Lifecycle, Ageing, Follow-up & Quality */}
+            {(lead.ageing || lead.followUpSummary?.hasOverdue || lead.followUpSummary?.openCount || !lead.assignedTo || lead.dataQuality) && (
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-600">
+                {lead.ageing && (
+                  <span
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 border rounded font-semibold ${
+                      lead.ageing.status === 'Stale'
+                        ? 'bg-red-50 text-red-700 border-red-200'
+                        : lead.ageing.status === 'Attention'
+                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                        : 'bg-zinc-50 text-zinc-700 border-zinc-200'
+                    }`}
+                  >
+                    <AccessTimeIcon sx={{ fontSize: 13 }} />
+                    <span className="whitespace-nowrap">{lead.ageing.stageAgeDays}d in stage · {lead.ageing.totalAgeDays}d total</span>
+                  </span>
+                )}
+                {lead.followUpSummary?.hasOverdue ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 text-red-700 border border-red-200 rounded font-bold">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <span className="whitespace-nowrap">Follow-up Overdue ({lead.followUpSummary.overdueDays}d)</span>
+                  </span>
+                ) : lead.followUpSummary?.openCount ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded font-medium">
+                    <Calendar className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <span className="whitespace-nowrap">{lead.followUpSummary.openCount} Open Follow-up(s)</span>
+                  </span>
+                ) : null}
+                {!lead.assignedTo && (
+                  <span
+                    data-testid="lead-unassigned-badge"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded font-semibold"
+                  >
+                    <WarningAmberIcon sx={{ fontSize: 13 }} />
+                    <span className="whitespace-nowrap">This lead is not assigned</span>
+                  </span>
+                )}
+                {lead.dataQuality && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-100 border border-zinc-300 rounded font-bold text-zinc-800 whitespace-nowrap">
+                    Quality {lead.dataQuality.score}/100 · {lead.dataQuality.label}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Row 3: Tags & Segmentation */}
+            {((Array.isArray(lead.tags) && lead.tags.length > 0) || (!lead.convertedClientId && canWrite)) && (
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-600">
+                {Array.isArray(lead.tags) &&
+                  lead.tags.map((t) => (
+                    <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-50 border border-zinc-200 rounded text-zinc-700 font-medium">
+                      <Tag className="h-3 w-3 shrink-0 text-zinc-400" aria-hidden />
+                      <span>{t}</span>
+                    </span>
+                  ))}
+                {!lead.convertedClientId && canWrite && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAddTagModal(true)}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 bg-white border border-dashed border-zinc-300 text-zinc-600 hover:border-zinc-500 rounded text-[11px] cursor-pointer"
+                  >
+                    <AddIcon sx={{ fontSize: 12 }} />
+                    <span>Tag</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
         </div>
       </div>
 
@@ -2002,7 +2079,7 @@ export const LeadDetailPage: React.FC = () => {
           >
             Details
           </button>
-          {!isTravelLead && (
+          {!workflow?.hideCommercialRequirement && (
             <button
               type="button"
               data-tour="leads-tab-qualification"
@@ -2037,6 +2114,17 @@ export const LeadDetailPage: React.FC = () => {
               className={tabClass(tab.tabId)}
             >
               {tab.label || tab.title}
+            </button>
+          ))}
+          {declTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              data-tour={`leads-tab-${tab.id}`}
+              onClick={() => setActiveTab(`decl_${tab.id}`)}
+              className={tabClass(`decl_${tab.id}`)}
+            >
+              {tab.label}
             </button>
           ))}
           {showProposalTab && (
@@ -2167,6 +2255,12 @@ export const LeadDetailPage: React.FC = () => {
                   <div className="p-2.5 bg-zinc-50 border border-zinc-200 rounded">
                     <span className="text-[11px] text-zinc-400 block font-medium">Source</span>
                     <strong className="text-zinc-900 font-bold mt-0.5 block">{detailsForm.source || '—'}</strong>
+                  </div>
+                  <div className="p-2.5 bg-zinc-50 border border-zinc-200 rounded">
+                    <span className="text-[11px] text-zinc-400 block font-medium">Deal Value</span>
+                    <strong className="text-zinc-900 font-bold mt-0.5 block">
+                      {detailsForm.value === '' ? '—' : formatCrmMoney(Number(detailsForm.value), lead.currency || settingsCurrency)}
+                    </strong>
                   </div>
                 </div>
               </div>
@@ -2305,6 +2399,21 @@ export const LeadDetailPage: React.FC = () => {
                       className="w-full px-3 py-2 text-xs border border-zinc-200 rounded focus:border-zinc-950 focus:outline-none"
                     />
                     <span className="text-[11px] text-zinc-400 mt-1 block">Format: 5 letters, 4 digits, 1 letter.</span>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 mb-1">
+                      Deal Value ({getCurrencySymbol(lead.currency || settingsCurrency)})
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={detailsForm.value}
+                      onChange={(e) =>
+                        setDetailsForm({ ...detailsForm, value: e.target.value === '' ? '' : Math.max(0, Number(e.target.value)) })
+                      }
+                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded focus:border-zinc-950 focus:outline-none"
+                    />
                   </div>
                   <div className="md:col-span-2">
                     <div className="flex items-center justify-between mb-1">
@@ -2552,6 +2661,13 @@ export const LeadDetailPage: React.FC = () => {
                   inputClassName="w-full px-3 py-2 text-xs border border-zinc-200 rounded focus:border-zinc-950 focus:outline-none bg-white text-zinc-900 disabled:bg-zinc-50 disabled:text-zinc-500"
                 />
               ) : null}
+
+              <ExtensionFieldsSection
+                record="lead"
+                recordId={id!}
+                requestTypeKey={detailRequestType?.key || lead?.requestType}
+                readOnly={leadLocked}
+              />
 
               {/* Tags & Segmentation */}
               <div className="bg-white border border-zinc-300 rounded-lg p-6">
@@ -3069,7 +3185,7 @@ export const LeadDetailPage: React.FC = () => {
         )}
 
         {/* ================= TAB 2: COMMERCIAL REQUIREMENT ================= */}
-        {!isTravelLead && activeTab === 'qualification' && id && lead && (
+        {activeTab === 'qualification' && id && lead && !workflow?.hideCommercialRequirement && (
           <CommercialRequirementTab
             leadId={id}
             lead={lead}
@@ -3824,17 +3940,6 @@ export const LeadDetailPage: React.FC = () => {
         {/* ================= TAB: PROPOSAL (Qualified and later stages) ================= */}
         {extensionLeadTabs.map((tab) => {
           if (!id) return null;
-          if (tab.id === 'travel-requirement' || tab.tabId.includes('travel-requirement')) {
-            if (activeTab !== tab.tabId) return null;
-            return (
-              <LeadTravelRequirementTab
-                key={tab.tabId}
-                leadId={id}
-                lead={lead}
-                onUpdated={() => void loadLeadData()}
-              />
-            );
-          }
           return (
             <ExtensionTab
               key={tab.tabId}
@@ -3850,6 +3955,23 @@ export const LeadDetailPage: React.FC = () => {
             />
           );
         })}
+
+        {activeTab.startsWith('decl_') && (
+          (() => {
+            const activeDeclTab = declTabs.find((t) => t.id === activeTab.replace('decl_', ''));
+            if (!activeDeclTab) return null;
+            return (
+              <ExtensionTabContent
+                tab={activeDeclTab}
+                record="lead"
+                recordId={id!}
+                recordData={lead}
+                requestTypeKey={detailRequestType?.key || lead?.requestType}
+                readOnly={leadLocked}
+              />
+            );
+          })()
+        )}
 
         {activeTab === 'proposal' && showProposalTab && (
           <div className="flex flex-col gap-5">
@@ -3965,7 +4087,8 @@ export const LeadDetailPage: React.FC = () => {
                   with Back.
                 </p>
               </div>
-              {canWriteOpportunities && (
+              {/* A lead converted into a client is history for sales: new deals start from the client. */}
+              {canWriteOpportunities && !lead.convertedClientId && (
                 <button
                   type="button"
                   data-tour="leads-deal-create"

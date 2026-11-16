@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { notifyHostNavChanged } from '../../utils/cmsSidebarExtensionPages';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import CloseIcon from '@mui/icons-material/Close';
 import {
@@ -7,6 +8,7 @@ import {
   Blocks,
   Briefcase,
   CheckCircle2,
+  ChevronDown,
   CloudUpload,
   Cpu,
   Factory,
@@ -24,6 +26,8 @@ import {
   Plane,
   Route,
   Ruler,
+  ShieldCheck,
+  ShieldOff,
   ShoppingBag,
   Sparkles,
   Stethoscope,
@@ -36,6 +40,7 @@ import {
 } from 'lucide-react';
 import { ApiError, crmApi } from '../../services/api';
 import { useDialog } from '../../context/DialogContext';
+import { useNotifyMessage } from '@/components/notifications';
 import {
   CORE_MODULE_LABELS,
   type CrmExtensionAccent,
@@ -137,7 +142,7 @@ function formatBytes(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 /** Read a File as base64 (no data-URL prefix) so it can travel as JSON. */
 function fileToBase64(file: File): Promise<string> {
@@ -164,6 +169,7 @@ export function ExtensionsPanel({ onChanged }: ExtensionsPanelProps) {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string>('');
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  useNotifyMessage(message?.text, message?.kind === 'success' ? 'success' : 'error', () => setMessage(null));
   const [uploadOpen, setUploadOpen] = useState(false);
 
   const load = useCallback(async (opts?: { clearMessage?: boolean }) => {
@@ -218,6 +224,7 @@ export function ExtensionsPanel({ onChanged }: ExtensionsPanelProps) {
     setMessage(null);
     try {
       const res = await crmApi.enableCrmExtension(ext.id);
+      notifyHostNavChanged(); // CRM 3.50.0: the CMS menu follows the change at once
       setMessage({ kind: 'success', text: res.message || `${ext.name} is now the active extension.` });
       await load({ clearMessage: false });
       onChanged?.();
@@ -246,6 +253,7 @@ export function ExtensionsPanel({ onChanged }: ExtensionsPanelProps) {
     setMessage(null);
     try {
       const res = await crmApi.disableCrmExtension(ext.id);
+      notifyHostNavChanged(); // CRM 3.50.0: the CMS menu follows the change at once
       setMessage({
         kind: 'success',
         text: res.message || `${ext.name} disabled. ${fallback?.name || 'Default'} is active.`,
@@ -276,6 +284,7 @@ export function ExtensionsPanel({ onChanged }: ExtensionsPanelProps) {
     setMessage(null);
     try {
       const res = await crmApi.uninstallCrmExtension(ext.id);
+      notifyHostNavChanged(); // CRM 3.50.0: the CMS menu follows the change at once
       setMessage({ kind: 'success', text: res.message || `${ext.name} uninstalled.` });
       await load({ clearMessage: false });
       onChanged?.();
@@ -284,6 +293,58 @@ export function ExtensionsPanel({ onChanged }: ExtensionsPanelProps) {
         kind: 'error',
         text: reason instanceof Error ? reason.message : `Failed to uninstall ${ext.name}`,
       });
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  const approveBackend = async (ext: CrmExtensionDef) => {
+    if (!ext.requiresTrust || busyId) return;
+    const ok = await confirm({
+      title: `Run backend code of ${ext.name}?`,
+      message:
+        `${ext.name} v${ext.version} by ${ext.publisher || 'an unknown publisher'} ships server code ` +
+        `(${ext.summary?.routes ?? 0} routes). Once approved it runs inside the CRM server with access to this ` +
+        `workspace's data through the extension SDK. Only approve packages from a publisher you trust. ` +
+        `Approval covers this exact upload (checksum ${(ext.checksum || '').slice(0, 12)}…); a new version must be approved again.`,
+      confirmLabel: 'Approve backend',
+      cancelLabel: 'Cancel',
+    });
+    if (!ok) return;
+    setBusyId(ext.id);
+    setMessage(null);
+    try {
+      const res = await crmApi.approveCrmExtensionBackend(ext.id, ext.checksum || '');
+      setMessage({ kind: 'success', text: res.message || `Backend of ${ext.name} approved.` });
+      await load({ clearMessage: false });
+      onChanged?.();
+    } catch (reason) {
+      setMessage({ kind: 'error', text: reason instanceof Error ? reason.message : 'Failed to approve the backend' });
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  const revokeBackend = async (ext: CrmExtensionDef) => {
+    if (!ext.requiresTrust || busyId) return;
+    const ok = await confirm({
+      title: `Stop backend code of ${ext.name}?`,
+      message:
+        `The extension's API routes stop answering at once. Its fields, tabs, pages and stored records stay; ` +
+        `you can approve the backend again later.`,
+      confirmLabel: 'Stop backend',
+      cancelLabel: 'Cancel',
+    });
+    if (!ok) return;
+    setBusyId(ext.id);
+    setMessage(null);
+    try {
+      const res = await crmApi.revokeCrmExtensionBackend(ext.id);
+      setMessage({ kind: 'success', text: res.message || `Backend of ${ext.name} stopped.` });
+      await load({ clearMessage: false });
+      onChanged?.();
+    } catch (reason) {
+      setMessage({ kind: 'error', text: reason instanceof Error ? reason.message : 'Failed to stop the backend' });
     } finally {
       setBusyId('');
     }
@@ -336,19 +397,6 @@ export function ExtensionsPanel({ onChanged }: ExtensionsPanelProps) {
           </div>
         </div>
 
-        {message && (
-          <div
-            role="alert"
-            className={`rounded-lg px-3 py-2 text-xs font-medium ${
-              message.kind === 'success'
-                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                : 'bg-red-50 text-red-700 border border-red-200'
-            }`}
-          >
-            {message.text}
-          </div>
-        )}
-
         {/* Active summary strip */}
         {active && (
           <div className="grid grid-cols-1 gap-3 rounded-xl border border-zinc-200 bg-zinc-50/70 p-4 sm:grid-cols-3">
@@ -392,6 +440,8 @@ export function ExtensionsPanel({ onChanged }: ExtensionsPanelProps) {
               onEnable={() => void enable(ext)}
               onDisable={() => void disable(ext)}
               onUninstall={() => void uninstall(ext)}
+              onApproveBackend={() => void approveBackend(ext)}
+              onRevokeBackend={() => void revokeBackend(ext)}
             />
           ))}
           <UploadCard onClick={() => setUploadOpen(true)} uploadedCount={uploadedCount} />
@@ -403,7 +453,7 @@ export function ExtensionsPanel({ onChanged }: ExtensionsPanelProps) {
         <span>
           Switching extensions never deletes data. Records created under the other extension stay in
           the database and reappear when that extension is enabled again. CMS extension packages
-          (for example crm-travel) are managed separately from Dashboard → Extensions.
+          are managed separately from Dashboard → Extensions.
         </span>
       </p>
 
@@ -448,6 +498,8 @@ function ExtensionCard({
   onEnable,
   onDisable,
   onUninstall,
+  onApproveBackend,
+  onRevokeBackend,
 }: {
   ext: CrmExtensionDef;
   busy: boolean;
@@ -455,12 +507,17 @@ function ExtensionCard({
   onEnable: () => void;
   onDisable: () => void;
   onUninstall: () => void;
+  onApproveBackend: () => void;
+  onRevokeBackend: () => void;
 }) {
   const accent = accentFor(ext.accent);
   const Icon = EXTENSION_ICONS[ext.icon] || Blocks;
   const hidden = new Set(ext.hiddenModules);
   const disableLocked = ext.isDefault;
   const uploaded = ext.source === 'uploaded';
+  const [expanded, setExpanded] = useState(false);
+  // Short text on the card: the description, or the tagline when there is none.
+  const summary = ext.description || ext.tagline || '';
 
   return (
     <article
@@ -469,94 +526,112 @@ function ExtensionCard({
       }`}
       data-extension-id={ext.id}
     >
-      {/* Top row: icon + badges */}
-      <div className="flex items-start justify-between gap-3">
+      {/* Icon, name and status */}
+      <div className="flex items-start gap-3">
         <div
-          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl shadow-sm ${
+          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl shadow-sm ${
             ext.isActive ? accent.badge : 'bg-zinc-100 text-zinc-600'
           }`}
         >
-          <Icon className="h-6 w-6" aria-hidden />
+          <Icon className="h-5 w-5" aria-hidden />
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-1.5">
-          {ext.isDefault && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-zinc-600">
-              <Lock className="h-3 w-3" aria-hidden /> Default
-            </span>
-          )}
-          {uploaded && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-sky-700">
-              <CloudUpload className="h-3 w-3" aria-hidden /> Uploaded
-            </span>
-          )}
-          {ext.isActive ? (
-            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-800">
-              <CheckCircle2 className="h-3 w-3" aria-hidden /> Enabled
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 rounded-full border border-zinc-300 bg-zinc-200 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-zinc-700">
-              <XCircle className="h-3 w-3" aria-hidden /> Disabled
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Title */}
-      <div className="mt-4">
-        <h3 className="m-0 text-base font-bold tracking-tight text-zinc-950">{ext.name}</h3>
-        {ext.tagline && (
-          <p className={`m-0 mt-0.5 text-xs font-semibold ${ext.isActive ? accent.text : 'text-zinc-500'}`}>
-            {ext.tagline}
-          </p>
-        )}
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[11px] text-zinc-400">
-          <span className="font-mono">v{ext.version}</span>
-          <span aria-hidden>·</span>
-          <span>{ext.publisher || 'Unknown publisher'}</span>
-          <span aria-hidden>·</span>
-          <span>{uploaded ? 'Uploaded package' : 'Built-in'}</span>
-          {uploaded && ext.installedAt && (
-            <>
-              <span aria-hidden>·</span>
-              <span>Installed {new Date(ext.installedAt).toLocaleDateString()}</span>
-            </>
-          )}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="m-0 min-w-0 truncate text-base font-bold tracking-tight text-zinc-950" title={ext.name}>
+              {ext.name}
+            </h3>
+            {ext.isActive ? (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-800">
+                <CheckCircle2 className="h-3 w-3" aria-hidden /> Enabled
+              </span>
+            ) : (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-zinc-300 bg-zinc-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-zinc-600">
+                <XCircle className="h-3 w-3" aria-hidden /> Disabled
+              </span>
+            )}
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-400">
+            <span className="font-mono">v{ext.version}</span>
+            {ext.isDefault && (
+              <span className="inline-flex items-center gap-1 font-semibold text-zinc-500">
+                <Lock className="h-3 w-3" aria-hidden /> Default
+              </span>
+            )}
+            {uploaded && (
+              <span className="inline-flex items-center gap-1 font-semibold text-sky-700">
+                <CloudUpload className="h-3 w-3" aria-hidden /> Uploaded
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
-      {ext.description && (
-        <p className="mb-0 mt-3 text-xs leading-relaxed text-zinc-600">{ext.description}</p>
+      {/* Short description; the rest opens below */}
+      {summary && (
+        <p className={`mb-0 mt-3 text-xs leading-relaxed text-zinc-600 ${expanded ? '' : 'line-clamp-2'}`}>{summary}</p>
       )}
+      <button
+        type="button"
+        onClick={() => setExpanded((open) => !open)}
+        aria-expanded={expanded}
+        className={`mt-1.5 inline-flex w-fit items-center gap-1 rounded-md px-1 py-0.5 text-[11px] font-semibold cursor-pointer hover:bg-zinc-100 ${
+          ext.isActive ? accent.text : 'text-zinc-600'
+        }`}
+      >
+        {expanded ? 'Show less' : 'Show more'}
+        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden />
+      </button>
 
-      {/* Highlights */}
-      {ext.highlights.length > 0 && (
-        <ul className="m-0 mt-3 list-none space-y-1 p-0">
-          {ext.highlights.map((item) => (
-            <li key={item} className="flex items-start gap-2 text-xs text-zinc-700">
-              <Sparkles className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${accent.text}`} aria-hidden />
-              <span>{item}</span>
-            </li>
-          ))}
-        </ul>
+      {expanded && (
+        <div className="mt-2 space-y-3">
+          {ext.tagline && ext.description && (
+            <p className={`m-0 text-xs font-semibold ${ext.isActive ? accent.text : 'text-zinc-500'}`}>{ext.tagline}</p>
+          )}
+          {ext.highlights.length > 0 && (
+            <ul className="m-0 list-none space-y-1 p-0">
+              {ext.highlights.map((item) => (
+                <li key={item} className="flex items-start gap-2 text-xs text-zinc-700">
+                  <Sparkles className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${accent.text}`} aria-hidden />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className={`grid grid-cols-2 gap-2 rounded-xl p-3 ${ext.isActive ? accent.soft : 'bg-zinc-50'}`}>
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Request type</div>
+              <div className="truncate text-xs font-semibold text-zinc-900">{ext.requestTypeName}</div>
+            </div>
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Pipeline</div>
+              <div className="truncate text-xs font-semibold text-zinc-900">{ext.pipelineName}</div>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-zinc-400">
+            <span>{ext.publisher || 'Unknown publisher'}</span>
+            <span aria-hidden>·</span>
+            <span>{uploaded ? 'Uploaded package' : 'Built-in'}</span>
+            {uploaded && ext.installedAt && (
+              <>
+                <span aria-hidden>·</span>
+                <span>Installed {new Date(ext.installedAt).toLocaleDateString()}</span>
+              </>
+            )}
+            {ext.requiresTrust && (
+              <>
+                <span aria-hidden>·</span>
+                <span className={ext.trust === 'approved' ? 'text-emerald-700' : 'text-amber-700'}>
+                  {ext.trust === 'approved' ? 'Backend approved' : 'Backend awaiting approval'}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
       )}
-
-      {/* Request type + pipeline */}
-      <div className={`mt-4 grid grid-cols-2 gap-2 rounded-xl p-3 ${ext.isActive ? accent.soft : 'bg-zinc-50'}`}>
-        <div className="min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Request type</div>
-          <div className="truncate text-xs font-semibold text-zinc-900">{ext.requestTypeName}</div>
-        </div>
-        <div className="min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Pipeline</div>
-          <div className="truncate text-xs font-semibold text-zinc-900">{ext.pipelineName}</div>
-        </div>
-      </div>
 
       {/* Modules */}
       <div className="mt-4">
-        <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-          Core modules
-        </div>
+        <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-400">Modules</div>
         <div className="flex flex-wrap gap-1.5">
           {ext.visibleModules.map((id) => (
             <span
@@ -579,18 +654,33 @@ function ExtensionCard({
           ))}
         </div>
         {hidden.size > 0 && (
-          <p className="mb-0 mt-1.5 text-[11px] text-zinc-400">
-            Struck-through modules are hidden from the sidebar, routes and forms.
-          </p>
+          <p className="mb-0 mt-1.5 text-[11px] text-zinc-400">Struck-through modules are hidden while this extension is active.</p>
         )}
       </div>
 
+      {/* Package files missing from the plugin folder */}
+      {uploaded && ext.filesAvailable === false && (
+        <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-[11px] text-red-800">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span>
+            <strong>Files missing.</strong> The package folder for v{ext.version} is not in the plugin directory (a
+            plugin update removes it), so this extension cannot be enabled and the workspace uses the default
+            extension. Upload the package again to restore it.
+          </span>
+        </div>
+      )}
+
+      {/* Backend code (trust gate) */}
+      {ext.requiresTrust && (
+        <BackendTrustBox ext={ext} anyBusy={anyBusy} onApprove={onApproveBackend} onRevoke={onRevokeBackend} />
+      )}
+
       {/* Actions */}
-      <div className="mt-5 flex flex-wrap items-center gap-2">
+      <div className="mt-auto flex flex-wrap items-center gap-2 pt-5">
         <div className="flex items-center gap-1 rounded-xl border border-zinc-200 bg-white p-1 shadow-xs">
           <button
             type="button"
-            disabled={anyBusy || ext.isActive}
+            disabled={anyBusy || ext.isActive || (uploaded && ext.filesAvailable === false)}
             onClick={onEnable}
             className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3.5 text-xs font-bold transition-all cursor-pointer disabled:cursor-default ${
               ext.isActive
@@ -638,6 +728,75 @@ function ExtensionCard({
   );
 }
 
+function BackendTrustBox({
+  ext,
+  anyBusy,
+  onApprove,
+  onRevoke,
+}: {
+  ext: CrmExtensionDef;
+  anyBusy: boolean;
+  onApprove: () => void;
+  onRevoke: () => void;
+}) {
+  const approved = ext.trust === 'approved';
+  const status = ext.backendStatus || 'unloaded';
+  const tone = approved
+    ? status === 'failed'
+      ? 'border-red-200 bg-red-50 text-red-800'
+      : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+    : 'border-amber-200 bg-amber-50 text-amber-800';
+  const headline = approved
+    ? status === 'failed'
+      ? 'Backend failed to load'
+      : status === 'loaded'
+        ? 'Backend running'
+        : 'Backend approved (loads on first request)'
+    : ext.trust === 'revoked'
+      ? 'Backend stopped by an admin'
+      : 'Backend code awaiting approval';
+  return (
+    <div className={`mt-4 rounded-xl border px-3 py-2.5 text-[11px] ${tone}`}>
+      <div className="flex items-center gap-1.5 font-bold">
+        {approved ? <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> : <ShieldOff className="h-3.5 w-3.5" aria-hidden />}
+        {headline}
+      </div>
+      <p className="m-0 mt-1 leading-relaxed opacity-90">
+        {approved
+          ? `Approved${ext.approvedAt ? ` on ${new Date(ext.approvedAt).toLocaleDateString()}` : ''} for this upload only.`
+          : 'Fields, tabs, pages and data models work without it; the extension\'s own API routes stay off until approved.'}
+        {status === 'failed' && ext.backendError ? ` ${ext.backendError}` : ''}
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {approved ? (
+          <button
+            type="button"
+            disabled={anyBusy}
+            onClick={onRevoke}
+            className="inline-flex h-7 items-center gap-1 rounded-lg border border-current bg-white px-2.5 text-[11px] font-semibold cursor-pointer disabled:opacity-40"
+          >
+            <ShieldOff className="h-3 w-3" aria-hidden /> Stop backend
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={anyBusy}
+            onClick={onApprove}
+            className="inline-flex h-7 items-center gap-1 rounded-lg border-0 bg-amber-600 px-2.5 text-[11px] font-semibold text-white hover:bg-amber-700 cursor-pointer disabled:opacity-40"
+          >
+            <ShieldCheck className="h-3 w-3" aria-hidden /> Approve backend
+          </button>
+        )}
+        {ext.checksum && (
+          <span className="font-mono text-[10px] opacity-70" title={ext.checksum}>
+            sha256 {ext.checksum.slice(0, 12)}…
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function UploadCard({ onClick, uploadedCount }: { onClick: () => void; uploadedCount: number }) {
   return (
     <button
@@ -680,6 +839,7 @@ function UploadExtensionDialog({
   const [step, setStep] = useState<UploadStep>('pick');
   const [result, setResult] = useState<CrmExtensionPackageValidation | null>(null);
   const [error, setError] = useState<string>('');
+  useNotifyMessage(error, 'error', () => setError(''));
 
   const reset = () => {
     setFile(null);
@@ -813,7 +973,7 @@ function UploadExtensionDialog({
                   Drag &amp; drop a <span className="font-mono">.zip</span> here, or click to browse
                 </span>
                 <span className="text-[11px] text-zinc-500">
-                  Up to {formatBytes(MAX_UPLOAD_BYTES)} · JSON and Markdown files only
+                  Up to {formatBytes(MAX_UPLOAD_BYTES)} · manifest, json/, ui/ bundle and api/ folder
                 </span>
               </>
             )}
@@ -828,13 +988,6 @@ function UploadExtensionDialog({
               }}
             />
           </div>
-
-          {error && (
-            <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-              <span>{error}</span>
-            </div>
-          )}
 
           {/* Validation result */}
           {result && !result.ok && (
@@ -902,7 +1055,54 @@ function UploadExtensionDialog({
                       }
                     />
                     <Row label="Package" value={`${result.fileName} · ${formatBytes(result.fileSize)}`} />
+                    {result.summary && result.summary.manifestVersion >= 2 && (
+                      <>
+                        <Row label="Format" value={`Full package · ${result.summary.files} files`} />
+                        <Row
+                          label="Declarations"
+                          value={
+                            [
+                              result.summary.fields && `${result.summary.fields} fields`,
+                              result.summary.tabs && `${result.summary.tabs} tabs`,
+                              result.summary.catalogValues && `${result.summary.catalogValues} list values`,
+                              result.summary.settingsFields && `${result.summary.settingsFields} settings`,
+                              result.summary.pages && `${result.summary.pages} pages`,
+                            ]
+                              .filter(Boolean)
+                              .join(' · ') || 'none'
+                          }
+                        />
+                        <Row
+                          label="UI bundle"
+                          value={result.summary.uiFiles ? `${result.summary.uiFiles} files in ui/` : 'none'}
+                        />
+                        <Row
+                          label="Backend"
+                          value={
+                            result.summary.apiFiles
+                              ? `${result.summary.routes} routes · ${result.summary.models} models · ${result.summary.apiFiles} files`
+                              : 'none'
+                          }
+                        />
+                        {result.summary.definedPermissions > 0 && (
+                          <Row label="New permissions" value={`${result.summary.definedPermissions} defined`} />
+                        )}
+                        {result.summary.allowedHosts.length > 0 && (
+                          <Row label="Calls out to" value={result.summary.allowedHosts.join(', ')} />
+                        )}
+                      </>
+                    )}
                   </dl>
+                  {result.requiresTrust && (
+                    <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                      <span>
+                        This package ships <strong>backend code</strong>. Its fields, tabs and UI work once enabled, but
+                        its api/ stays unloaded until an admin approves this exact version on the card. Only approve code
+                        from a publisher you trust: it runs inside the CRM server.
+                      </span>
+                    </div>
+                  )}
                   {result.warnings.length > 0 && (
                     <ul className="m-0 mt-2 list-disc space-y-1 pl-5 text-[11px] text-amber-700">
                       {result.warnings.map((item) => (
@@ -921,10 +1121,14 @@ function UploadExtensionDialog({
                 What happens next
               </div>
               <ol className="m-0 list-decimal space-y-1 pl-4 text-xs text-zinc-600">
-                <li>The zip is checked: safe paths, allowed file types, size.</li>
+                <li>The zip is checked: safe paths, allowed folders and file types, size.</li>
                 <li>
-                  <span className="font-mono">crm-extension.json</span> is validated: id, version, request type, pipeline
-                  stages, hidden modules, conversions.
+                  <span className="font-mono">crm-extension.json</span> is validated: id, version, compatibility,
+                  capabilities, request type, pipeline, hidden modules, conversions, permissions.
+                </li>
+                <li>
+                  <span className="font-mono">json/</span> declarations, the <span className="font-mono">ui/</span> bundle
+                  and the <span className="font-mono">api/</span> routes, models and code (static scan) are checked.
                 </li>
                 <li>The extension appears in the grid as <em>Disabled</em>. Enable it to switch the workspace.</li>
               </ol>

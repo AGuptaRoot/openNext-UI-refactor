@@ -25,6 +25,7 @@ import {
   ExportResult,
 } from '../../components/leads/ExportResultModal';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import { notify, useNotifyMessage } from '@/components/notifications';
 
 const REASON_LABELS: Record<string, string> = {
   email: 'Same email',
@@ -102,10 +103,8 @@ export const DataQualityPage: React.FC = () => {
   const exportDropdownRef = useRef<HTMLDivElement>(null);
 
   // Notification toast
-  const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
-    setToast({ text, type });
-    setTimeout(() => setToast(null), 3500);
+    notify.show(type, text);
   };
 
   // Duplicate lead review: Choose existing contact / Create new lead
@@ -114,6 +113,7 @@ export const DataQualityPage: React.FC = () => {
   const [reviewContactsLoading, setReviewContactsLoading] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  useNotifyMessage(reviewError, 'error', () => setReviewError(null));
 
   // Debounce search input
   useEffect(() => {
@@ -435,19 +435,6 @@ export const DataQualityPage: React.FC = () => {
 
   return (
     <div data-tour="data-quality-tour-landing" className="flex w-full flex-col gap-5 pb-12">
-      {/* Toast Notification */}
-      {toast && (
-        <div
-          className={`fixed bottom-5 right-5 z-50 px-4 py-2.5 rounded-lg text-xs font-semibold shadow-lg border ${
-            toast.type === 'error'
-              ? 'bg-red-50 text-red-800 border-red-200'
-              : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-          }`}
-        >
-          {toast.text}
-        </div>
-      )}
-
       {/* Page Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div data-tour="data-quality-title">
@@ -974,12 +961,6 @@ export const DataQualityPage: React.FC = () => {
                   </div>
                 ) : null}
               </div>
-
-              {reviewError ? (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
-                  {reviewError}
-                </div>
-              ) : null}
 
               {reviewContactsLoading ? (
                 <div className="text-xs text-zinc-500 py-2">Checking matching contacts…</div>

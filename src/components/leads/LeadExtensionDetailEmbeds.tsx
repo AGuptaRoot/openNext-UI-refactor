@@ -56,7 +56,7 @@ export function LeadExtensionDetailEmbeds({
         extensionRef.current && typeof extensionRef.current === 'object'
           ? extensionRef.current
           : {};
-      // Isolation: send only that extension's slice when known (e.g. { "crm-travel": {...} }).
+      // Isolation: send only that extension's slice when known ({ "<extensionId>": {...} }).
       const bag =
         extensionId && full[extensionId] !== undefined
           ? { [extensionId]: full[extensionId] }
@@ -74,7 +74,6 @@ export function LeadExtensionDetailEmbeds({
         requestId,
       };
       target.postMessage(msg, '*');
-      target.postMessage({ ...msg, type: 'crm-travel-hydrate' }, '*');
     },
     [leadId]
   );
@@ -90,9 +89,7 @@ export function LeadExtensionDetailEmbeds({
 
       if (
         type === 'extension-lead-ready' ||
-        type === 'crm-travel-ready' ||
-        type === 'extension-lead-get' ||
-        type === 'crm-travel-get-extension'
+        type === 'extension-lead-get'
       ) {
         const sourceExtId = String(data.extensionId || data.sourceExtId || '').trim();
         const match = embeds.find((e) => !sourceExtId || e.extensionId === sourceExtId);
@@ -107,7 +104,7 @@ export function LeadExtensionDetailEmbeds({
       }
 
       // Read-only view pages must never sync — ignore accidental sync messages from embeds.
-      if (type === 'extension-lead-sync' || type === 'crm-travel-sync') {
+      if (type === 'extension-lead-sync') {
         const ext = asExtensionBag(data.extension);
         if (!ext || !Object.keys(ext).length) return;
         const fp = extensionFingerprint(ext);

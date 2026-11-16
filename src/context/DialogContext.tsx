@@ -8,12 +8,29 @@ import React, {
   useState,
 } from 'react';
 import CloseIcon from '@mui/icons-material/Close';
+import { notify, type NotifySeverity } from '@/components/notifications/notify';
 
 export type AlertOptions = {
   title?: string;
   message: string;
   okLabel?: string;
+  /** Snackbar colour; when left out it is read from the message (failed… → error, saved… → success). */
+  severity?: NotifySeverity;
 };
+
+const ERROR_WORDS = /\b(fail(ed|s|ure)?|error|unable|could not|couldn't|cannot|can't|invalid|denied|not allowed|not found|forbidden|expired)\b/i;
+const WARNING_WORDS = /\b(warning|please|required|must|already)\b/i;
+const SUCCESS_WORDS = /\b(success(fully)?|saved|copied|sent|generated|recorded|approved|converted|marked|created|updated|deleted|removed|added|done)\b/i;
+
+/** The colour of a legacy alert() message that did not say. */
+function alertSeverity(options: AlertOptions): NotifySeverity {
+  if (options.severity) return options.severity;
+  const text = `${options.title || ''} ${options.message || ''}`;
+  if (ERROR_WORDS.test(text)) return 'error';
+  if (WARNING_WORDS.test(text)) return 'warning';
+  if (SUCCESS_WORDS.test(text)) return 'success';
+  return 'info';
+}
 
 export type ConfirmOptions = {
   title?: string;
@@ -120,13 +137,12 @@ export const DialogProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     window.setTimeout(() => showNext(), 0);
   }, [showNext]);
 
-  const alertFn = useCallback(
-    (messageOrOptions: string | AlertOptions) =>
-      new Promise<void>((resolve) => {
-        enqueue({ kind: 'alert', options: normalizeAlert(messageOrOptions), resolve });
-      }),
-    [enqueue]
-  );
+  // Every alert is a top-right snackbar (CrmSnackbarHost); it never blocks the page.
+  const alertFn = useCallback((messageOrOptions: string | AlertOptions) => {
+    const options = normalizeAlert(messageOrOptions);
+    notify.show(alertSeverity(options), options.message, options.title ? { title: options.title } : undefined);
+    return Promise.resolve();
+  }, []);
 
   const confirmFn = useCallback(
     (messageOrOptions: string | ConfirmOptions) =>

@@ -3,6 +3,7 @@ import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { useNavigate } from 'react-router-dom';
 import { formatCrmMoney } from '../../utils/currency';
+import { useNotifyMessage } from '@/components/notifications';
 
 export interface FinanceListColumn<T> {
   label: string;
@@ -35,6 +36,7 @@ export function FinanceListPage<T extends { _id: string }>({
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -78,7 +80,6 @@ export function FinanceListPage<T extends { _id: string }>({
         </label>
       </div>
 
-      {error && <div className="px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-xs font-semibold text-red-700">{error}</div>}
       <div className="bg-white border border-zinc-300 rounded-xl overflow-hidden">
         {loading ? (
           <div className="p-12 text-center text-sm text-zinc-500 animate-pulse">Loading…</div>

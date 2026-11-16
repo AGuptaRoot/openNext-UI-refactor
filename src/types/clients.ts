@@ -30,6 +30,29 @@ export interface ClientContact {
   updatedAt?: string;
 }
 
+/** CRM 3.46.0 — an existing Client whose company name matches the one typed on Lead create. */
+export interface ClientCompanyMatch {
+  id: string;
+  name: string;
+  /** CRM 3.48.0: 'contact' = the contact already belongs to this client; 'company' = same company name. */
+  reason?: 'contact' | 'company';
+  /** The user can open this client (sales-agent scope). */
+  canOpen: boolean;
+  /** The user may add a contact to this client. */
+  canAddContact: boolean;
+  /** Shown only when canOpen. */
+  primaryContactName?: string;
+}
+
+/** CRM 3.46.0 — result of "Add as Secondary Contact". */
+export interface SecondaryContactResult {
+  client: { id: string; name: string };
+  contact: ClientContact;
+  personContactId: string;
+  /** The person was already one of the client's contacts (nothing new was added). */
+  alreadyLinked: boolean;
+}
+
 export interface ClientNote {
   _id: string;
   title?: string;
@@ -66,7 +89,7 @@ export interface ClientSourceLead {
   email?: string;
   company?: string;
   stage?: string | null;
-  /** Request Type display name on the source lead (e.g. "Travel"). */
+  /** Request Type display name on the source lead. */
   requestType?: string;
   requestTypeId?: string | null;
 }
@@ -81,7 +104,7 @@ export interface ClientRequestType {
 /**
  * Read-through view of a client's extension context.
  * `extension` is the source lead's bag (never copied onto the client);
- * `clientExtension` holds client-owned records such as passports.
+ * `clientExtension` holds data older extension versions kept on the client.
  */
 export interface ClientExtensionData {
   clientId: string;
@@ -90,67 +113,6 @@ export interface ClientExtensionData {
   requestType: ClientRequestType;
   extension: Record<string, unknown>;
   clientExtension: Record<string, unknown>;
-}
-
-/** One passport stored on a client. */
-export interface ClientPassport {
-  id: string;
-  /** Proxied CRM media URL — works with a private S3 bucket. */
-  url: string;
-  provider?: string;
-  fileName?: string;
-  mimeType?: string;
-  fileSize?: number;
-  fullname: string;
-  passport_number: string;
-  Date_of_issue: string;
-  Date_of_expiry: string;
-  ocr?: {
-    model?: string;
-    extractionMode?: string;
-    mrzParsed?: boolean;
-    error?: string;
-  } | null;
-  createdAt?: string | null;
-  updatedAt?: string | null;
-  createdByName?: string;
-}
-
-/** Uploaded-vs-required summary driving the "{n} missing" banner. */
-export interface ClientRecordSummary {
-  uploaded: number;
-  /** null when the extension declares no cap. */
-  allowed: number | null;
-  missing: number;
-  overLimit: number;
-  canUploadMore: boolean;
-  countLabel: string;
-  message: string;
-}
-
-export interface ClientPassportList {
-  clientId: string;
-  extensionId: string;
-  tabId: string;
-  leadId: string | null;
-  requestType: ClientRequestType;
-  storeKey: string;
-  countBy: string;
-  records: ClientPassport[];
-  summary: ClientRecordSummary;
-}
-
-export interface ClientPassportMutation {
-  record?: ClientPassport;
-  records: ClientPassport[];
-  summary: ClientRecordSummary;
-  ocrApplied?: boolean;
-  ocrError?: string;
-  deleted?: boolean;
-  extracted?: Pick<
-    ClientPassport,
-    'fullname' | 'passport_number' | 'Date_of_issue' | 'Date_of_expiry'
-  >;
 }
 
 export interface ClientCustomFieldDef {
@@ -249,6 +211,8 @@ export interface ClientRelatedTask {
 export interface ClientRelatedQuotation {
   _id: string;
   number?: string;
+  quotationNo?: string;
+  grandTotal?: number;
   title?: string;
   status?: string;
   total?: number;
@@ -259,6 +223,11 @@ export interface ClientRelatedQuotation {
 export interface ClientRelatedInvoice {
   _id: string;
   number?: string;
+  invoiceNo?: string;
+  grandTotal?: number;
+  documentType?: string;
+  /** From verified payments (CRM 3.28.0): Unpaid / Partially Paid / Paid. */
+  paymentStatus?: 'Unpaid' | 'Partially Paid' | 'Paid';
   status?: string;
   total?: number;
   balanceDue?: number;
@@ -270,6 +239,8 @@ export interface ClientRelatedInvoice {
 export interface ClientRelatedPayment {
   _id: string;
   number?: string;
+  paymentNo?: string;
+  mode?: string;
   amount?: number;
   currency?: string;
   method?: string;

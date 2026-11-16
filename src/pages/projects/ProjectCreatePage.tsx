@@ -5,6 +5,7 @@ import AddIcon from '@mui/icons-material/Add';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
 
+import { useNotifyMessage } from '@/components/notifications';
 import { useAuth } from '../../context/AuthContext';
 import { crmApi } from '../../services/api';
 import {
@@ -96,6 +97,7 @@ export const ProjectCreatePage: React.FC = () => {
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
 
   // Form states
   const [name, setName] = useState('');
@@ -446,19 +448,6 @@ export const ProjectCreatePage: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {error && (
-        <div className="px-4 py-3 rounded-lg text-xs font-semibold bg-red-50 text-red-700 border border-red-200 flex items-center justify-between">
-          <span>{error}</span>
-          <button
-            type="button"
-            onClick={() => setError(null)}
-            className="text-red-700 hover:text-red-900 bg-transparent border-0 cursor-pointer p-0 text-xs font-bold"
-          >
-            <CloseIcon sx={{ fontSize: 14 }} />
-          </button>
-        </div>
-      )}
 
       {loadingMeta ? (
         <div className="bg-white border border-zinc-300 rounded-xl p-12 text-center text-xs font-semibold text-zinc-400 animate-pulse">

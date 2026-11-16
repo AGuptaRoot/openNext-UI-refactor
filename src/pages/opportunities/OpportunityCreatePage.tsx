@@ -4,8 +4,10 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
+import { notify } from '@/components/notifications';
 import { useAuth } from '../../context/AuthContext';
 import { crmApi } from '../../services/api';
+import { useSalesFlowConfig } from '../../hooks/useSalesFlowConfig';
 import {
   OpportunityProductLine,
   INDIAN_STATES,
@@ -16,7 +18,10 @@ import {
 import { computeQualificationMatchScore } from '../../utils/qualificationMatchScore';
 import { OpportunityPipeline } from '../../types/opportunity-pipelines';
 import { ClientItem } from '../../types/clients';
-import { LeadItem, AssignableUser, OpportunityItemDraft } from '../../types/leads';
+import { LeadItem, AssignableUser, OpportunityItemDraft, OpportunityStartStage, SalesFlowCheck, SalesFlowConfig, SalesFlowPanel, SalesFlowNotice } from '../../types/leads';
+import { SalesFlowNotices } from '../../components/finance/SalesFlowQuotationParts';
+import { salesTerms } from '../../utils/salesTerms';
+import type { ExtensionFact, ExtensionValueConfirm } from '../../types/extensions';
 import { ClientSelect } from '../../components/clients/ClientSelect';
 import { LeadSelect } from '../../components/leads/LeadSelect';
 import { ContactSelect } from '../../components/contacts/ContactSelect';
@@ -33,6 +38,19 @@ import {
 import { OpportunityStageIcon } from '../../components/icons/OpportunityStageIcon';
 import { PhoneNumberField } from '../../components/common/PhoneNumberField';
 import { splitPhoneNumber, validateNationalNumber } from '../../utils/phoneCountryCodes';
+import { ExtensionCreateFields, SalesFlowPanels, countCheckRow } from '../../components/extensions';
+import { useExtensionSettingsValues } from '../../components/extensions/useExtensionSettings';
+import { extensionDataApi } from '../../services/extensionDataApi';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
+import {
+  canReplaceWithPrefill,
+  emptyFieldValue,
+  invalidFieldValue,
+  missingRequiredFields,
+  withFormulas,
+} from '../../utils/extensionFieldLogic';
+import { useDialog } from '../../context/DialogContext';
+import { notifySalesFlowSaved } from '../../utils/salesFlowSaved';
 import { RequestType } from '../../types/request-types';
 import {
   AlertTriangle,
@@ -56,6 +74,10 @@ type LineDraft = {
   key: string;
   productName: string;
   description: string;
+  /** From the extension's prefill line (e.g. 2 Adults, Rooms × Nights); a hand-made line is 1 × 0. */
+  quantity?: number;
+  unitPrice?: number;
+  tax?: number;
 };
 
 function newLine(partial?: Partial<LineDraft>): LineDraft {
@@ -63,11 +85,39 @@ function newLine(partial?: Partial<LineDraft>): LineDraft {
     key: `line_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     productName: partial?.productName ?? '',
     description: partial?.description ?? '',
+    ...(partial?.quantity !== undefined ? { quantity: partial.quantity } : {}),
+    ...(partial?.unitPrice !== undefined ? { unitPrice: partial.unitPrice } : {}),
+    ...(partial?.tax !== undefined ? { tax: partial.tax } : {}),
   };
+}
+
+/** A prefill line's number, or undefined when it is missing / out of range. */
+function lineNumber(value: unknown, min: number, max: number): number | undefined {
+  const n = Number(value);
+  return value !== undefined && value !== null && value !== '' && Number.isFinite(n) && n >= min && n <= max ? n : undefined;
 }
 
 function defaultCloseDate() {
   return new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+}
+
+/** YYYY-MM-DD of the user's own (local) calendar day, offset by whole days. */
+function localDateIso(offsetDays = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Product lines compared by what the agent sees (name + description). */
+function linesSignature(list: LineDraft[]): string {
+  return JSON.stringify(list.map((l) => [l.productName, l.description]));
+}
+
+/** Same stored value (lists compared by content). */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) return JSON.stringify(a) === JSON.stringify(b);
+  return false;
 }
 
 function safeReturnPath(raw: string | null): string {
@@ -113,15 +163,20 @@ export const OpportunityCreatePage: React.FC = () => {
 
   const [clients, setClients] = useState<ClientItem[]>([]);
   const [leads, setLeads] = useState<LeadItem[]>([]);
+  /** Why the lead from a ?leadId= link was not used (e.g. it is not ready for an opportunity yet). */
+  const [leadLinkProblem, setLeadLinkProblem] = useState('');
+  // Lead workflow: leads not offered because they are neither Qualified nor ready (Settings → Qualification Match).
+  const [hiddenLeadCount, setHiddenLeadCount] = useState(0);
+  const [leadRule, setLeadRule] = useState<'all' | 'qualified_or_ready'>('all');
   const [requestTypes, setRequestTypes] = useState<RequestType[]>([]);
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [pipelines, setPipelines] = useState<OpportunityPipeline[]>([]);
-  const [pipelineId, setPipelineId] = useState<string>(
+  const [pipelineId] = useState<string>(
     () => searchParams.get('pipelineId') || searchParams.get('pipeline') || ''
   );
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [extensionValues, setExtensionValues] = useState<Record<string, unknown>>({});
 
   // Form State
   const [title, setTitle] = useState('');
@@ -152,13 +207,93 @@ export const OpportunityCreatePage: React.FC = () => {
   const linesContainerRef = useRef<HTMLDivElement | null>(null);
   const [shippingState, setShippingState] = useState(DEFAULT_COMPANY_STATE);
   const [leadPrefillDone, setLeadPrefillDone] = useState(false);
+  /** Sales flow: what the active extension filled in for the chosen lead (only when it offers it). */
+  const [salesPrefill, setSalesPrefill] = useState<{ leadId: string; warnings: string[]; lines: number; notices?: SalesFlowNotice[] } | null>(null);
+  /** Layout switches of the active extension (e.g. its panels replace the product lines). */
+  const salesFlow: SalesFlowConfig = useSalesFlowConfig();
+  const terms = salesTerms(salesFlow);
+  const [salesPanels, setSalesPanels] = useState<{ leadId: string; panels: SalesFlowPanel[] } | null>(null);
+  const [salesPanelsLoading, setSalesPanelsLoading] = useState(false);
+  /** The extension's checklist for the chosen lead (prefill `checks`). */
+  const [salesChecks, setSalesChecks] = useState<{ leadId: string; checks: SalesFlowCheck[] } | null>(null);
+  /** The extension's facts and value questions for the chosen lead (prefill facts / valueConfirms). */
+  const [salesFacts, setSalesFacts] = useState<{ leadId: string; facts: ExtensionFact[]; confirms: ExtensionValueConfirm[] } | null>(null);
+  /**
+   * The extension's own layout of this page (salesFlow.opportunityForm). Without it the page
+   * stays as it was: both link types, declared fields at the bottom.
+   */
+  const oppForm = salesFlow.opportunityForm || null;
+  /**
+   * salesFlow.opportunityForm.startStage: the CRM sets the stage of a new opportunity (from the lead's
+   * readiness); the stepper is read-only and no stage / probability is sent.
+   */
+  const stageLocked = Boolean(oppForm?.startStage && oppForm.startStage.locked !== false);
+  const stageLockedRef = useRef(stageLocked);
+  stageLockedRef.current = stageLocked;
+  const [startStageInfo, setStartStageInfo] = useState<OpportunityStartStage | null>(null);
+  const { declarations } = useActiveExtension();
+  const declaredOppGroups = useMemo(() => declarations.fields?.opportunity || [], [declarations.fields]);
+  const declaredOppFields = useMemo(
+    () => new Map(declaredOppGroups.flatMap((g) => g.fields).map((f) => [f.key, f] as const)),
+    [declaredOppGroups]
+  );
+  /** Latest declared fields for async prefill answers (the declarations may load after the request starts). */
+  const declaredOppFieldsRef = useRef(declaredOppFields);
+  declaredOppFieldsRef.current = declaredOppFields;
+  const oppSettingsValues = useExtensionSettingsValues(
+    useMemo(() => Array.from(declaredOppFields.values()).some((f) => f.optionsFrom), [declaredOppFields])
+  );
+  const { confirm } = useDialog();
+  const allowedLinkTypes = useMemo<Array<'lead' | 'client'>>(() => {
+    const listed = (oppForm?.linkTypes || []).filter((t): t is 'lead' | 'client' => t === 'lead' || t === 'client');
+    return listed.length ? Array.from(new Set(listed)) : ['lead', 'client'];
+  }, [oppForm]);
+  /** Declared groups shown as numbered cards right after section 1 (they shift the later numbers). */
+  const formGroupCount = oppForm ? declaredOppGroups.length : 0;
+  /** The agent picked Lead / Client by hand: the form's default no longer applies. */
+  const linkTypeTouched = useRef(false);
+  // Only for a lead, and only when the active extension asks for it (salesFlow.hideOpportunityLines):
+  // an opportunity for a client has no lead requirements, so it keeps the product editor.
+  const hideLines = Boolean(salesFlow.hideOpportunityLines) && linkType === 'lead';
+  const hideLinesRef = useRef(false);
+  hideLinesRef.current = hideLines;
+  const prefillSeq = useRef(0);
+  /** Values this page filled in itself — replaced on the next lead, while the agent's own edits are kept. */
+  const autoFilled = useRef<{
+    title: string;
+    closeDate: string;
+    lines: string;
+    values: Record<string, unknown>;
+    person: string;
+    email: string;
+    mobile: string;
+    dealValue: number;
+    currency: string;
+  }>({
+    title: '',
+    closeDate: '',
+    lines: '',
+    values: {},
+    person: '',
+    email: '',
+    mobile: '',
+    dealValue: 0,
+    currency: '',
+  });
+  /** Current values for handlers that run after an await (state in their closure may be old). */
+  const extensionValuesRef = useRef(extensionValues);
+  extensionValuesRef.current = extensionValues;
+  const contactRef = useRef({ person: contactPerson, email: contactEmail, mobile: contactMobile });
+  contactRef.current = { person: contactPerson, email: contactEmail, mobile: contactMobile };
+  /** Bumped on every lead sync / reset, so a late contact answer for an older lead is dropped. */
+  const leadSyncSeq = useRef(0);
   const [leadMatchScore, setLeadMatchScore] = useState<number | null>(null);
 
   const goBack = () => navigate(returnTo);
 
-  const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
-    setToast({ text, type });
-    setTimeout(() => setToast(null), 3500);
+
+  const showToast = (text: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') => {
+    notify.show(type, text);
   };
 
   const applyPersonContact = (contact: PersonContact | null) => {
@@ -179,7 +314,16 @@ export const OpportunityCreatePage: React.FC = () => {
       try {
         const [clientsRes, leadsRes, settingsRes, usersRes, pipelinesRes, specificLeadRes, requestTypesRes] = await Promise.all([
           crmApi.listClients({ limit: 200 }).catch(() => ({ data: [] as ClientItem[] })),
-          crmApi.getLeads({ limit: 200 }).catch(() => ({ data: [] as LeadItem[] })),
+          // Leads the workflow allows; an older backend without the endpoint → every lead, as before.
+          crmApi
+            .getOpportunityLeadOptions('', initialLeadId)
+            .then((res) => ({ data: res.data?.leads || [], hidden: res.data?.hidden || 0, rule: res.data?.rule || 'all' }))
+            .catch(() =>
+              crmApi
+                .getLeads({ limit: 200 })
+                .then((res) => ({ data: res.data || [], hidden: 0, rule: 'all' as const }))
+                .catch(() => ({ data: [] as LeadItem[], hidden: 0, rule: 'all' as const }))
+            ),
           crmApi.getSettings().catch(() => ({ data: null })),
           canAssignOwner
             ? crmApi.getAssignableUsers().catch(() => ({ data: [] as AssignableUser[] }))
@@ -191,8 +335,13 @@ export const OpportunityCreatePage: React.FC = () => {
         if (cancelled) return;
         setClients(clientsRes.data || []);
         setRequestTypes(Array.isArray(requestTypesRes?.data) ? requestTypesRes.data : []);
-        let allLeads = leadsRes.data || [];
-        if (specificLeadRes?.data) {
+        let allLeads: LeadItem[] = leadsRes.data || [];
+        setHiddenLeadCount(leadsRes.hidden || 0);
+        setLeadRule(leadsRes.rule === 'qualified_or_ready' ? 'qualified_or_ready' : 'all');
+        // A lead opened from its page is added when the rule allows every lead; otherwise only
+        // offered leads can be chosen (the server refuses the rest with the reason).
+        // A lead converted into a client is never offered (no new opportunity from it).
+        if (specificLeadRes?.data && leadsRes.rule !== 'qualified_or_ready' && !specificLeadRes.data.convertedClientId) {
           if (!allLeads.some((l) => l._id === specificLeadRes.data._id)) {
             allLeads = [specificLeadRes.data, ...allLeads];
           }
@@ -200,7 +349,19 @@ export const OpportunityCreatePage: React.FC = () => {
         setLeads(allLeads);
         const loadedPipelines = Array.isArray(pipelinesRes?.data) ? pipelinesRes.data : [];
         setPipelines(loadedPipelines);
-        if (specificLeadRes?.data) {
+        const linkedLeadOffered = Boolean(initialLeadId) && allLeads.some((l) => l._id === initialLeadId);
+        if (initialLeadId && !linkedLeadOffered) {
+          // A lead the workflow does not offer is never synced or prefilled: the lead stays empty, with the reason.
+          const reason = specificLeadRes?.data?.convertedClientId
+            ? 'This lead is already a client — a new opportunity cannot be created from it.'
+            : leadsRes.rule === 'qualified_or_ready'
+              ? "This lead is not ready for an opportunity yet — only Qualified leads and leads that meet the workspace's requirements can be used."
+              : 'The lead from the link could not be loaded — choose a lead.';
+          setLeadPrefillDone(true);
+          setLeadId('');
+          setLeadLinkProblem(reason);
+          showToast(reason, 'warning');
+        } else if (specificLeadRes?.data) {
           setLeadPrefillDone(true);
           setLinkType('lead');
           setLeadId(specificLeadRes.data._id);
@@ -380,7 +541,8 @@ export const OpportunityCreatePage: React.FC = () => {
     return byName?.id || '';
   };
 
-  const applyLeadBudget = (lead: LeadItem) => {
+  /** The lead's budget for the Estimated Deal Value (0 when it has none). */
+  const leadBudget = (lead: LeadItem): number => {
     const qual = lead.qualification;
     const comm = lead.commercialRequirement;
     const candidates: Array<number | string | null | undefined> = [
@@ -400,73 +562,130 @@ export const OpportunityCreatePage: React.FC = () => {
     }
     for (const raw of candidates) {
       const n = Number(raw);
-      if (Number.isFinite(n) && n > 0) {
-        setDealValue(n);
-        return;
-      }
+      if (Number.isFinite(n) && n > 0) return n;
     }
+    return 0;
+  };
+
+  /** Deal value filled in by the page: replaces an empty or earlier automatic value, never the agent's. */
+  const applyAutoDealValue = (next: number) => {
+    const before = autoFilled.current.dealValue;
+    setDealValue((prev) => (!prev || prev === before ? next : prev));
+    autoFilled.current.dealValue = next;
+  };
+
+  /** Currency filled in by the page (the lead's, else Settings): replaces the default or an earlier automatic one. */
+  const applyAutoCurrency = (next: string) => {
+    const before = autoFilled.current.currency;
+    const fallback = normalizeCurrencyCode(settingsCurrency);
+    setCurrency((prev) => {
+      const current = normalizeCurrencyCode(prev, settingsCurrency);
+      return current === before || current === fallback ? next : prev;
+    });
+    autoFilled.current.currency = next;
+  };
+
+  /**
+   * Contact filled in by the page: each of name / email / mobile replaces an empty or earlier automatic
+   * value (the agent's own entries stay). The directory contact follows the name.
+   */
+  const applyAutoContact = (
+    next: { person: string; email: string; mobile: string },
+    contact: PersonContact | null
+  ) => {
+    const auto = autoFilled.current;
+    const now = contactRef.current;
+    const replaceable = (current: string, autoValue: string) => !current.trim() || current === autoValue;
+    if (replaceable(now.person, auto.person)) {
+      setContactPerson(next.person);
+      setSelectedContact(next.person ? contact : null);
+      now.person = next.person;
+      auto.person = next.person;
+    } else auto.person = '';
+    if (replaceable(now.email, auto.email)) {
+      setContactEmail(next.email);
+      now.email = next.email;
+      auto.email = next.email;
+    } else auto.email = '';
+    if (replaceable(now.mobile, auto.mobile)) {
+      setContactMobile(next.mobile);
+      now.mobile = next.mobile;
+      auto.mobile = next.mobile;
+    } else auto.mobile = '';
+  };
+
+  /**
+   * The lead was cleared or the opportunity is no longer for a lead: everything filled in from it goes
+   * (title, close date, lines, declared values, contact, deal value, currency) — the agent's own entries stay.
+   * Also drops any prefill still on its way.
+   */
+  const clearLeadAutoFill = () => {
+    leadSyncSeq.current += 1;
+    void applySalesFlowPrefill('');
+    applyAutoContact({ person: '', email: '', mobile: '' }, null);
+    applyAutoDealValue(0);
+    applyAutoCurrency(normalizeCurrencyCode(settingsCurrency));
+    autoFilled.current.currency = '';
   };
 
   const syncFromLead = (
     lead: LeadItem,
     opts?: { forceTitle?: boolean; availablePipelines?: OpportunityPipeline[] }
   ) => {
-    if (opts?.forceTitle || !title.trim()) {
+    const syncSeq = ++leadSyncSeq.current;
+    {
       // The lead's own title is the agreed name for this piece of business, so
       // the deal carries it through. Leads with no title keep the old wording.
+      // An earlier lead's automatic title is replaced; a title the agent typed stays.
       const leadTitle = String(lead.title || '').trim();
-      setTitle(
-        leadTitle || `Deal with ${lead.company || lead.contactName || lead.name || 'Lead'}`
-      );
+      const autoTitle = leadTitle || `Deal with ${lead.company || lead.contactName || lead.name || 'Lead'}`;
+      const before = autoFilled.current.title;
+      setTitle((prev) => (opts?.forceTitle || !prev.trim() || prev === before ? autoTitle : prev));
+      autoFilled.current.title = autoTitle;
     }
+    void applySalesFlowPrefill(lead._id);
     if (canAssignOwner && !salesOwner.trim()) {
       const ownerId = resolveLeadOwnerId(lead);
       if (ownerId) setSalesOwner(ownerId);
     }
     const pipes = opts?.availablePipelines || pipelines;
-    const isTravelLead =
-      lead.requestType === 'travel' ||
-      (lead as any).type === 'travel' ||
-      Boolean((lead as any).extension?.['crm-travel']);
     let targetPipeline: OpportunityPipeline | null = null;
-    if (isTravelLead && pipes.length > 0) {
-      const travelPipe = pipes.find(
-        (p) =>
-          p.pipelineKey === 'travel_pipeline' ||
-          (p as any).key === 'travel_pipeline' ||
-          p.name.toLowerCase().includes('travel')
-      );
-      if (travelPipe) {
-        setPipelineId(travelPipe._id);
-        targetPipeline = travelPipe;
-      }
-    } else if (pipelineId && pipes.length > 0) {
+    if (pipelineId && pipes.length > 0) {
       targetPipeline = pipes.find((p) => p._id === pipelineId) || null;
     }
 
-    applyLeadBudget(lead);
-    if (lead.currency) {
-      setCurrency(normalizeCurrencyCode(lead.currency, settingsCurrency));
-    }
+    // Deal value, currency and contact follow the chosen lead (an earlier lead's automatic values are
+    // replaced or cleared; the agent's own entries stay). No lead currency → the Settings currency.
+    applyAutoDealValue(leadBudget(lead));
+    applyAutoCurrency(
+      lead.currency ? normalizeCurrencyCode(lead.currency, settingsCurrency) : normalizeCurrencyCode(settingsCurrency)
+    );
+    const leadContact = {
+      person: String(lead.contactName || lead.name || ''),
+      email: String(lead.email || ''),
+      mobile: String(lead.phone || ''),
+    };
     if (lead.contactId) {
       void crmApi
         .getContact(lead.contactId)
         .then((res) => {
-          if (res.data) applyPersonContact(res.data);
+          if (syncSeq !== leadSyncSeq.current) return;
+          if (res.data) {
+            applyAutoContact(
+              {
+                person: formatContactName(res.data) || res.data.name || '',
+                email: res.data.email || '',
+                mobile: res.data.phone || '',
+              },
+              res.data
+            );
+          } else applyAutoContact(leadContact, null);
         })
         .catch(() => {
-          if (!contactPerson.trim() && (lead.contactName || lead.name)) {
-            setContactPerson(lead.contactName || lead.name || '');
-          }
-          if (!contactEmail.trim() && lead.email) setContactEmail(lead.email);
-          if (!contactMobile.trim() && lead.phone) setContactMobile(lead.phone);
+          if (syncSeq === leadSyncSeq.current) applyAutoContact(leadContact, null);
         });
     } else {
-      if (!contactPerson.trim() && (lead.contactName || lead.name)) {
-        setContactPerson(lead.contactName || lead.name || '');
-      }
-      if (!contactEmail.trim() && lead.email) setContactEmail(lead.email);
-      if (!contactMobile.trim() && lead.phone) setContactMobile(lead.phone);
+      applyAutoContact(leadContact, null);
     }
 
     // Commercial Requirement Match: If match score is 80% or greater, set Pipeline Stage to the second stage
@@ -475,7 +694,8 @@ export const OpportunityCreatePage: React.FC = () => {
     const pipeStages = targetPipeline?.stages?.length
       ? targetPipeline.stages
       : (displayStages.length ? displayStages : opportunityStages);
-    if (matchScore != null && matchScore >= 80 && pipeStages.length > 1) {
+    // Not when the stage is set automatically (salesFlow.opportunityForm.startStage).
+    if (!stageLockedRef.current && matchScore != null && matchScore >= 80 && pipeStages.length > 1) {
       const secondStage = pipeStages[1];
       const stageKey = (secondStage as any).key || secondStage.label || (secondStage as any).name;
       const prob = Number(secondStage.probability) || 25;
@@ -486,6 +706,169 @@ export const OpportunityCreatePage: React.FC = () => {
         'info'
       );
     }
+  };
+
+  /**
+   * Asks the active extension what an opportunity for this lead starts with (sales flow).
+   * Without such an extension the answer is { available: false } and nothing changes.
+   * Only fields that are empty or were filled automatically are replaced.
+   */
+  const applySalesFlowPrefill = async (forLeadId: string) => {
+    const seq = ++prefillSeq.current;
+    setSalesPrefill(null);
+    setSalesPanels(null);
+    setSalesChecks(null);
+    setSalesFacts(null);
+    // What the previous lead's prefill filled in goes first (the agent's own edits stay), so nothing of
+    // lead A is left on lead B — also when B's prefill fails or sends fewer values. No lead: the title too.
+    clearPrefilled(!forLeadId);
+    if (!forLeadId) {
+      setSalesPanelsLoading(false);
+      return;
+    }
+    let data;
+    setSalesPanelsLoading(true);
+    try {
+      data = (await crmApi.getOpportunityPrefill(forLeadId)).data;
+    } catch {
+      return; // older backend or no access: the form works as before
+    } finally {
+      if (seq === prefillSeq.current) setSalesPanelsLoading(false);
+    }
+    if (seq !== prefillSeq.current || !data) return;
+    if (!data.available) {
+      if (data.reason === 'failed') {
+        setSalesPrefill({ leadId: forLeadId, warnings: [data.message || 'The extension could not prepare this opportunity — fill it in by hand.'], lines: 0 });
+      }
+      return;
+    }
+    const auto = autoFilled.current;
+    setSalesPanels({ leadId: forLeadId, panels: data.panels || [] });
+    setSalesChecks({ leadId: forLeadId, checks: Array.isArray(data.checks) ? data.checks : [] });
+    setSalesFacts({
+      leadId: forLeadId,
+      facts: Array.isArray(data.facts) ? data.facts : [],
+      confirms: Array.isArray(data.valueConfirms) ? data.valueConfirms : [],
+    });
+    // The lead's Deal Value is the Estimated Deal Value (the agent may still change it).
+    if (data.dealValue !== null && data.dealValue !== undefined && Number.isFinite(Number(data.dealValue))) {
+      applyAutoDealValue(Math.max(0, Number(data.dealValue)));
+    }
+    if (data.title) {
+      const next = data.title;
+      const before = auto.title;
+      setTitle((prev) => (!prev.trim() || prev === before ? next : prev));
+      auto.title = next;
+    }
+    if (data.expectedCloseDate) {
+      const next = data.expectedCloseDate;
+      const before = auto.closeDate;
+      setExpectedCloseDate((prev) => (!prev || prev === before || prev === defaultCloseDate() ? next : prev));
+      auto.closeDate = next;
+    }
+    // Quantity, rate and tax come with the line, so the saved rows match the quotation's rows and a
+    // price agreed on the opportunity carries over to the quotation.
+    const suggested = (data.lines || []).map((l) =>
+      newLine({
+        productName: l.name,
+        description: l.description,
+        quantity: lineNumber(l.quantity, 1, 100000),
+        unitPrice: lineNumber(l.unitPrice, 0, 1e12),
+        tax: lineNumber(l.tax, 0, 100),
+      })
+    );
+    if (hideLinesRef.current) {
+      setLines(suggested.length ? suggested : [newLine()]);
+    } else if (suggested.length) {
+      const before = auto.lines;
+      setLines((prev) => {
+        const blank = prev.every((l) => !l.productName.trim() && !l.description.trim());
+        return blank || linesSignature(prev) === before ? suggested : prev;
+      });
+      auto.lines = linesSignature(suggested);
+    }
+    const values = data.values || {};
+    const fields = declaredOppFieldsRef.current;
+    const current = extensionValuesRef.current;
+    const before = auto.values;
+    const merged = { ...current };
+    for (const [key, value] of Object.entries(values)) {
+      if (canReplaceWithPrefill(current[key], before[key], fields.get(key))) merged[key] = value;
+    }
+    // Formulas follow the merged values (e.g. a day count from the new dates).
+    const next = withFormulas(Array.from(fields.values()), merged);
+    extensionValuesRef.current = next;
+    setExtensionValues(next);
+    auto.values = values;
+    setSalesPrefill({ leadId: forLeadId, warnings: data.warnings || [], lines: suggested.length, notices: data.notices || [] });
+
+    // A value the agent set before choosing this lead (not this prefill's) still needs this lead's question,
+    // e.g. a field changed by hand to a value that this lead's records are not ready for.
+    const confirms: ExtensionValueConfirm[] = Array.isArray(data.valueConfirms) ? data.valueConfirms : [];
+    for (const ask of confirms) {
+      const held = current[ask.field];
+      const setByAgent = !canReplaceWithPrefill(held, undefined, fields.get(ask.field));
+      if (!setByAgent || String(held ?? '') !== ask.value || String(next[ask.field] ?? '') !== ask.value) continue;
+      if (String(values[ask.field] ?? '') === ask.value) continue; // this lead's own value: not the agent's
+      const ok = await confirm({
+        title: ask.title || 'Please confirm',
+        message: ask.message,
+        confirmLabel: 'Continue',
+        cancelLabel: 'Change it back',
+      });
+      if (seq !== prefillSeq.current) return;
+      if (!ok) {
+        const fallback = values[ask.field] !== undefined ? values[ask.field] : '';
+        const reverted = withFormulas(Array.from(declaredOppFieldsRef.current.values()), {
+          ...extensionValuesRef.current,
+          [ask.field]: fallback,
+        });
+        extensionValuesRef.current = reverted;
+        setExtensionValues(reverted);
+      }
+    }
+  };
+
+  /**
+   * Withdraws what the last prefill filled in, wherever the agent has not changed it: declared values go
+   * back to empty (or their declared default), the close date to the default, the product lines to one
+   * empty row; the title only when `withTitle` (no lead any more).
+   */
+  const clearPrefilled = (withTitle: boolean) => {
+    const auto = autoFilled.current;
+    if (withTitle && auto.title) {
+      const before = auto.title;
+      setTitle((prev) => (prev === before ? '' : prev));
+      auto.title = '';
+    }
+    if (auto.closeDate) {
+      const before = auto.closeDate;
+      setExpectedCloseDate((prev) => (prev === before ? defaultCloseDate() : prev));
+      auto.closeDate = '';
+    }
+    // Hidden product lines belong to the chosen lead only.
+    if (hideLinesRef.current) setLines([newLine()]);
+    else if (auto.lines) {
+      const before = auto.lines;
+      setLines((prev) => (linesSignature(prev) === before ? [newLine()] : prev));
+    }
+    auto.lines = '';
+    const previous = auto.values;
+    auto.values = {};
+    if (!Object.keys(previous).length) return;
+    const fields = declaredOppFieldsRef.current;
+    const current = extensionValuesRef.current;
+    const next = { ...current };
+    let changed = false;
+    for (const [key, value] of Object.entries(previous)) {
+      if (!(key in current) || !sameValue(current[key], value)) continue; // changed by the agent: kept
+      next[key] = emptyFieldValue(fields.get(key));
+      changed = true;
+    }
+    if (!changed) return;
+    const computed = withFormulas(Array.from(fields.values()), next);
+    extensionValuesRef.current = computed;
+    setExtensionValues(computed);
   };
 
   // Prefill from ?leadId= once leads list is loaded
@@ -502,26 +885,6 @@ export const OpportunityCreatePage: React.FC = () => {
     leads,
     leadPrefillDone,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Auto-select Travel Pipeline once pipelines list is loaded if lead is travel
-  useEffect(() => {
-    if (!pipelines.length || !leadId || !leads.length || pipelineId) return;
-    const lead = leads.find((l) => l._id === leadId);
-    if (!lead) return;
-    const isTravelLead =
-      lead.requestType === 'travel' ||
-      (lead as any).type === 'travel' ||
-      Boolean((lead as any).extension?.['crm-travel']);
-    if (isTravelLead) {
-      const travelPipe = pipelines.find(
-        (p) =>
-          p.pipelineKey === 'travel_pipeline' ||
-          (p as any).key === 'travel_pipeline' ||
-          p.name.toLowerCase().includes('travel')
-      );
-      if (travelPipe) setPipelineId(travelPipe._id);
-    }
-  }, [pipelines, leadId, leads, pipelineId]);
 
   const selectedPipeline = useMemo(() => {
     if (!pipelineId) return null;
@@ -561,13 +924,15 @@ export const OpportunityCreatePage: React.FC = () => {
       const name = line.productName.trim();
       if (!name) continue;
 
+      const quantity = line.quantity ?? 1;
+      const unitPrice = line.unitPrice ?? 0;
       validLines.push({
         productName: name,
         description: line.description.trim(),
-        quantity: 1,
-        unitPrice: 0,
-        tax: 0,
-        amount: 0,
+        quantity,
+        unitPrice,
+        tax: line.tax ?? 0,
+        amount: Math.round(quantity * unitPrice * 100) / 100,
       });
     }
 
@@ -642,12 +1007,56 @@ export const OpportunityCreatePage: React.FC = () => {
   const isSection1Done = hasAccountLink && Boolean(title.trim());
   const isSection2Done = Boolean(stage && probability !== undefined);
   const isSection3Done = Boolean(contactPerson.trim() || contactEmail.trim() || selectedContact);
-  const isSection4Done = totals.validLines.length > 0;
+  const isSection4Done = hideLines ? (linkType === 'lead' ? Boolean(leadId) : true) : totals.validLines.length > 0;
 
+  /** Declared fields wait for a lead (salesFlow.opportunityForm.needsLead). */
+  const fieldsNeedLead = Boolean(oppForm?.needsLead) && linkType === 'lead' && !leadId;
+  /** ...and for the lead's prefill, so its questions (valueConfirms) cannot be skipped by typing first. */
+  const prefillLoading = linkType === 'lead' && Boolean(leadId) && salesPanelsLoading;
+  const fieldsLocked = fieldsNeedLead || prefillLoading;
+
+  /** With an opportunity form: the extension's checks for this lead + one row per required declared field. */
+  const formChecks = useMemo<SalesFlowCheck[]>(() => {
+    if (!oppForm) return [];
+    const rows: SalesFlowCheck[] = [];
+    if (linkType === 'lead' && leadId && salesChecks && salesChecks.leadId === leadId) rows.push(...salesChecks.checks);
+    // Live rows of the groups' count checks (countCheck.checkLabel), once the lead's numbers are known.
+    if (linkType === 'lead' && leadId && salesFacts && salesFacts.leadId === leadId) {
+      for (const group of declaredOppGroups) {
+        const row = countCheckRow(group, extensionValues, salesFacts.facts);
+        if (row) rows.push(row);
+      }
+    }
+    for (const group of declaredOppGroups) {
+      for (const field of group.fields || []) {
+        if (!field.required || field.formula || field.readOnly || field.hidden) continue;
+        rows.push({ label: field.label, ok: !missingRequiredFields([{ fields: [field] }], extensionValues).length });
+      }
+    }
+    return rows;
+  }, [oppForm, linkType, leadId, salesChecks, salesFacts, declaredOppGroups, extensionValues]);
+
+  const totalChecklistItems = (hideLines ? 2 : 3) + formChecks.length;
   const checklistScore =
     (hasAccountLink ? 1 : 0) +
     (Boolean(title.trim()) ? 1 : 0) +
-    (totals.validLines.length > 0 ? 1 : 0);
+    (!hideLines && totals.validLines.length > 0 ? 1 : 0) +
+    formChecks.filter((c) => c.ok).length;
+
+  /** Subtitle of a locked stage section, from the pipeline's own stage labels. */
+  const lockedStageText = useMemo(() => {
+    const first = startStageInfo?.startStage || oppForm?.startStage?.stage || '';
+    const later = startStageInfo?.readyStage ?? oppForm?.startStage?.readyStage ?? '';
+    if (!first) return 'Set automatically when the opportunity is saved.';
+    let text = `Set automatically — starts at "${first}"`;
+    if (later) text += `; "${later}" when the lead is ready (its requirements are complete)`;
+    text += '.';
+    if (later && startStageInfo && linkType === 'lead' && leadId) {
+      const reasons = startStageInfo.reasons && startStageInfo.reasons.length ? ` (${startStageInfo.reasons.slice(0, 3).join('; ')})` : '';
+      text += startStageInfo.ready ? ` This lead is ready: "${later}".` : ` This lead is not ready yet${reasons}.`;
+    }
+    return text;
+  }, [startStageInfo, oppForm, linkType, leadId]);
 
   const stepperStages = useMemo(() => {
     return displayStages.filter(
@@ -690,6 +1099,7 @@ export const OpportunityCreatePage: React.FC = () => {
 
   // Client Selection Handler
   const handleClientChange = (newClientId: string) => {
+    if (leadId) clearLeadAutoFill();
     setClientId(newClientId);
     setLeadId('');
     setSelectedContact(null);
@@ -731,7 +1141,9 @@ export const OpportunityCreatePage: React.FC = () => {
     showToast('Contact details auto-filled from client profile!', 'success');
   };
 
-  const handleLinkTypeChange = (next: 'lead' | 'client') => {
+  const applyLinkType = (next: 'lead' | 'client') => {
+    // Leaving Lead: the lead's values, title and lines go (and a prefill on its way is dropped).
+    const leavingLead = linkType === 'lead' && next !== 'lead';
     setLinkType(next);
     setSelectedContact(null);
     if (next === 'lead') {
@@ -739,10 +1151,33 @@ export const OpportunityCreatePage: React.FC = () => {
     } else {
       setLeadId('');
     }
+    if (leavingLead) clearLeadAutoFill();
   };
+
+  const handleLinkTypeChange = (next: 'lead' | 'client') => {
+    linkTypeTouched.current = true;
+    applyLinkType(next);
+  };
+
+  // salesFlow.opportunityForm: start with its preferred link type (a ?leadId= / ?clientId= link wins
+  // when that type is allowed) and never stay on a type it does not allow.
+  const linkTypesKey = oppForm ? allowedLinkTypes.join(',') : '';
+  useEffect(() => {
+    if (!linkTypesKey) return;
+    const allowed = linkTypesKey.split(',') as Array<'lead' | 'client'>;
+    if (linkTypeTouched.current && allowed.includes(linkType)) return;
+    const next =
+      initialLeadId && allowed.includes('lead')
+        ? 'lead'
+        : initialClientId && allowed.includes('client')
+          ? 'client'
+          : allowed[0];
+    if (next !== linkType) applyLinkType(next);
+  }, [linkTypesKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Inbound Lead Link Handler: auto-fills deal details + Estimated Deal Value from Lead budget
   const handleLeadChange = (newLeadId: string) => {
+    setLeadLinkProblem('');
     setLeadId(newLeadId);
     setClientId('');
     setSelectedContact(null);
@@ -750,11 +1185,47 @@ export const OpportunityCreatePage: React.FC = () => {
     if (lead) {
       syncFromLead(lead);
       showToast(`Linked lead: ${lead.company || lead.name}`, 'info');
+    } else {
+      // Lead cleared: drop its values and any prefill still on its way (a late answer must not land).
+      clearLeadAutoFill();
     }
   };
 
+  // Locked start stage: ask the server for this lead (no lead → the first stage); asked again when the lead changes.
+  const startLeadId = linkType === 'lead' ? leadId : '';
   useEffect(() => {
-    if (!displayStages.length) return;
+    if (!stageLocked) {
+      setStartStageInfo(null);
+      return;
+    }
+    let cancelled = false;
+    crmApi
+      .getOpportunityStartStage(startLeadId || undefined)
+      .then((res) => {
+        if (!cancelled) setStartStageInfo(res.data && res.data.locked ? res.data : null);
+      })
+      .catch(() => {
+        if (!cancelled) setStartStageInfo(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [stageLocked, startLeadId]);
+
+  useEffect(() => {
+    if (!stageLocked) return;
+    const label = startStageInfo?.stage || oppForm?.startStage?.stage || '';
+    if (!label) return;
+    const lower = label.trim().toLowerCase();
+    const hit = displayStages.find((s) => s.key.toLowerCase() === lower || s.label.toLowerCase() === lower);
+    setStage(hit ? hit.key : label);
+    setProbability(
+      startStageInfo?.probability ?? hit?.probability ?? stageProbability(hit ? hit.key : label, displayStages)
+    );
+  }, [stageLocked, startStageInfo, oppForm, displayStages]);
+
+  useEffect(() => {
+    if (!displayStages.length || stageLocked) return;
     if (leadMatchScore != null && leadMatchScore >= 80 && displayStages.length > 1) {
       const secondStage = displayStages[1];
       setStage(secondStage.key);
@@ -767,10 +1238,11 @@ export const OpportunityCreatePage: React.FC = () => {
       setProbability(next.probability);
       return next.key;
     });
-  }, [displayStages, leadMatchScore]);
+  }, [displayStages, leadMatchScore, stageLocked]);
 
-  // Stage selection
+  // Stage selection (not when the stage is set automatically)
   const selectStage = (stageKey: string) => {
+    if (stageLocked) return;
     setStage(stageKey);
     const fromStages = displayStages.find((s) => s.key === stageKey);
     setProbability(fromStages?.probability ?? stageProbability(stageKey, displayStages));
@@ -805,11 +1277,15 @@ export const OpportunityCreatePage: React.FC = () => {
       showToast('Please enter the Opportunity Title', 'error');
       return;
     }
-    if (isOpportunityLostStage(stage) && !lostReason.trim()) {
+    if (!stageLocked && isOpportunityLostStage(stage) && !lostReason.trim()) {
       showToast('Please provide the reason why this deal was lost', 'error');
       return;
     }
-    if (!totals.validLines.length) {
+    if (expectedCloseDate && expectedCloseDate < localDateIso(1)) {
+      showToast('Expected close date must be a future date (tomorrow or later)', 'error');
+      return;
+    }
+    if (!hideLines && !totals.validLines.length) {
       showToast('Please add at least one proposed item name', 'error');
       return;
     }
@@ -843,11 +1319,28 @@ export const OpportunityCreatePage: React.FC = () => {
       }
     }
 
+    // Declared values are checked before the opportunity is created, so it is never saved and then left
+    // without them: only declared keys are sent, with the server's rules (numbers, options, required).
+    const valuesToSave = Object.fromEntries(
+      Object.entries(extensionValues).filter(([key]) => declaredOppFields.has(key))
+    );
+    if (declaredOppFields.size) {
+      const missing = missingRequiredFields(declaredOppGroups, valuesToSave);
+      const problem =
+        invalidFieldValue(Array.from(declaredOppFields.values()), valuesToSave, oppSettingsValues) ||
+        (missing.length ? `${missing[0]} is required` : null);
+      if (problem) {
+        showToast(`${salesFlow.extensionName || 'Extension'} details: ${problem}`, 'error');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
-      await crmApi.createOpportunity({
+      const created = await crmApi.createOpportunity({
         title: title.trim(),
-        pipelineId: pipelineId || undefined,
+        // A locked start stage: the server decides the pipeline, stage and probability.
+        pipelineId: stageLocked ? undefined : pipelineId || undefined,
         clientId: linkType === 'client' ? clientId || undefined : undefined,
         clientName:
           linkType === 'client'
@@ -855,8 +1348,8 @@ export const OpportunityCreatePage: React.FC = () => {
             : undefined,
         leadId: linkType === 'lead' ? leadId || undefined : undefined,
         salesOwner: canAssignOwner ? salesOwner.trim() || undefined : undefined,
-        stage,
-        probability,
+        stage: stageLocked ? undefined : stage,
+        probability: stageLocked ? undefined : probability,
         expectedCloseDate: expectedCloseDate || undefined,
         contactPerson: contactPerson.trim() || undefined,
         contactEmail: contactEmail.trim() || undefined,
@@ -871,8 +1364,26 @@ export const OpportunityCreatePage: React.FC = () => {
         exchangeRate: exchangeRate > 0 ? exchangeRate : 1,
         shippingState,
         shippingCharge: totals.shipping,
-        lostReason: isOpportunityLostStage(stage) ? lostReason.trim() : undefined,
+        lostReason: !stageLocked && isOpportunityLostStage(stage) ? lostReason.trim() : undefined,
       });
+      const newId = created?.data?._id;
+      // Declared values, then the extension's own copy (salesFlow.opportunityForm.savedRoute).
+      // Neither undoes the saved opportunity; a values problem is shown, and the copy is not made from nothing.
+      let syncProblem: string | null = null;
+      if (newId && Object.keys(valuesToSave).length > 0) {
+        await extensionDataApi.setValues('opportunity', newId, valuesToSave).catch((err: unknown) => {
+          syncProblem = `the details were not saved (${err instanceof Error && err.message ? err.message : 'unknown error'}); add them on the opportunity page`;
+        });
+      }
+      // Saving values already tells the extension (server side); otherwise tell it here.
+      if (!syncProblem && newId && oppForm?.savedRoute && Object.keys(valuesToSave).length === 0) {
+        syncProblem = await notifySalesFlowSaved('opportunity', newId);
+      }
+      if (syncProblem) {
+        showToast(`Opportunity saved. ${salesFlow.extensionName || 'Extension'} details were not synced: ${syncProblem}`, 'warning');
+        window.setTimeout(() => navigate(returnTo), 2500);
+        return;
+      }
       showToast('Opportunity deal created successfully!', 'success');
       navigate(returnTo);
     } catch (err: unknown) {
@@ -912,18 +1423,6 @@ export const OpportunityCreatePage: React.FC = () => {
 
   return (
     <div data-tour="opportunities-create-form" className="flex w-full flex-col gap-6 pb-16">
-      {toast && (
-        <div
-          className={`fixed top-20 right-6 z-[80] px-4 py-2.5 rounded-lg text-xs font-semibold border shadow-lg ${
-            toast.type === 'error'
-              ? 'bg-zinc-950 text-white border-zinc-900'
-              : 'bg-white text-zinc-950 border-zinc-300'
-          }`}
-        >
-          {toast.text}
-        </div>
-      )}
-
       {/* Top Header Row */}
       <div
         data-tour="opportunities-create-header"
@@ -944,7 +1443,7 @@ export const OpportunityCreatePage: React.FC = () => {
             </div>
             <div className="flex items-center gap-2.5 mt-0.5 flex-wrap">
               <h1 className="text-2xl font-bold text-zinc-950 m-0 tracking-tight">
-                New Opportunity Deal
+                {oppForm?.title || 'New Opportunity Deal'}
               </h1>
               <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-zinc-100 text-zinc-800 border border-zinc-300">
                 {linkType === 'lead' ? 'Lead' : 'Client'}
@@ -953,6 +1452,9 @@ export const OpportunityCreatePage: React.FC = () => {
                 {stage} · {probability}%
               </span>
             </div>
+            {oppForm?.subtitle ? (
+              <p className="text-xs text-zinc-500 m-0 mt-1" data-testid="opportunity-form-subtitle">{oppForm.subtitle}</p>
+            ) : null}
           </div>
         </div>
 
@@ -1009,14 +1511,17 @@ export const OpportunityCreatePage: React.FC = () => {
                     Deal overview &amp; account link
                   </h2>
                   <p className="text-xs text-zinc-500 m-0 mt-0.5">
-                    Choose Lead or Client first, then complete the deal details.
+                    {allowedLinkTypes.length === 1
+                      ? `Choose the ${allowedLinkTypes[0]} first, then complete the deal details.`
+                      : 'Choose Lead or Client first, then complete the deal details.'}
                   </p>
                 </div>
               </div>
             </div>
 
             <div className="p-5 space-y-[18px]">
-              {/* Toggle row */}
+              {/* Toggle row (only the link types the active extension allows; hidden when just one) */}
+              {allowedLinkTypes.length > 1 ? (
               <div className="flex flex-wrap items-center gap-4">
                 <span className="text-[12.5px] font-semibold text-zinc-900">
                   Create opportunity for <span className="text-zinc-950 font-bold">*</span>
@@ -1027,6 +1532,7 @@ export const OpportunityCreatePage: React.FC = () => {
                 >
                   <button
                     type="button"
+                    aria-pressed={linkType === 'lead'}
                     onClick={() => handleLinkTypeChange('lead')}
                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md cursor-pointer transition-all ${
                       linkType === 'lead'
@@ -1040,6 +1546,7 @@ export const OpportunityCreatePage: React.FC = () => {
                   </button>
                   <button
                     type="button"
+                    aria-pressed={linkType === 'client'}
                     onClick={() => handleLinkTypeChange('client')}
                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md cursor-pointer transition-all ${
                       linkType === 'client'
@@ -1053,6 +1560,7 @@ export const OpportunityCreatePage: React.FC = () => {
                   </button>
                 </div>
               </div>
+              ) : null}
 
               {/* Row 1 (2 cols): Lead/Client Select + Title */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1069,11 +1577,45 @@ export const OpportunityCreatePage: React.FC = () => {
                         onChange={(nextId) => handleLeadChange(nextId)}
                         required
                       />
+                      {leadRule === 'qualified_or_ready' && (
+                        <p className="m-0 mt-1 text-[11px] text-zinc-500" data-testid="opportunity-lead-rule">
+                          Only Qualified leads and leads that meet the workspace's requirements are listed
+                          {hiddenLeadCount ? ` (${hiddenLeadCount} other lead${hiddenLeadCount === 1 ? ' is' : 's are'} not ready yet)` : ''}.
+                        </p>
+                      )}
                     </div>
+                    {!leadId && leadLinkProblem ? (
+                      <p role="alert" className="m-0 mt-1.5 text-xs text-amber-700" data-testid="opportunity-lead-link-problem">
+                        {leadLinkProblem}
+                      </p>
+                    ) : null}
                     {!leadId ? (
                       <p className="m-0 mt-1.5 text-xs text-zinc-500">
                         Select a lead to prefill opportunity details.
                       </p>
+                    ) : null}
+                    {leadId && salesPrefill && salesPrefill.leadId === leadId ? (
+                      <div className="mt-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2" data-testid="opportunity-sales-prefill">
+                        {salesPrefill.lines ? (
+                          <p className="m-0 text-[11.5px] text-zinc-600">
+                            {hideLines
+                              ? `Title, close date, deal value and ${salesPrefill.lines} item${salesPrefill.lines === 1 ? '' : 's'} were filled from the lead's requirements — review them before saving.`
+                              : `Title, close date and ${salesPrefill.lines} product line${salesPrefill.lines === 1 ? '' : 's'} were filled from the lead's requirements — review them before saving.`}
+                          </p>
+                        ) : null}
+                        {salesPrefill.warnings.length ? (
+                          <ul className="m-0 mt-1 pl-4 text-[11.5px] text-amber-700 space-y-0.5">
+                            {salesPrefill.warnings.map((w, i) => (
+                              <li key={i}>{w}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {leadId && salesPrefill && salesPrefill.leadId === leadId && salesPrefill.notices?.length ? (
+                      <div className="mt-2">
+                        <SalesFlowNotices notices={salesPrefill.notices} leadId={leadId} />
+                      </div>
                     ) : null}
                   </div>
                 ) : (
@@ -1323,6 +1865,27 @@ export const OpportunityCreatePage: React.FC = () => {
             </div>
           </section>
 
+          {oppForm ? (
+            <ExtensionCreateFields
+              record="opportunity"
+              values={extensionValues}
+              onChange={setExtensionValues}
+              disabled={saving || fieldsLocked}
+              disabledHint={
+                fieldsNeedLead
+                  ? oppForm.emptyText || 'Select a lead first.'
+                  : prefillLoading
+                    ? "Loading the lead's details…"
+                    : undefined
+              }
+              currencySymbol={getCurrencySymbol(currency)}
+              variant="numbered"
+              startIndex={2}
+              facts={linkType === 'lead' && salesFacts && salesFacts.leadId === leadId ? salesFacts.facts : []}
+              confirms={linkType === 'lead' && salesFacts && salesFacts.leadId === leadId ? salesFacts.confirms : []}
+            />
+          ) : null}
+
           {/* SECTION 2: Pipeline Stage & Win Probability */}
           <section
             id="pipeline-stage"
@@ -1338,14 +1901,14 @@ export const OpportunityCreatePage: React.FC = () => {
                       : 'border border-zinc-300 text-zinc-700 bg-zinc-50'
                   }`}
                 >
-                  {isSection2Done ? <Check className="h-4 w-4 stroke-[2.5]" /> : '2'}
+                  {isSection2Done ? <Check className="h-4 w-4 stroke-[2.5]" /> : 2 + formGroupCount}
                 </div>
                 <div>
                   <h2 className="text-[15px] font-semibold text-zinc-950 m-0">
                     Pipeline stage &amp; win probability
                   </h2>
                   <p className="text-xs text-zinc-500 m-0 mt-0.5">
-                    Click a milestone — probability updates automatically.
+                    {stageLocked ? lockedStageText : 'Click a milestone — probability updates automatically.'}
                   </p>
                 </div>
               </div>
@@ -1361,9 +1924,26 @@ export const OpportunityCreatePage: React.FC = () => {
                     return (
                       <div
                         key={s.key}
-                        onClick={() => selectStage(s.key)}
+                        role={stageLocked ? undefined : 'button'}
+                        tabIndex={stageLocked ? undefined : 0}
+                        aria-pressed={stageLocked ? undefined : isCur}
+                        aria-current={stageLocked && isCur ? 'step' : undefined}
+                        aria-label={`${s.label} — ${s.probability}%`}
+                        onClick={stageLocked ? undefined : () => selectStage(s.key)}
+                        onKeyDown={
+                          stageLocked
+                            ? undefined
+                            : (e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  selectStage(s.key);
+                                }
+                              }
+                        }
                         title={`${s.label} — ${s.probability}% · ${s.desc || ''}`}
-                        className="flex-1 flex flex-col items-center gap-2 relative text-center cursor-pointer group"
+                        className={`flex-1 flex flex-col items-center gap-2 relative text-center rounded-lg outline-none ${
+                          stageLocked ? 'cursor-default' : 'cursor-pointer group focus-visible:ring-2 focus-visible:ring-zinc-400'
+                        }`}
                       >
                         {idx > 0 && (
                           <div
@@ -1399,7 +1979,8 @@ export const OpportunityCreatePage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Outcomes (Won / Lost) */}
+              {/* Outcomes (Won / Lost) — not offered when the stage is set automatically */}
+              {!stageLocked && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button
                   type="button"
@@ -1435,6 +2016,7 @@ export const OpportunityCreatePage: React.FC = () => {
                   </span>
                 </button>
               </div>
+              )}
 
               {/* Current-stage panel */}
               <div className="flex flex-col sm:flex-row items-center gap-4 bg-zinc-50 border border-zinc-200 rounded-xl p-4">
@@ -1459,6 +2041,7 @@ export const OpportunityCreatePage: React.FC = () => {
                   <input
                     type="date"
                     className={fieldClass}
+                    min={localDateIso(1)}
                     value={expectedCloseDate}
                     onChange={(e) => setExpectedCloseDate(e.target.value)}
                     title="Expected close date"
@@ -1467,7 +2050,7 @@ export const OpportunityCreatePage: React.FC = () => {
               </div>
 
               {/* Lost Reason Panel */}
-              {isOpportunityLostStage(stage) && (
+              {!stageLocked && isOpportunityLostStage(stage) && (
                 <div className="p-3.5 bg-zinc-50 border border-zinc-950 rounded-xl flex flex-col gap-1.5">
                   <label className="text-xs font-bold text-zinc-950 flex items-center gap-1.5">
                     <XCircle className="h-4 w-4 text-zinc-950" />
@@ -1502,7 +2085,7 @@ export const OpportunityCreatePage: React.FC = () => {
                       : 'border border-zinc-300 text-zinc-700 bg-zinc-50'
                   }`}
                 >
-                  {isSection3Done ? <Check className="h-4 w-4 stroke-[2.5]" /> : '3'}
+                  {isSection3Done ? <Check className="h-4 w-4 stroke-[2.5]" /> : 3 + formGroupCount}
                 </div>
                 <div>
                   <h2 className="text-[15px] font-semibold text-zinc-950 m-0">
@@ -1585,7 +2168,43 @@ export const OpportunityCreatePage: React.FC = () => {
             </div>
           </section>
 
-          {/* SECTION 4: Proposed Products & Line Items */}
+          {hideLines ? (
+            linkType === 'lead' ? (
+              <section
+                id="line-items"
+                data-testid="opportunity-sales-panels"
+                className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+              >
+                <div className="p-5 pb-3 border-b border-zinc-100 flex items-center gap-3">
+                  <div
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 transition-colors ${
+                      isSection4Done ? 'bg-zinc-950 text-white' : 'border border-zinc-300 text-zinc-700 bg-zinc-50'
+                    }`}
+                  >
+                    {isSection4Done ? <Check className="h-4 w-4 stroke-[2.5]" /> : 4 + formGroupCount}
+                  </div>
+                  <div>
+                    <h2 className="text-[15px] font-semibold text-zinc-950 m-0">Lead requirements</h2>
+                    <p className="text-xs text-zinc-500 m-0 mt-0.5">
+                      Taken from the selected lead. Completed requirements are saved as this opportunity's items.
+                    </p>
+                  </div>
+                </div>
+                <div className="p-5">
+                  {!leadId ? (
+                    <p className="m-0 text-xs text-zinc-500">{oppForm?.emptyText || 'Select a lead to see its requirements.'}</p>
+                  ) : (
+                    <SalesFlowPanels
+                      loading={salesPanelsLoading}
+                      panels={salesPanels && salesPanels.leadId === leadId ? salesPanels.panels : []}
+                      placeholder="No requirement details for this lead."
+                    />
+                  )}
+                </div>
+              </section>
+            ) : null
+          ) : (
+          /* SECTION 4: Proposed Products & Line Items */
           <section
             id="line-items"
             data-tour="opportunities-section-products"
@@ -1600,11 +2219,11 @@ export const OpportunityCreatePage: React.FC = () => {
                       : 'border border-zinc-300 text-zinc-700 bg-zinc-50'
                   }`}
                 >
-                  {isSection4Done ? <Check className="h-4 w-4 stroke-[2.5]" /> : '4'}
+                  {isSection4Done ? <Check className="h-4 w-4 stroke-[2.5]" /> : 4 + formGroupCount}
                 </div>
                 <div>
                   <h2 className="text-[15px] font-semibold text-zinc-950 m-0">
-                    Proposed products &amp; line items
+                    {terms.proposedLines}
                   </h2>
                   <p className="text-xs text-zinc-500 m-0 mt-0.5">
                     Add products or billable items for this proposal.
@@ -1657,11 +2276,11 @@ export const OpportunityCreatePage: React.FC = () => {
                         updateLine(line.key, { productName: e.target.value })
                       }
                       onFocus={() => setOpenSuggestFor(line.key)}
-                      placeholder="Item name / Product name"
+                      placeholder={terms.hideShipping ? 'Service name' : 'Item name / Product name'}
                       className={fieldClass}
                       required
                       autoComplete="off"
-                      title="Product or service item name"
+                      title={terms.hideShipping ? 'Service name' : 'Product or service item name'}
                     />
                     <input
                       type="text"
@@ -1721,6 +2340,17 @@ export const OpportunityCreatePage: React.FC = () => {
               })}
             </div>
           </section>
+          )}
+
+          {oppForm ? null : (
+            <ExtensionCreateFields
+              record="opportunity"
+              values={extensionValues}
+              onChange={setExtensionValues}
+              disabled={saving || prefillLoading}
+              currencySymbol={getCurrencySymbol(currency)}
+            />
+          )}
 
           {/* Bottom Actions Bar */}
           <div
@@ -1802,12 +2432,14 @@ export const OpportunityCreatePage: React.FC = () => {
               </b>
             </div>
 
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                Proposed items
-              </span>
-              <b className="text-zinc-900 font-bold">{totals.validLines.length} item(s)</b>
-            </div>
+            {!hideLines && (
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                  Proposed items
+                </span>
+                <b className="text-zinc-900 font-bold">{totals.validLines.length} item(s)</b>
+              </div>
+            )}
 
             <hr className="border-0 border-t border-zinc-200 my-0.5" />
 
@@ -1818,10 +2450,10 @@ export const OpportunityCreatePage: React.FC = () => {
                 <div className="flex-1 mx-3 h-1.5 rounded-full bg-zinc-100 overflow-hidden">
                   <div
                     className="h-full bg-zinc-950 transition-all duration-300"
-                    style={{ width: `${(checklistScore / 3) * 100}%` }}
+                    style={{ width: `${(checklistScore / totalChecklistItems) * 100}%` }}
                   />
                 </div>
-                <span className="text-zinc-500 font-medium">{checklistScore}/3</span>
+                <span className="text-zinc-500 font-medium">{checklistScore}/{totalChecklistItems}</span>
               </div>
               <ul className="list-none p-0 m-0 flex flex-col gap-2 text-xs">
                 <li className="flex items-center gap-2">
@@ -1858,22 +2490,45 @@ export const OpportunityCreatePage: React.FC = () => {
                       : 'Opportunity title entered'}
                   </span>
                 </li>
-                <li className="flex items-center gap-2">
-                  <span
-                    className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
-                      totals.validLines.length > 0
-                        ? 'bg-zinc-950 text-white'
-                        : 'border border-dashed border-zinc-400 text-transparent'
-                    }`}
-                  >
-                    <Check className="h-2.5 w-2.5 stroke-[2.5]" />
-                  </span>
-                  <span className={totals.validLines.length > 0 ? 'text-zinc-900 font-medium' : 'text-zinc-400'}>
-                    {totals.validLines.length > 0
-                      ? `${totals.validLines.length} proposed item(s)`
-                      : 'Proposed items added'}
-                  </span>
-                </li>
+                {!hideLines && (
+                  <li className="flex items-center gap-2">
+                    <span
+                      className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
+                        totals.validLines.length > 0
+                          ? 'bg-zinc-950 text-white'
+                          : 'border border-dashed border-zinc-400 text-transparent'
+                      }`}
+                    >
+                      <Check className="h-2.5 w-2.5 stroke-[2.5]" />
+                    </span>
+                    <span className={totals.validLines.length > 0 ? 'text-zinc-900 font-medium' : 'text-zinc-400'}>
+                      {totals.validLines.length > 0
+                        ? `${totals.validLines.length} proposed item(s)`
+                        : 'Proposed items added'}
+                    </span>
+                  </li>
+                )}
+                {formChecks.map((check, i) => (
+                  <li key={`form-check-${i}`} className="flex items-start gap-2" data-testid="opportunity-form-check">
+                    <span
+                      className={`mt-px w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
+                        check.ok
+                          ? 'bg-zinc-950 text-white'
+                          : 'border border-dashed border-zinc-400 text-transparent'
+                      }`}
+                    >
+                      <Check className="h-2.5 w-2.5 stroke-[2.5]" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className={`block break-words ${check.ok ? 'text-zinc-900 font-medium' : 'text-zinc-400'}`}>
+                        {check.label}
+                      </span>
+                      {check.hint ? (
+                        <span className="block text-[11px] text-zinc-500 break-words">{check.hint}</span>
+                      ) : null}
+                    </span>
+                  </li>
+                ))}
               </ul>
             </div>
           </div>

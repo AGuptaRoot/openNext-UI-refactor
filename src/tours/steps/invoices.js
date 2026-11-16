@@ -51,6 +51,8 @@ async function ensureInvoicesTab() {
 
 async function ensureRecurringTab() {
   await ensurePath('/invoices');
+  await wait(150);
+  if (!document.querySelector(T('invoices-tab-recurring'))) return; // hidden by the active extension
   requestInvoicesTourTab('recurring');
   await wait(400);
   await waitForSelector(T('invoices-recurring-toolbar'), 5000);
@@ -428,6 +430,7 @@ export const invoicesTourSteps = [
       'Search templates. Columns: Name, Category, Currency, Terms, Lines. New Template creates a preset; Load Template on Create Invoice applies it.',
     skipBeacon: true,
     before: async () => {
+      if (!document.querySelector(T('invoices-templates-btn'))) return; // hidden by the active extension
       await ensurePath('/invoice-templates');
     },
   }),

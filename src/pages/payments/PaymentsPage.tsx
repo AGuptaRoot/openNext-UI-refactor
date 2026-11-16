@@ -1,3 +1,4 @@
+import { useNotifyMessage } from '@/components/notifications';
 import { displayLabel } from '../../utils/displayLabels';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -85,6 +86,7 @@ export const PaymentsPage: React.FC = () => {
   const [pagination, setPagination] = useState<ListPaginationMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
   const [busyId, setBusyId] = useState('');
   const [refundItem, setRefundItem] = useState<PaymentItem | null>(null);
   const [refundAmount, setRefundAmount] = useState('');
@@ -479,7 +481,6 @@ export const PaymentsPage: React.FC = () => {
         )}
       </div>
 
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
       <div className="bg-white border border-zinc-300 rounded-xl overflow-hidden">
         {loading ? (

@@ -1,6 +1,7 @@
 import { DashboardData, DashboardPeriod, UserContext, WidgetConfig } from '../types/dashboard';
 import type {
   ActiveExtensionInfo,
+  CrmExtensionDef,
   CrmExtensionInstallResult,
   CrmExtensionPackageBody,
   CrmExtensionPackageValidation,
@@ -29,8 +30,20 @@ import {
   OpportunityItemDraft,
   ActivityReminderFeed,
   LeadPortalAccessState,
+  LeadWorkflowFacts,
+  OpportunityLeadOptions,
+  OpportunityPrefill,
+  OpportunityStartStage,
+  QuotationPrefill,
+  QuotationDateRules,
+  ClientQuotationPickerData,
+  SalesFlowConfig,
+  SalesFlowSavedResult,
+  SalesFlowSummaryItem,
 } from '../types/leads';
-import type { ActivityLocationReport } from '../types/reports';
+import type { ActivityLocationReport, ExtensionReportDefinition, ExtensionReportSectionData } from '../types/reports';
+import type { CrmNotificationFeed } from '../types/notifications';
+import type { EmployeeWorkReport, WorkReportEmployees, WorkReportQuery } from '../types/workReports';
 import { parseCsvString } from '../utils/csvParser';
 import { pickImportField, LEAD_IMPORT_ALIASES, CLIENT_IMPORT_ALIASES } from '../utils/importFields';
 import { displayUserLabel } from '../utils/displayLabels';
@@ -92,6 +105,8 @@ import {
   ClientListSummary,
   ClientDetailSummary,
   ClientContact,
+  ClientCompanyMatch,
+  SecondaryContactResult,
   ClientNote,
   ClientEvent,
   ClientAddress,
@@ -112,9 +127,6 @@ import {
   ClientImportPreviewResult,
   ClientImportExecuteResult,
   ClientExtensionData,
-  ClientPassport,
-  ClientPassportList,
-  ClientPassportMutation,
   DEFAULT_CLIENT_CATEGORIES,
   DEFAULT_CLIENT_TAGS,
   DEFAULT_CLIENT_STATUSES,
@@ -392,6 +404,15 @@ export interface ApiResponse<T> {
   duplicates?: unknown[];
 }
 
+/**
+ * Whether the signed-in user may read GET /settings (crm.settings.manage). Set by AuthContext after
+ * /me; null = not known yet (the request is sent and the server decides).
+ */
+let settingsReadable: boolean | null = null;
+export function setSettingsReadable(value: boolean | null): void {
+  settingsReadable = value;
+}
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -486,21 +507,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<ApiR
   }
 
   return payload;
-}
-
-/**
- * Identifies which extension record slot a client-detail request targets.
- * Both values come from the extension's host-slots declaration; the server
- * falls back to crm-travel / passports when they are omitted.
- */
-export type ClientRecordSlot = { extensionId?: string; tabId?: string };
-
-function clientSlotQuery(slot: ClientRecordSlot = {}): string {
-  const params = new URLSearchParams();
-  if (slot.extensionId) params.set('extensionId', slot.extensionId);
-  if (slot.tabId) params.set('tabId', slot.tabId);
-  const qs = params.toString();
-  return qs ? `?${qs}` : '';
 }
 
 /** Payload returned by CRM list export endpoints (raw CSV/JSON file body). */
@@ -1117,59 +1123,6 @@ const SETTINGS_USER_DESIGNATIONS_KEY = 'opennext_mock_settings_user_designations
 const SETTINGS_EMAIL_STATUS_KEY = 'opennext_mock_settings_email_status_v1';
 const DATA_QUALITY_RULES_KEY = 'opennext_mock_data_quality_rules_v1';
 
-export const DEFAULT_TRAVEL_LOCATIONS = {
-  from: [
-    'Mumbai',
-    'Delhi',
-    'Bengaluru',
-    'Hyderabad',
-    'Ahmedabad',
-    'Chennai',
-    'Kolkata',
-    'Pune',
-    'Jaipur',
-    'Kochi',
-    'Chandigarh',
-    'Lucknow',
-  ],
-  to: [
-    'Goa',
-    'Dubai',
-    'Bangkok',
-    'Singapore',
-    'Manali',
-    'Shimla',
-    'Kashmir',
-    'Kerala',
-    'Jaipur',
-    'Maldives',
-    'Bali',
-    'London',
-  ],
-  destination: [
-    'Goa Beach Holiday',
-    'Dubai City & Desert',
-    'Himachal Tour',
-    'Kerala Backwaters',
-    'Golden Triangle (Delhi-Agra-Jaipur)',
-    'Kashmir Paradise',
-    'Thailand Experience',
-    'Singapore Discovery',
-    'Maldives Resort Stay',
-    'Bali Tropical Gateway',
-  ],
-};
-
-export const DEFAULT_TRAVEL_SERVICES: string[] = [
-  'Hotel',
-  'Air Ticket / Flight',
-  'Bus Ticket',
-  'Cab / Transport',
-  'Tour Package',
-  'Visa Assistance',
-  'Cruise',
-];
-
 const DEFAULT_ADMIN_SETTINGS: CrmSettings = {
   company_name: 'Root CRM',
   company_state: 'Maharashtra',
@@ -1251,8 +1204,6 @@ const DEFAULT_ADMIN_SETTINGS: CrmSettings = {
   proforma_prefix: 'PI-',
   default_advance_percent: 30,
   qualification_match: { ...DEFAULT_QUALIFICATION_MATCH_CATALOG },
-  travel_locations: { ...DEFAULT_TRAVEL_LOCATIONS },
-  travel_services: [...DEFAULT_TRAVEL_SERVICES],
 };
 
 function normalizeCrmSettings(raw?: Partial<CrmSettings> | null): CrmSettings {
@@ -1408,20 +1359,6 @@ function normalizeCrmSettings(raw?: Partial<CrmSettings> | null): CrmSettings {
           ? raw.qualification_match.productCertifications
           : DEFAULT_ADMIN_SETTINGS.qualification_match.productCertifications,
     },
-    travel_locations: {
-      from: Array.isArray(raw?.travel_locations?.from)
-        ? raw.travel_locations.from
-        : DEFAULT_TRAVEL_LOCATIONS.from,
-      to: Array.isArray(raw?.travel_locations?.to)
-        ? raw.travel_locations.to
-        : DEFAULT_TRAVEL_LOCATIONS.to,
-      destination: Array.isArray(raw?.travel_locations?.destination)
-        ? raw.travel_locations.destination
-        : DEFAULT_TRAVEL_LOCATIONS.destination,
-    },
-    travel_services: Array.isArray(raw?.travel_services)
-      ? raw.travel_services
-      : DEFAULT_TRAVEL_SERVICES,
   };
   return merged;
 }
@@ -3813,6 +3750,22 @@ function getLocalQuotationOrThrow(id: string): QuotationItem {
   return normalizeQuotationRecord(item);
 }
 
+/** The browser's time zone, so timer entries land on the viewer's day. */
+function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+function workReportQuery(params: WorkReportQuery): URLSearchParams {
+  const query = new URLSearchParams({ tz: browserTimeZone(), period: params.period === 'month' ? 'month' : 'day' });
+  if (params.period === 'month' && params.month) query.set('month', params.month);
+  if (params.period !== 'month' && params.date) query.set('date', params.date);
+  return query;
+}
+
 export const crmApi = {
   getMe: async (): Promise<ApiResponse<UserContext>> => {
     return request<UserContext>('/me', { method: 'GET' });
@@ -3926,6 +3879,22 @@ export const crmApi = {
     return request(`/crm-extensions/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
+  /** Let the uploaded backend code of exactly this upload run (checksum from the card). */
+  approveCrmExtensionBackend: async (id: string, checksum: string): Promise<ApiResponse<CrmExtensionDef>> => {
+    return request<CrmExtensionDef>(`/crm-extensions/${encodeURIComponent(id)}/approve-backend`, {
+      method: 'POST',
+      body: JSON.stringify({ checksum }),
+    });
+  },
+
+  /** Stop the uploaded backend code; declarations, UI and JSON models keep working. */
+  revokeCrmExtensionBackend: async (id: string): Promise<ApiResponse<CrmExtensionDef>> => {
+    return request<CrmExtensionDef>(`/crm-extensions/${encodeURIComponent(id)}/revoke-backend`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+
   // ─── LEADS MODULE APIS ────────────────────────────────────────────────────
   getLeads: async (params: LeadQueryParams = {}): Promise<ApiResponse<LeadItem[]>> => {
     const query = new URLSearchParams();
@@ -3940,6 +3909,7 @@ export const crmApi = {
     if (params.needsSampleRequest) query.set('needsSampleRequest', params.needsSampleRequest);
     if (params.search) query.set('search', params.search);
     if (params.sort) query.set('sort', params.sort);
+    if (params.order) query.set('order', params.order);
     const qs = query.toString();
 
     try {
@@ -3999,6 +3969,15 @@ export const crmApi = {
             (l.tags && l.tags.some((t) => t.toLowerCase().includes(q))) ||
             (l.notes && l.notes.toLowerCase().includes(q))
         );
+      }
+      // Newest first by default, like the server (createdAt desc).
+      if (!params.sort || params.sort === 'createdAt') {
+        const dir = params.order === 'asc' ? 1 : -1;
+        items.sort((a, b) => {
+          const ta = a.createdAt ? new Date(a.createdAt).getTime() || 0 : 0;
+          const tb = b.createdAt ? new Date(b.createdAt).getTime() || 0 : 0;
+          return (ta - tb) * dir;
+        });
       }
 
       const total = items.length;
@@ -4130,6 +4109,126 @@ export const crmApi = {
       return { success: true, data: { deleted: true, id }, message: 'Lead deleted successfully' };
     }
   },
+
+  /** Lead workflow facts: ready / qualified, Create Opportunity allowed, Commercial Requirement shown. */
+  getLeadWorkflow: async (id: string): Promise<ApiResponse<LeadWorkflowFacts>> =>
+    request<LeadWorkflowFacts>(`/leads/${encodeURIComponent(id)}/workflow`, { method: 'GET' }),
+
+  /** Leads offered on the Create Opportunity page (Qualified or ready, per the workflow rules). */
+  getOpportunityLeadOptions: async (q = '', include = ''): Promise<ApiResponse<OpportunityLeadOptions>> => {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (include) params.set('include', include);
+    const qs = params.toString();
+    return request<OpportunityLeadOptions>(`/lead-workflow/opportunity-leads${qs ? `?${qs}` : ''}`, { method: 'GET' });
+  },
+
+  /** Runs a record action of the active extension (json/actions.json). */
+  runExtensionAction: async (actionId: string, recordId: string): Promise<ApiResponse<{ message: string; navigate: string }>> =>
+    request<{ message: string; navigate: string }>(`/extension-actions/${encodeURIComponent(actionId)}`, {
+      method: 'POST',
+      body: JSON.stringify({ recordId }),
+    }),
+
+  /** The active extension's Dashboard (json/dashboard.json); { available: false } without one. */
+  /** CRM 3.34.0 — a quotation for a client through the active extension (salesFlow.clientQuotation). */
+  getClientQuotationEligible: async (): Promise<ApiResponse<{ clientIds: string[] }>> =>
+    request<{ clientIds: string[] }>('/sales-flow/client-quotation/eligible', { method: 'GET' }),
+
+  /** CRM 3.47.0 — may the lead form's values be copied to this client now (extension rule)? */
+  getClientLeadFormSyncStatus: async (clientId: string): Promise<ApiResponse<{ available: boolean; message: string }>> =>
+    request<{ available: boolean; message: string }>(`/sales-flow/client-quotation/${encodeURIComponent(clientId)}/lead-form-sync`, { method: 'GET' }),
+
+  /** CRM 3.47.0 — copy the lead form's declared values to the client (the extension saves what it owns). */
+  syncClientLeadForm: async (clientId: string, values: Record<string, unknown>): Promise<ApiResponse<{ synced: boolean }>> =>
+    request<{ synced: boolean }>(`/sales-flow/client-quotation/${encodeURIComponent(clientId)}/lead-form-sync`, {
+      method: 'POST',
+      body: JSON.stringify({ values }),
+    }),
+
+  getClientQuotationPicker: async (clientId: string): Promise<ApiResponse<ClientQuotationPickerData>> =>
+    request<ClientQuotationPickerData>(`/sales-flow/client-quotation/${encodeURIComponent(clientId)}/picker`, { method: 'GET' }),
+
+  startClientQuotation: async (clientId: string, selected: string[]): Promise<ApiResponse<{ leadId: string; opportunityId: string; recordId?: string }>> =>
+    request<{ leadId: string; opportunityId: string; recordId?: string }>(`/sales-flow/client-quotation/${encodeURIComponent(clientId)}/start`, {
+      method: 'POST',
+      body: JSON.stringify({ selected }),
+    }),
+
+  /** The signed-in user's in-app notifications (CRM 3.33.0). */
+  getNotifications: async (): Promise<ApiResponse<CrmNotificationFeed>> =>
+    request<CrmNotificationFeed>('/notifications', { method: 'GET' }),
+
+  markNotificationRead: async (id: string): Promise<ApiResponse<{ ok: boolean }>> =>
+    request<{ ok: boolean }>(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST', body: '{}' }),
+
+  markAllNotificationsRead: async (): Promise<ApiResponse<{ ok: boolean }>> =>
+    request<{ ok: boolean }>('/notifications/read-all', { method: 'POST', body: '{}' }),
+
+  getExtensionDashboard: async (): Promise<ApiResponse<ExtensionReportDefinition>> =>
+    request<ExtensionReportDefinition>('/extension-dashboard', { method: 'GET' }),
+
+  getExtensionDashboardData: async (body: { filters: Record<string, string>; params: Record<string, string> }): Promise<ApiResponse<{ sections: Record<string, ExtensionReportSectionData> }>> =>
+    request<{ sections: Record<string, ExtensionReportSectionData> }>('/extension-dashboard/data', { method: 'POST', body: JSON.stringify(body) }),
+
+  /** The active extension's Reports page (json/reports.json); { available: false } without one. */
+  getExtensionReports: async (): Promise<ApiResponse<ExtensionReportDefinition>> =>
+    request<ExtensionReportDefinition>('/extension-reports', { method: 'GET' }),
+
+  getExtensionReportData: async (body: { filters: Record<string, string>; params: Record<string, string>; sections?: string[] }): Promise<ApiResponse<{ sections: Record<string, ExtensionReportSectionData> }>> =>
+    request<{ sections: Record<string, ExtensionReportSectionData> }>('/extension-reports/data', { method: 'POST', body: JSON.stringify(body) }),
+
+  exportExtensionReport: async (body: { sectionId: string; filters: Record<string, string>; params: Record<string, string> }): Promise<ApiResponse<{ fileName: string; csv: string }>> =>
+    request<{ fileName: string; csv: string }>('/extension-reports/export', { method: 'POST', body: JSON.stringify(body) }),
+
+  /** What the active extension offers on the create pages (sales flow); { available: false } without one. */
+  getSalesFlowConfig: async (): Promise<ApiResponse<SalesFlowConfig>> =>
+    request<SalesFlowConfig>('/sales-flow', { method: 'GET' }),
+
+  /** The stage a new opportunity opens in (salesFlow.opportunityForm.startStage); { locked: false } without it. */
+  getOpportunityStartStage: async (leadId?: string): Promise<ApiResponse<OpportunityStartStage>> =>
+    request<OpportunityStartStage>(
+      leadId ? `/opportunities/start-stage?leadId=${encodeURIComponent(leadId)}` : '/opportunities/start-stage',
+      { method: 'GET' }
+    ),
+
+  /** What a new opportunity for this lead starts with, from the active extension (sales flow). */
+  getOpportunityPrefill: async (leadId: string): Promise<ApiResponse<OpportunityPrefill>> =>
+    request<OpportunityPrefill>('/sales-flow/opportunity-prefill', { method: 'POST', body: JSON.stringify({ leadId }) }),
+
+  /**
+   * Issue Date / Valid Till limits for a quotation of this lead / opportunity (CRM 3.32.0): the active
+   * extension's rule (e.g. not valid after the trip starts). The server enforces the same on every save.
+   */
+  getQuotationDateRules: async (ref: { leadId?: string; opportunityId?: string; recordId?: string; clientId?: string }): Promise<ApiResponse<QuotationDateRules>> =>
+    request<QuotationDateRules>('/sales-flow/quotation-dates', {
+      method: 'POST',
+      body: JSON.stringify({
+        leadId: ref.leadId || '',
+        opportunityId: ref.opportunityId || '',
+        ...(ref.recordId && ref.clientId ? { recordId: ref.recordId, clientId: ref.clientId } : {}),
+      }),
+    }),
+
+  /** What a new quotation for this lead / opportunity starts with, from the active extension (sales flow). */
+  getQuotationPrefill: async (ref: { leadId?: string; opportunityId?: string; recordId?: string; clientId?: string }): Promise<ApiResponse<QuotationPrefill>> =>
+    request<QuotationPrefill>('/sales-flow/quotation-prefill', {
+      method: 'POST',
+      // opportunityId is always sent ('' when none); the lead only when known. 3.51.0: or the client's record.
+      body: JSON.stringify({
+        ...(ref.leadId ? { leadId: ref.leadId } : {}),
+        opportunityId: ref.opportunityId || '',
+        ...(ref.recordId && ref.clientId ? { recordId: ref.recordId, clientId: ref.clientId } : {}),
+      }),
+    }),
+
+  /** Tells the active extension an opportunity was saved (salesFlow.opportunityForm.savedRoute). */
+  salesFlowOpportunitySaved: async (opportunityId: string): Promise<ApiResponse<SalesFlowSavedResult>> =>
+    request<SalesFlowSavedResult>('/sales-flow/opportunity-saved', { method: 'POST', body: JSON.stringify({ opportunityId }) }),
+
+  /** Tells the active extension a quotation was saved (salesFlow.quotationForm.savedRoute). */
+  salesFlowQuotationSaved: async (quotationId: string): Promise<ApiResponse<SalesFlowSavedResult>> =>
+    request<SalesFlowSavedResult>('/sales-flow/quotation-saved', { method: 'POST', body: JSON.stringify({ quotationId }) }),
 
   changeLeadStage: async (id: string, stage: string): Promise<ApiResponse<LeadItem>> => {
     try {
@@ -6445,6 +6544,40 @@ export const crmApi = {
     }
   },
 
+  /** CRM 3.46.0 — existing Clients whose company name matches (Lead create asks the user; nothing is linked). */
+  findClientsByCompany: async (company: string): Promise<ApiResponse<ClientCompanyMatch[]>> => {
+    const value = String(company || '').trim();
+    if (value.length < 2) return { success: true, data: [] };
+    return request<ClientCompanyMatch[]>(`/clients/company-match?company=${encodeURIComponent(value.slice(0, 120))}`);
+  },
+
+  /** CRM 3.48.0 — the shared "Existing Client Found" lookup: by company and / or contact (contact in the body only). */
+  findExistingClients: async (lookup: {
+    company: string;
+    personContactId?: string;
+    email?: string;
+    phone?: string;
+  }): Promise<ApiResponse<ClientCompanyMatch[]>> =>
+    request<ClientCompanyMatch[]>('/clients/company-match', {
+      method: 'POST',
+      body: JSON.stringify({
+        company: String(lookup.company || '').trim().slice(0, 120),
+        personContactId: lookup.personContactId || undefined,
+        email: String(lookup.email || '').trim() || undefined,
+        phone: String(lookup.phone || '').trim() || undefined,
+      }),
+    }),
+
+  /** CRM 3.46.0 — "Add as Secondary Contact": the new contact (or personContactId) joins an existing Client. */
+  addSecondaryClientContact: async (
+    clientId: string,
+    body: PersonContactInput & { personContactId?: string; reuseExisting?: boolean; source?: 'lead' | 'client' | 'contact' }
+  ): Promise<ApiResponse<SecondaryContactResult>> =>
+    request<SecondaryContactResult>(`/clients/${encodeURIComponent(clientId)}/secondary-contacts`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   addClientContact: async (
     id: string,
     body: Partial<ClientContact>
@@ -7564,89 +7697,13 @@ export const crmApi = {
 
   /**
    * Read-through extension context for a client: the source lead's extension
-   * bag plus the resolved request type. Gated on `crm.clients.read`, so the
-   * Travel Requirement tab works without lead permissions.
+   * bag plus the resolved request type. Gated on `crm.clients.read`, so
+   * extension sections work without lead permissions.
    */
   getClientExtensionData: async (id: string): Promise<ApiResponse<ClientExtensionData>> =>
     request<ClientExtensionData>(`/clients/${encodeURIComponent(id)}/extension-data`, {
       method: 'GET',
     }),
-
-  listClientPassports: async (
-    id: string,
-    slot: ClientRecordSlot = {}
-  ): Promise<ApiResponse<ClientPassportList>> =>
-    request<ClientPassportList>(
-      `/clients/${encodeURIComponent(id)}/passports${clientSlotQuery(slot)}`,
-      { method: 'GET' }
-    ),
-
-  /**
-   * Upload one passport image. The server enforces the traveller cap before
-   * storing the file, runs OCR, and appends the record.
-   */
-  uploadClientPassport: async (
-    id: string,
-    file: File,
-    slot: ClientRecordSlot = {}
-  ): Promise<ApiResponse<ClientPassportMutation>> => {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    const res = await fetch(
-      `${API_BASE}/clients/${encodeURIComponent(id)}/passports${clientSlotQuery(slot)}`,
-      { method: 'POST', body: formData, credentials: 'include' }
-    );
-    const payload = await res
-      .json()
-      .catch(() => ({ success: false, error: 'Passport upload failed' }));
-
-    if (!res.ok || !payload.success) {
-      throw new ApiError(
-        payload.error || payload.message || 'Passport upload failed',
-        res.status || 500,
-        typeof payload.code === 'string' ? payload.code : undefined
-      );
-    }
-    return payload as ApiResponse<ClientPassportMutation>;
-  },
-
-  updateClientPassport: async (
-    id: string,
-    passportId: string,
-    body: Partial<
-      Pick<
-        ClientPassport,
-        'fullname' | 'passport_number' | 'Date_of_issue' | 'Date_of_expiry'
-      >
-    >,
-    slot: ClientRecordSlot = {}
-  ): Promise<ApiResponse<ClientPassportMutation>> =>
-    request<ClientPassportMutation>(
-      `/clients/${encodeURIComponent(id)}/passports/${encodeURIComponent(passportId)}${clientSlotQuery(slot)}`,
-      { method: 'PUT', body: JSON.stringify(body) }
-    ),
-
-  deleteClientPassport: async (
-    id: string,
-    passportId: string,
-    slot: ClientRecordSlot = {}
-  ): Promise<ApiResponse<ClientPassportMutation>> =>
-    request<ClientPassportMutation>(
-      `/clients/${encodeURIComponent(id)}/passports/${encodeURIComponent(passportId)}${clientSlotQuery(slot)}`,
-      { method: 'DELETE' }
-    ),
-
-  /** Re-run OCR on an already stored scan (e.g. after the Groq key is set). */
-  rescanClientPassport: async (
-    id: string,
-    passportId: string,
-    slot: ClientRecordSlot = {}
-  ): Promise<ApiResponse<ClientPassportMutation>> =>
-    request<ClientPassportMutation>(
-      `/clients/${encodeURIComponent(id)}/passports/${encodeURIComponent(passportId)}/scan${clientSlotQuery(slot)}`,
-      { method: 'POST' }
-    ),
 
   getClientPortalAccess: async (id: string): Promise<ApiResponse<ClientPortalAccess[]>> => {
     try {
@@ -9110,6 +9167,20 @@ export const crmApi = {
       return { success: true, data: payments };
     }
   },
+
+  /** Where private documents are stored (admin): S3 via env or the S3 Media plugin, or the server folder. */
+  getPrivateStorageStatus: async (): Promise<ApiResponse<unknown>> => request<unknown>('/private-storage/status', { method: 'GET' }),
+
+  /** Correct a locked primary contact (admin / sales manager, with a reason; audited). */
+  correctOpportunityContact: async (
+    id: string,
+    body: { contactPerson: string; contactEmail: string; contactMobile: string; reason: string; confirm: true }
+  ): Promise<ApiResponse<unknown>> =>
+    request<unknown>(`/opportunities/${encodeURIComponent(id)}/contact-correction`, { method: 'POST', body: JSON.stringify(body) }),
+
+  /** Read-only summary for invoicing a quotation (lead, opportunity, contact + the extension's facts). */
+  getInvoicePrefill: async (quotationId: string): Promise<ApiResponse<{ summary: SalesFlowSummaryItem[] }>> =>
+    request<{ summary: SalesFlowSummaryItem[] }>('/sales-flow/invoice-prefill', { method: 'POST', body: JSON.stringify({ quotationId }) }),
 
   getRazorpayStatus: async (): Promise<ApiResponse<RazorpayStatusData>> => {
     try {
@@ -14056,6 +14127,49 @@ export const crmApi = {
     }
   },
 
+  // ------------------------------------------------------------ work reports (Tasks → Reports)
+  /** Employees with the day's work and the month to date (CRM managers and project managers). */
+  getWorkReportEmployees: async (date?: string): Promise<ApiResponse<WorkReportEmployees>> => {
+    const query = new URLSearchParams({ tz: browserTimeZone() });
+    if (date) query.set('date', date);
+    return request<WorkReportEmployees>(`/work-reports/employees?${query}`);
+  },
+
+  /** One employee's daily or monthly report. */
+  getEmployeeWorkReport: async (userId: string, params: WorkReportQuery = {}): Promise<ApiResponse<EmployeeWorkReport>> => {
+    const query = workReportQuery(params);
+    return request<EmployeeWorkReport>(`/work-reports/employees/${encodeURIComponent(userId)}?${query}`);
+  },
+
+  /** The report as PDF or Word (.docx). */
+  downloadEmployeeWorkReport: async (
+    userId: string,
+    params: WorkReportQuery & { format: 'pdf' | 'docx' }
+  ): Promise<{ blob: Blob; filename: string }> => {
+    const query = workReportQuery(params);
+    query.set('format', params.format);
+    const response = await fetch(`${API_BASE}/work-reports/employees/${encodeURIComponent(userId)}/export?${query}`, {
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      let message = `Failed to download the report (HTTP ${response.status})`;
+      try {
+        const body = (await response.json()) as { error?: string; message?: string };
+        message = body.error || body.message || message;
+      } catch {
+        // non-JSON error body
+      }
+      throw new ApiError(message, response.status);
+    }
+    const disposition = String(response.headers.get('content-disposition') || '');
+    const filename = /filename="([^"]+)"/.exec(disposition)?.[1] || `work-report.${params.format}`;
+    const type =
+      params.format === 'docx'
+        ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        : 'application/pdf';
+    return { blob: new Blob([await response.arrayBuffer()], { type }), filename };
+  },
+
   getWeeklyTimesheet: async (params: {
     weekStart?: string;
     projectId?: string;
@@ -16392,6 +16506,10 @@ export const crmApi = {
 
   // ─── WAVE 4 ADMIN APIS ───────────────────────────────────────────────────
   getSettings: async (): Promise<ApiResponse<CrmSettings>> => {
+    // Only admins may read the settings: others are refused here, without a request (and a 403 in the console).
+    if (settingsReadable === false) {
+      throw new ApiError('Settings can only be read by an administrator', 403, 'FORBIDDEN');
+    }
     try {
       const response = await request<CrmSettings>('/settings', { method: 'GET' });
       return { ...response, data: normalizeCrmSettings(response.data) };
@@ -16704,315 +16822,6 @@ export const crmApi = {
         message: `Test email queued for ${body.to}`,
       };
     }
-  },
-
-  getTravelLocations: async (): Promise<
-    ApiResponse<{ from: string[]; to: string[]; destination: string[] }>
-  > => {
-    const normalizeLocationList = (items: unknown, fallback: string[]): string[] => {
-      if (!Array.isArray(items)) return fallback;
-      const res = items
-        .map((item) => {
-          if (typeof item === 'string') return item.trim();
-          if (item && typeof item === 'object') {
-            const row = item as { label?: string; optionKey?: string; name?: string; value?: string };
-            return String(row.label || row.name || row.value || row.optionKey || '').trim();
-          }
-          return '';
-        })
-        .filter(Boolean);
-      return res.length ? res : fallback;
-    };
-
-    try {
-      const res = await request<{ from?: unknown; to?: unknown; destination?: unknown }>(
-        '/travel/settings/locations',
-        { method: 'GET' }
-      );
-      if (res.data) {
-        return {
-          success: true,
-          data: {
-            from: normalizeLocationList(res.data.from, DEFAULT_TRAVEL_LOCATIONS.from),
-            to: normalizeLocationList(res.data.to, DEFAULT_TRAVEL_LOCATIONS.to),
-            destination: normalizeLocationList(res.data.destination, DEFAULT_TRAVEL_LOCATIONS.destination),
-          },
-        };
-      }
-    } catch {
-      // fallback
-    }
-    const saved = readLocalAdminValue<{ from: unknown; to: unknown; destination: unknown }>(
-      'opennext_travel_locations_v1',
-      DEFAULT_TRAVEL_LOCATIONS
-    );
-    return {
-      success: true,
-      data: {
-        from: normalizeLocationList(saved.from, DEFAULT_TRAVEL_LOCATIONS.from),
-        to: normalizeLocationList(saved.to, DEFAULT_TRAVEL_LOCATIONS.to),
-        destination: normalizeLocationList(saved.destination, DEFAULT_TRAVEL_LOCATIONS.destination),
-      },
-    };
-  },
-
-  saveTravelLocations: async (body: {
-    from: string[];
-    to: string[];
-    destination: string[];
-  }): Promise<ApiResponse<{ from: string[]; to: string[]; destination: string[] }>> => {
-    const normalizeLocationList = (items: unknown): string[] => {
-      if (!Array.isArray(items)) return [];
-      return items
-        .map((item) => {
-          if (typeof item === 'string') return item.trim();
-          if (item && typeof item === 'object') {
-            const row = item as { label?: string; optionKey?: string; name?: string; value?: string };
-            return String(row.label || row.name || row.value || row.optionKey || '').trim();
-          }
-          return '';
-        })
-        .filter(Boolean);
-    };
-
-    const cleanBody = {
-      from: normalizeLocationList(body.from),
-      to: normalizeLocationList(body.to),
-      destination: normalizeLocationList(body.destination),
-    };
-    saveLocalAdminValue('opennext_travel_locations_v1', cleanBody);
-    try {
-      const res = await request<{ from?: unknown; to?: unknown; destination?: unknown }>(
-        '/travel/settings/locations',
-        {
-          method: 'PUT',
-          body: JSON.stringify(cleanBody),
-        }
-      );
-      if (res.data) {
-        return {
-          success: true,
-          data: {
-            from: normalizeLocationList(res.data.from),
-            to: normalizeLocationList(res.data.to),
-            destination: normalizeLocationList(res.data.destination),
-          },
-        };
-      }
-    } catch {
-      // fallback
-    }
-    return { success: true, data: cleanBody, message: 'Travel locations saved' };
-  },
-
-  getTravelServices: async (): Promise<ApiResponse<string[]>> => {
-    const normalizeServiceList = (items: unknown, fallback: string[]): string[] => {
-      if (!Array.isArray(items)) return fallback;
-      const res = items
-        .map((item) => {
-          if (typeof item === 'string') return item.trim();
-          if (item && typeof item === 'object') {
-            const row = item as { label?: string; name?: string; serviceKey?: string; serviceId?: string; id?: string };
-            return String(row.label || row.name || row.serviceKey || row.serviceId || row.id || '').trim();
-          }
-          return '';
-        })
-        .filter(Boolean);
-      return res.length ? res : fallback;
-    };
-
-    try {
-      const res = await request<unknown>('/travel/settings/services', { method: 'GET' });
-      if (res.data) {
-        return {
-          success: true,
-          data: normalizeServiceList(res.data, DEFAULT_TRAVEL_SERVICES),
-        };
-      }
-    } catch {
-      // fallback
-    }
-    const saved = readLocalAdminValue<unknown>('opennext_travel_services_v1', DEFAULT_TRAVEL_SERVICES);
-    return {
-      success: true,
-      data: normalizeServiceList(saved, DEFAULT_TRAVEL_SERVICES),
-    };
-  },
-
-  saveTravelServices: async (services: string[]): Promise<ApiResponse<string[]>> => {
-    const normalizeServiceList = (items: unknown): string[] => {
-      if (!Array.isArray(items)) return [];
-      return items
-        .map((item) => {
-          if (typeof item === 'string') return item.trim();
-          if (item && typeof item === 'object') {
-            const row = item as { label?: string; name?: string; serviceKey?: string; serviceId?: string; id?: string };
-            return String(row.label || row.name || row.serviceKey || row.serviceId || row.id || '').trim();
-          }
-          return '';
-        })
-        .filter(Boolean);
-    };
-
-    const cleanList = normalizeServiceList(services);
-    saveLocalAdminValue('opennext_travel_services_v1', cleanList);
-    try {
-      const res = await request<unknown>('/travel/settings/services', {
-        method: 'PUT',
-        body: JSON.stringify({ services: cleanList }),
-      });
-      if (res.data) {
-        return {
-          success: true,
-          data: normalizeServiceList(res.data),
-          message: 'Travel service requirements saved',
-        };
-      }
-    } catch {
-      // fallback
-    }
-    return { success: true, data: cleanList, message: 'Travel service requirements saved' };
-  },
-
-  getTravelRequirementFields: async (options?: { all?: boolean }): Promise<
-    ApiResponse<
-      Array<{
-        fieldId: string;
-        fieldKey: string;
-        name: string;
-        type: string;
-        serviceIds: string[];
-        options: string[];
-        required?: boolean;
-        placeholder?: string;
-        helpText?: string;
-        displayOrder?: number;
-        enabled?: boolean;
-      }>
-    >
-  > => {
-    try {
-      const q = options?.all ? '?all=1' : '';
-      const res = await request<any>(`/travel/requirement-fields${q}`, { method: 'GET' });
-      if (res && res.data) {
-        return { success: true, data: Array.isArray(res.data) ? res.data : [] };
-      }
-    } catch {
-      // fallback
-    }
-    const local = readLocalAdminValue<any[]>('opennext_travel_req_fields_v1', []);
-    return { success: true, data: Array.isArray(local) ? local : [] };
-  },
-
-  createTravelRequirementField: async (body: {
-    name: string;
-    type: string;
-    serviceIds: string[];
-    options?: string[];
-    required?: boolean;
-    placeholder?: string;
-    helpText?: string;
-  }): Promise<ApiResponse<any>> => {
-    try {
-      const res = await request<any>('/travel/requirement-fields', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      });
-      if (res && res.data) return res;
-    } catch {
-      // fallback
-    }
-    const current = readLocalAdminValue<any[]>('opennext_travel_req_fields_v1', []);
-    const newField = {
-      fieldId: `trf_${Date.now()}`,
-      fieldKey: body.name.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
-      ...body,
-      enabled: true,
-      displayOrder: current.length * 10,
-    };
-    current.push(newField);
-    saveLocalAdminValue('opennext_travel_req_fields_v1', current);
-    return { success: true, data: newField, message: 'Field created successfully' };
-  },
-
-  updateTravelRequirementField: async (
-    fieldId: string,
-    body: {
-      name?: string;
-      type?: string;
-      serviceIds?: string[];
-      options?: string[];
-      required?: boolean;
-      placeholder?: string;
-      helpText?: string;
-      displayOrder?: number;
-      enabled?: boolean;
-    }
-  ): Promise<ApiResponse<any>> => {
-    try {
-      const res = await request<any>(`/travel/requirement-fields/${encodeURIComponent(fieldId)}`, {
-        method: 'PUT',
-        body: JSON.stringify(body),
-      });
-      if (res && res.data) {
-        const current = readLocalAdminValue<any[]>('opennext_travel_req_fields_v1', []);
-        const idx = current.findIndex((f: any) => f.fieldId === fieldId);
-        if (idx >= 0) {
-          current[idx] = { ...current[idx], ...res.data };
-          saveLocalAdminValue('opennext_travel_req_fields_v1', current);
-        }
-        return res;
-      }
-    } catch {
-      // fallback
-    }
-    const current = readLocalAdminValue<any[]>('opennext_travel_req_fields_v1', []);
-    const idx = current.findIndex((f: any) => f.fieldId === fieldId);
-    let updatedItem = { fieldId, ...body };
-    if (idx >= 0) {
-      current[idx] = { ...current[idx], ...body };
-      updatedItem = current[idx];
-      saveLocalAdminValue('opennext_travel_req_fields_v1', current);
-    }
-    return { success: true, data: updatedItem, message: 'Field updated successfully' };
-  },
-
-  deleteTravelRequirementField: async (fieldId: string): Promise<ApiResponse<any>> => {
-    try {
-      const res = await request<any>(`/travel/requirement-fields/${encodeURIComponent(fieldId)}`, {
-        method: 'DELETE',
-      });
-      if (res && res.data) return res;
-    } catch {
-      // fallback
-    }
-    const current = readLocalAdminValue<any[]>('opennext_travel_req_fields_v1', []);
-    const filtered = current.filter((f: any) => f.fieldId !== fieldId);
-    saveLocalAdminValue('opennext_travel_req_fields_v1', filtered);
-    return { success: true, data: { deleted: true } };
-  },
-
-  getLeadTravelRequirements: async (leadId: string): Promise<ApiResponse<{ lead?: any; sections?: any[] }>> => {
-    try {
-      const res = await request<any>(`/travel/leads/${encodeURIComponent(leadId)}/requirements`, { method: 'GET' });
-      if (res && res.data) return res;
-    } catch {
-      // fallback
-    }
-    return { success: true, data: { lead: null, sections: [] } };
-  },
-
-  saveLeadTravelServiceRequirement: async (leadId: string, serviceId: string, values: Record<string, unknown>): Promise<ApiResponse<any>> => {
-    try {
-      const res = await request<any>(`/travel/leads/${encodeURIComponent(leadId)}/requirements/${encodeURIComponent(serviceId)}`, {
-        method: 'POST',
-        body: JSON.stringify({ values }),
-      });
-      if (res && res.data) return res;
-    } catch {
-      // fallback
-    }
-    return { success: true, data: { leadId, serviceId, values } };
   },
 
   listSettingsWorkspaceUsers: async (): Promise<ApiResponse<SettingsWorkspaceUser[]>> => {

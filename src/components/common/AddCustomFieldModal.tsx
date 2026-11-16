@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import CloseIcon from '@mui/icons-material/Close';
+import { useNotifyMessage } from '@/components/notifications';
 
 export interface CustomFieldDefinitionInput {
   key: string;
@@ -41,6 +42,7 @@ export const AddCustomFieldModal: React.FC<AddCustomFieldModalProps> = ({
   const [optionsStr, setOptionsStr] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
 
   useEffect(() => {
     if (open) {
@@ -124,12 +126,6 @@ export const AddCustomFieldModal: React.FC<AddCustomFieldModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3.5">
-          {error && (
-            <div className="p-2.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 font-medium">
-              {error}
-            </div>
-          )}
-
           <div>
             <label className="block text-xs font-semibold text-zinc-700 mb-1">
               Field Label *

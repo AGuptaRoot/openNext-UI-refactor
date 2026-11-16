@@ -29,6 +29,8 @@ import { triggerFileDownload } from '../../utils/fileDownload';
 import { displayLabel } from '../../utils/displayLabels';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 import { useActiveExtension } from '../../hooks/useActiveExtension';
+import { useSalesFlowConfig } from '../../hooks/useSalesFlowConfig';
+import { useNotifyMessage } from '@/components/notifications';
 
 type MainTab = 'invoices' | 'recurring';
 
@@ -89,8 +91,11 @@ export const InvoicesPage: React.FC = () => {
   const { clients, projects } = useFinanceOptions();
   const settingsCurrency = useDefaultCurrency();
 
+  // salesFlow.hideRecurringInvoices: the invoice list only (no Recurring Profiles).
+  const salesFlow = useSalesFlowConfig();
+  const hideRecurring = Boolean(salesFlow.hideRecurringInvoices);
   const tabParam = searchParams.get('tab');
-  const tab: MainTab = tabParam === 'recurring' ? 'recurring' : 'invoices';
+  const tab: MainTab = tabParam === 'recurring' && !hideRecurring ? 'recurring' : 'invoices';
 
   const [items, setItems] = useState<InvoiceItem[]>([]);
   const [kpiItems, setKpiItems] = useState<InvoiceItem[]>([]);
@@ -110,6 +115,8 @@ export const InvoicesPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
+  useNotifyMessage(infoMessage, 'success', () => setInfoMessage(''));
   const [busyId, setBusyId] = useState('');
 
   const [recurring, setRecurring] = useState<RecurringInvoiceItem[]>([]);
@@ -416,7 +423,9 @@ export const InvoicesPage: React.FC = () => {
           </p>
           <h1 className="m-0 text-2xl font-bold text-zinc-950">Invoices</h1>
           <p className="m-0 mt-1 text-sm text-zinc-500">
-            Tax invoices, collections, write-offs, templates, and recurring billing schedules.
+            {hideRecurring
+              ? 'Tax invoices, collections, write-offs and templates.'
+              : 'Tax invoices, collections, write-offs, templates, and recurring billing schedules.'}
           </p>
         </div>
         <div data-tour="invoices-header-actions" className="flex flex-wrap gap-2">
@@ -461,8 +470,8 @@ export const InvoicesPage: React.FC = () => {
                 )}
               </div>
               {/* Templates are an internal billing tool, not something a
-                  portal user sets up. */}
-              {!isClient && (
+                  portal user sets up; an extension can hide them (salesFlow.hideInvoiceTemplates). */}
+              {!isClient && !salesFlow.hideInvoiceTemplates && (
                 <button
                   type="button"
                   data-tour="invoices-templates-btn"
@@ -501,6 +510,7 @@ export const InvoicesPage: React.FC = () => {
         </div>
       </header>
 
+      {hideRecurring ? null : (
       <div data-tour="invoices-main-tabs" className="inline-flex self-start rounded-lg border border-zinc-200 bg-zinc-50 p-0.5">
         <button
           type="button"
@@ -523,8 +533,9 @@ export const InvoicesPage: React.FC = () => {
           Recurring Profiles
         </button>
       </div>
+      )}
 
-      <div data-tour="invoices-kpis" className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div data-tour="invoices-kpis" className={`grid grid-cols-2 gap-3 ${hideRecurring ? 'lg:grid-cols-4' : 'lg:grid-cols-5'}`}>
         {[
           {
             label: tab === 'recurring' ? 'Profiles' : archived ? 'Archived' : 'Total invoices',
@@ -534,7 +545,7 @@ export const InvoicesPage: React.FC = () => {
           { label: 'Overdue', value: String(kpis.overdue) },
           { label: 'Collected (Paid)', value: formatFinanceMoney(kpis.collected) },
           { label: 'Recurring invoices', value: String(kpis.recurring) },
-        ].map((card) => (
+        ].filter((card) => !(hideRecurring && card.label === 'Recurring invoices')).map((card) => (
           <div key={card.label} className="rounded-xl border border-zinc-300 bg-white p-4">
             <div className="text-[11px] font-semibold uppercase text-zinc-500">{card.label}</div>
             <div className="mt-1 text-lg font-bold text-zinc-950">{card.value}</div>
@@ -633,6 +644,7 @@ export const InvoicesPage: React.FC = () => {
               Archived
             </button>
           </div>
+          {hideRecurring ? null : (
           <button
             type="button"
             data-tour="invoices-recurring-filter"
@@ -645,6 +657,7 @@ export const InvoicesPage: React.FC = () => {
           >
             {filterRecurring ? 'All invoices' : 'From recurring only'}
           </button>
+          )}
           {profileFilter && (
             <button
               type="button"
@@ -715,22 +728,6 @@ export const InvoicesPage: React.FC = () => {
             placeholder="Search profiles…"
             className="h-9 min-w-[220px] rounded-lg border border-zinc-200 px-3 text-sm outline-none focus:border-zinc-400"
           />
-        </div>
-      )}
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-      )}
-      {infoMessage && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-          {infoMessage}
-          <button
-            type="button"
-            className="ml-3 cursor-pointer border-0 bg-transparent text-xs font-semibold underline"
-            onClick={() => setInfoMessage('')}
-          >
-            Dismiss
-          </button>
         </div>
       )}
 

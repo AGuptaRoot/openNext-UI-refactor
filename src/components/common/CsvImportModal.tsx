@@ -14,6 +14,7 @@ import {
   Search,
   Settings,
 } from 'lucide-react';
+import { useNotifyMessage } from '@/components/notifications';
 
 import { crmApi } from '../../services/api';
 import { triggerFileDownload } from '../../utils/fileDownload';
@@ -80,6 +81,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
   const [analyzing, setAnalyzing] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  useNotifyMessage(errorMessage, 'error', () => setErrorMessage(''));
   const [previewFilter, setPreviewFilter] = useState<'all' | 'valid' | 'warning' | 'error'>('all');
 
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
@@ -354,13 +356,6 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-5 overflow-y-auto flex-1 flex flex-col gap-4">
-          {errorMessage && (
-            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 flex items-center gap-2">
-              <ErrorOutlineIcon sx={{ fontSize: 16 }} className="text-red-600 shrink-0" />
-              <span>{errorMessage}</span>
-            </div>
-          )}
-
           {/* STEP 1: FILE UPLOAD & PRESETS */}
           {step === 1 && (
             <div className="flex flex-col gap-4">

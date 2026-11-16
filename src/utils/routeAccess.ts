@@ -130,22 +130,6 @@ const PREFIX_RULES: Array<{ prefix: string; rule: RouteAccessRule }> = [
     rule: { anyOf: ['crm.orders.read'], label: 'Sales Orders' },
   },
   { prefix: '/samples', rule: { anyOf: ['crm.samples.read'], label: 'Samples' } },
-  {
-    prefix: '/travel',
-    rule: {
-      anyOf: ['crm.leads.read', 'crm.dashboard.view'],
-      denyClient: true,
-      label: 'Travel',
-    },
-  },
-  {
-    prefix: '/add-ons',
-    rule: {
-      anyOf: ['crm.leads.read', 'crm.dashboard.view'],
-      denyClient: true,
-      label: 'Travel',
-    },
-  },
   { prefix: '/tickets', rule: { anyOf: ['crm.tickets.read'], label: 'Tickets' } },
 ];
 
@@ -169,6 +153,11 @@ export function normalizeRoutePath(pathname: string): string {
 
 export function getRouteAccessRule(pathname: string): RouteAccessRule | null {
   const path = normalizeRoutePath(pathname);
+
+  // Extension pages (/ext/...) are handled by extension runtime and have no static access rule
+  if (path === '/ext' || path.startsWith('/ext/')) {
+    return null;
+  }
 
   if (PROJECT_EDIT_RE.test(path)) {
     return { anyOf: ['crm.projects.write'], denyClient: true, label: 'Edit Project' };
@@ -194,6 +183,11 @@ export function evaluateRouteAccess(
   }
 ): { allowed: boolean; rule: RouteAccessRule | null } {
   const path = normalizeRoutePath(pathname);
+
+  // Extension pages (/ext/...) are allowed through route guard and evaluated internally by ExtensionPage
+  if (path === '/ext' || path.startsWith('/ext/')) {
+    return { allowed: true, rule: null };
+  }
 
   // Check optional module toggles: block route when module is disabled (or not explicitly enabled)
   const modules = opts.features?.modules;

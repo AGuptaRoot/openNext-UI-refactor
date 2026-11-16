@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useNotifyMessage } from '@/components/notifications';
 import { crmApi } from '../../services/api';
 import {
   QUOTATION_CURRENCIES,
@@ -40,6 +41,7 @@ export const QuotationTemplateCreatePage: React.FC = () => {
   const [lines, setLines] = useState<EditableLine[]>([newEditableLine()]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
 
   const validLines = useMemo(
     () => lines.filter((line) => line.name.trim() && line.qty > 0),
@@ -91,11 +93,6 @@ export const QuotationTemplateCreatePage: React.FC = () => {
         saving={saving}
         formId="quotation-template-form"
       />
-      {error && (
-        <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-xs font-semibold text-red-700">
-          {error}
-        </div>
-      )}
       <form id="quotation-template-form" onSubmit={submit} className="flex flex-col gap-5" noValidate>
         <FormSection title="Template details">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

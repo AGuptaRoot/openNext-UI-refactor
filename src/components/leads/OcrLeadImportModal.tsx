@@ -9,6 +9,7 @@ import { ApiError, crmApi } from '../../services/api';
 import type { LeadOcrExtractResult } from '../../types/leads';
 import { LiveCameraCapture } from '../common/LiveCameraCapture';
 import { fileToVisionDataUrl } from '../../utils/imageDataUrl';
+import { useNotifyMessage } from '@/components/notifications';
 
 const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif';
 const MAX_BYTES = 12 * 1024 * 1024;
@@ -34,6 +35,7 @@ export const OcrLeadImportModal: React.FC<OcrLeadImportModalProps> = ({
   const [step, setStep] = useState<Step>('pick');
   const [statusText, setStatusText] = useState('');
   const [error, setError] = useState<string | null>(null);
+  useNotifyMessage(error, 'error', () => setError(null));
   const [busy, setBusy] = useState(false);
   const [liveCameraOpen, setLiveCameraOpen] = useState(false);
 
@@ -217,14 +219,6 @@ export const OcrLeadImportModal: React.FC<OcrLeadImportModalProps> = ({
           </div>
         )}
 
-        {error && (
-          <div
-            role="alert"
-            className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-xs font-semibold text-red-700"
-          >
-            {error}
-          </div>
-        )}
 
         {step === 'done' && (
           <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-800">

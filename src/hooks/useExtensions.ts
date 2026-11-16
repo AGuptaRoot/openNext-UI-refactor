@@ -93,7 +93,7 @@ export type ExtensionClientTab = {
   whenRequestTypeName: string | null;
   /** Dotted path in the extension bag holding the allowed record count. */
   countBy: string | null;
-  /** Plural noun for the "{n} missing" banner (e.g. "passports"). */
+  /** Plural noun for the "{n} missing" banner (e.g. "documents"). */
   countLabel: string;
   order: number;
   hintMessage: string;
@@ -477,15 +477,25 @@ function mergeHostSlotsIntoSummary(data: ExtensionUiSummary, extensionId: string
   }
 }
 
-export function useExtensions() {
-  const [summary, setSummary] = useState<ExtensionUiSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+/**
+ * Performance: every component using this hook shares one load (30 s), and the host-slots cache
+ * is written to the server once per session per extension (it was a POST per hook instance).
+ */
+const SUMMARY_TTL_MS = 30_000;
+let sharedSummary: { at: number; promise: Promise<ExtensionUiSummary | null> } | null = null;
+const syncedHostSlots = new Set<string>();
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
+function loadSummaryShared(force = false): Promise<ExtensionUiSummary | null> {
+  if (!force && sharedSummary && Date.now() - sharedSummary.at < SUMMARY_TTL_MS) return sharedSummary.promise;
+  const promise = loadSummary();
+  sharedSummary = { at: Date.now(), promise };
+  promise.catch(() => {
+    sharedSummary = null;
+  });
+  return promise;
+}
+
+async function loadSummary(): Promise<ExtensionUiSummary | null> {
       const res = await crmApi.getExtensionsUi();
       let data = (res.data as ExtensionUiSummary) || null;
       if (data && !data.leadDetailEmbeds) data.leadDetailEmbeds = [];
@@ -510,10 +520,14 @@ export function useExtensions() {
               }
               if (!slots || !data) return;
               mergeHostSlotsIntoSummary(data, ext.extensionId, slots);
-              try {
-                await crmApi.syncExtensionHostSlots(ext.extensionId, slots);
-              } catch {
-                /* optional cache for request-type seeding */
+              const syncKey = `${ext.extensionId}:${text.length}:${text.slice(0, 64)}`;
+              if (!syncedHostSlots.has(syncKey)) {
+                syncedHostSlots.add(syncKey);
+                try {
+                  await crmApi.syncExtensionHostSlots(ext.extensionId, slots);
+                } catch {
+                  syncedHostSlots.delete(syncKey); // optional cache for request-type seeding
+                }
               }
             } catch {
               /* optional */
@@ -521,8 +535,20 @@ export function useExtensions() {
           })
         );
       }
+      return data;
+}
 
-      setSummary(data);
+export function useExtensions() {
+  const [summary, setSummary] = useState<ExtensionUiSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  /** reload() after a change asks the server again; the first load shares the cached answer. */
+  const load = useCallback(async (force: boolean) => {
+    setLoading(true);
+    setError('');
+    try {
+      setSummary(await loadSummaryShared(force));
     } catch (reason) {
       setSummary(null);
       setError(reason instanceof Error ? reason.message : 'Failed to load extensions');
@@ -530,10 +556,11 @@ export function useExtensions() {
       setLoading(false);
     }
   }, []);
+  const reload = useCallback(() => load(true), [load]);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    void load(false);
+  }, [load]);
 
   const hasExtensions = (summary?.extensions?.length || 0) > 0;
 

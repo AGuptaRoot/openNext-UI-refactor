@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { crmApi } from '../../services/api';
@@ -20,6 +21,7 @@ import {
 import { displayLabel, displayUserLabel } from '../../utils/displayLabels';
 import { getRuntimeDefaultCurrency } from '../../utils/currency';
 import { DocumentUploadControl } from '../../components/common/DocumentUploadControl';
+import { useNotifyMessage } from '@/components/notifications';
 
 function statusClass(status: string): string {
   const map: Record<string, string> = {
@@ -99,6 +101,8 @@ export const ExpenseDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  useNotifyMessage(error, 'error');
+  useNotifyMessage(info, 'success', () => setInfo(''));
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(searchParams.get('edit') === '1');
   const [editForm, setEditForm] = useState<EditFormState | null>(null);
@@ -106,6 +110,8 @@ export const ExpenseDetailPage: React.FC = () => {
   const [rejectReason, setRejectReason] = useState('');
 
   const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const { isModuleVisible } = useActiveExtension();
+  const showProjects = isModuleVisible('projects');
   const [employees, setEmployees] = useState<AssignableUser[]>([]);
   const [categories, setCategories] = useState<string[]>(DEFAULT_EXPENSE_CATEGORIES);
 
@@ -131,7 +137,7 @@ export const ExpenseDetailPage: React.FC = () => {
 
   useEffect(() => {
     Promise.all([
-      crmApi.listProjects({ limit: 200 }),
+      showProjects ? crmApi.listProjects({ limit: 200 }) : Promise.resolve({ success: true, data: [] as ProjectItem[] } as Awaited<ReturnType<typeof crmApi.listProjects>>),
       crmApi.getAssignableUsers(),
       crmApi.getExpenseCategories(),
     ])
@@ -405,14 +411,6 @@ export const ExpenseDetailPage: React.FC = () => {
         </div>
       </header>
 
-      {error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
-      ) : null}
-      {info ? (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-          {info}
-        </div>
-      ) : null}
 
       {expense.status === 'Rejected' && expense.rejectionReason ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -515,6 +513,7 @@ export const ExpenseDetailPage: React.FC = () => {
               ))}
             </select>
           </label>
+          {showProjects && (
           <label className="flex flex-col gap-1 text-[11px] font-semibold uppercase text-zinc-500">
             Project
             <select
@@ -530,6 +529,7 @@ export const ExpenseDetailPage: React.FC = () => {
               ))}
             </select>
           </label>
+          )}
           <label className="flex items-center gap-2 text-sm font-medium text-zinc-700 mt-6">
             <input
               type="checkbox"
@@ -608,6 +608,7 @@ export const ExpenseDetailPage: React.FC = () => {
                 <div className="text-[11px] font-semibold uppercase text-zinc-400">Billable</div>
                 <div className="mt-0.5 text-zinc-800">{expense.isBillable ? 'Yes' : 'No'}</div>
               </div>
+              {showProjects && (
               <div>
                 <div className="text-[11px] font-semibold uppercase text-zinc-400">Project</div>
                 <div className="mt-0.5 text-zinc-800">
@@ -623,6 +624,7 @@ export const ExpenseDetailPage: React.FC = () => {
                   )}
                 </div>
               </div>
+              )}
               <div>
                 <div className="text-[11px] font-semibold uppercase text-zinc-400">Client</div>
                 <div className="mt-0.5 text-zinc-800">

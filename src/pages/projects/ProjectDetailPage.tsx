@@ -19,6 +19,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import SearchIcon from '@mui/icons-material/Search';
 import { Check } from 'lucide-react';
 
+import { notify } from '@/components/notifications';
 import { useAuth } from '../../context/AuthContext';
 import { useDialog } from '../../context/DialogContext';
 import { crmApi } from '../../services/api';
@@ -231,7 +232,6 @@ export const ProjectDetailPage: React.FC = () => {
   const [users, setUsers] = useState<AssignableUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   const currentUserId = String(
     user?.userId || (user as { id?: string; _id?: string } | null)?.id || (user as { _id?: string } | null)?._id || ''
@@ -328,8 +328,7 @@ export const ProjectDetailPage: React.FC = () => {
   const currency = overview?.currency || project?.currency || settingsCurrency;
 
   const showToast = useCallback((text: string, type: 'success' | 'error' = 'success') => {
-    setToast({ text, type });
-    setTimeout(() => setToast(null), 3500);
+    notify.show(type, text);
   }, []);
 
   const loadCore = useCallback(async () => {
@@ -1196,18 +1195,6 @@ export const ProjectDetailPage: React.FC = () => {
 
   return (
     <div data-tour="projects-detail-root" className="flex flex-col gap-5">
-      {toast && (
-        <div
-          className={`fixed top-20 right-6 z-[80] px-4 py-2.5 rounded-lg text-xs font-semibold border shadow-sm ${
-            toast.type === 'error'
-              ? 'bg-red-50 text-red-700 border-red-200'
-              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-          }`}
-        >
-          {toast.text}
-        </div>
-      )}
-
       {/* Header */}
       <div data-tour="projects-detail-hero" className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 pb-1 border-b border-zinc-200">
         <div className="min-w-0">

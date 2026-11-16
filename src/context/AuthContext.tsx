@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
-import { crmApi, isCrmMockModeEnabled } from '../services/api';
+import { crmApi, isCrmMockModeEnabled, setSettingsReadable } from '../services/api';
 import { CrmFeatureFlags, CrmRole, UserContext } from '../types/dashboard';
 import { normalizeActiveExtension } from '../types/extensions';
 import { canUseCrmTours, userCanAssignTickets, userHasPermission } from '../utils/permissions';
@@ -214,6 +214,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     },
     [user, activeRole, isClient]
   );
+
+  // GET /settings is admin-only: tell the API layer so other users never send it.
+  useEffect(() => {
+    setSettingsReadable(user ? hasPermission('crm.settings.manage') : null);
+  }, [user, hasPermission]);
 
   const hasAnyPermission = useCallback(
     (...permissions: string[]): boolean =>

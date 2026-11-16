@@ -1,4 +1,5 @@
 import { displayLabel, displayUserLabel } from '../../utils/displayLabels';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
@@ -35,6 +36,7 @@ import {
 } from '../../components/finance/FinanceFormElements';
 import { triggerFileDownload } from '../../utils/fileDownload';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import { useNotifyMessage } from '@/components/notifications';
 
 type MainTab = 'expenses' | 'recurring';
 type ArchiveView = 'active' | 'archived';
@@ -117,6 +119,8 @@ export const ExpensesPage: React.FC = () => {
   const [categories, setCategories] = useState<string[]>(DEFAULT_EXPENSE_CATEGORIES);
   const [employees, setEmployees] = useState<AssignableUser[]>([]);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const { isModuleVisible } = useActiveExtension();
+  const showProjects = isModuleVisible('projects');
 
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState(() => searchParams.get('status') || '');
@@ -165,6 +169,8 @@ export const ExpensesPage: React.FC = () => {
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
+  useNotifyMessage(infoMessage, 'success', () => setInfoMessage(''));
 
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -233,7 +239,7 @@ export const ExpensesPage: React.FC = () => {
     Promise.all([
       crmApi.getExpenseCategories(),
       crmApi.getAssignableUsers(),
-      crmApi.listProjects({ limit: 200 }),
+      showProjects ? crmApi.listProjects({ limit: 200 }) : Promise.resolve({ success: true, data: [] as ProjectItem[] } as Awaited<ReturnType<typeof crmApi.listProjects>>),
     ])
       .then(([categoryResponse, employeeResponse, projectResponse]) => {
         setCategories(
@@ -584,15 +590,6 @@ export const ExpensesPage: React.FC = () => {
           Recurring Expenses
         </button>
       </div>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-      )}
-      {infoMessage && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-          {infoMessage}
-        </div>
-      )}
 
       {tab === 'expenses' && (
         <>
@@ -1192,6 +1189,7 @@ export const ExpensesPage: React.FC = () => {
                   ))}
                 </select>
               </label>
+              {showProjects && (
               <label className="flex flex-col gap-1 text-[11px] font-semibold uppercase text-zinc-500">
                 Project
                 <select
@@ -1207,6 +1205,7 @@ export const ExpensesPage: React.FC = () => {
                   ))}
                 </select>
               </label>
+              )}
               <label className="flex flex-col gap-1 text-[11px] font-semibold uppercase text-zinc-500">
                 Payment mode
                 <select
@@ -1232,7 +1231,7 @@ export const ExpensesPage: React.FC = () => {
                   checked={Boolean(scheduleForm.isBillable)}
                   onChange={(e) => setScheduleForm((f) => ({ ...f, isBillable: e.target.checked }))}
                 />
-                Billable to project / client
+                {showProjects ? 'Billable to project / client' : 'Billable to client'}
               </label>
               <label className="flex flex-col gap-1 text-[11px] font-semibold uppercase text-zinc-500 sm:col-span-2">
                 Description & notes

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { crmApi } from '../../services/api';
@@ -20,6 +21,7 @@ import {
 import { ClientSelect } from '../../components/clients/ClientSelect';
 import { DocumentUploadControl } from '../../components/common/DocumentUploadControl';
 import { useDefaultCurrency } from '../../hooks/useDefaultCurrency';
+import { useNotifyMessage } from '@/components/notifications';
 
 function localToday(): string {
   const d = new Date();
@@ -34,11 +36,14 @@ export const ExpenseCreatePage: React.FC = () => {
   const currencyLockedRef = useRef(false);
 
   const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const { isModuleVisible } = useActiveExtension();
+  const showProjects = isModuleVisible('projects');
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [employees, setEmployees] = useState<AssignableUser[]>([]);
   const [categories, setCategories] = useState<string[]>(DEFAULT_EXPENSE_CATEGORIES);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error', () => setError(''));
   const [billFileName, setBillFileName] = useState('');
   const [billFileSize, setBillFileSize] = useState(0);
 
@@ -69,7 +74,7 @@ export const ExpenseCreatePage: React.FC = () => {
 
   useEffect(() => {
     Promise.all([
-      crmApi.listProjects({ limit: 200 }),
+      showProjects ? crmApi.listProjects({ limit: 200 }) : Promise.resolve({ success: true, data: [] as ProjectItem[] } as Awaited<ReturnType<typeof crmApi.listProjects>>),
       crmApi.getClients({ limit: 200 }),
       crmApi.getAssignableUsers(),
       crmApi.getExpenseCategories(),
@@ -207,10 +212,6 @@ export const ExpenseCreatePage: React.FC = () => {
         </p>
       </div>
 
-      {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-      )}
-
       <form id="expense-create-form" onSubmit={onSubmit} className="space-y-5">
         <div data-tour="expenses-create-item">
         <FormSection title="Item & Purchase Details">
@@ -329,6 +330,7 @@ export const ExpenseCreatePage: React.FC = () => {
                 ))}
               </select>
             </FormField>
+            {showProjects && (
             <FormField label="Project (optional)">
               <select
                 className={financeFieldClass}
@@ -343,6 +345,7 @@ export const ExpenseCreatePage: React.FC = () => {
                 ))}
               </select>
             </FormField>
+            )}
             <FormField label="Client (optional)">
               <ClientSelect
                 clients={clients}

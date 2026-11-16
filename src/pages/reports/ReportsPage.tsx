@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import CloseIcon from '@mui/icons-material/Close';
+import { notify } from '@/components/notifications';
 import { CrmRoleIcon } from '../../components/icons/CrmRoleIcon';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -30,6 +31,7 @@ import {
   RecurringInvoicesReportData,
   PaymentReconciliationReportData,
   EmployeesReportData,
+  ExtensionReportDefinition,
 } from '../../types/reports';
 
 import { SalesReportTab } from '../../components/reports/tabs/SalesReportTab';
@@ -42,6 +44,7 @@ import { AgeingReportTab } from '../../components/reports/tabs/AgeingReportTab';
 import { RecurringInvoicesReportTab } from '../../components/reports/tabs/RecurringInvoicesReportTab';
 import { PaymentReconciliationReportTab } from '../../components/reports/tabs/PaymentReconciliationReportTab';
 import { ActivityLocationReportTab } from '../../components/reports/tabs/ActivityLocationReportTab';
+import { ExtensionReportsDashboard } from '../../components/reports/ExtensionReportsDashboard';
 
 export const ALL_REPORT_TABS: ReportTabDefinition[] = [
   { id: 'sales', label: 'Sales Pipeline', exportKey: 'sales', requiredPerm: null },
@@ -206,7 +209,77 @@ export function formatRoleName(role: string): string {
     .join(' ');
 }
 
+/**
+ * Reports: the active extension's dashboard when it declares one (json/reports.json), otherwise the core
+ * report tabs. The extension may keep some core tabs (keepCoreTabs), opened from its dashboard.
+ */
 export const ReportsPage: React.FC = () => {
+  const [definition, setDefinition] = useState<ExtensionReportDefinition | null>(null);
+  const [checked, setChecked] = useState(false);
+  const [showCore, setShowCore] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedTab = String(searchParams.get('tab') || '');
+  const linkedRep = String(searchParams.get('rep') || '');
+  useEffect(() => {
+    if (definition && linkedTab && definition.keepCoreTabs.includes(linkedTab)) setShowCore(true);
+  }, [definition, linkedTab]);
+  useEffect(() => {
+    let alive = true;
+    crmApi
+      .getExtensionReports()
+      .then((res) => {
+        if (alive) setDefinition(res.data && res.data.available ? res.data : null);
+      })
+      .catch(() => {
+        if (alive) setDefinition(null);
+      })
+      .finally(() => {
+        if (alive) setChecked(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (!checked) {
+    return (
+      <div className="flex justify-center py-16">
+        <CircularProgress size={22} />
+      </div>
+    );
+  }
+  if (definition && !showCore) {
+    return (
+      <ExtensionReportsDashboard
+        definition={definition}
+        onOpenCoreReports={definition.keepCoreTabs.length ? () => setShowCore(true) : undefined}
+      />
+    );
+  }
+  return (
+    <CoreReportsPage
+      onlyTabs={definition ? definition.keepCoreTabs : undefined}
+      initialTab={linkedTab}
+      initialRep={linkedRep}
+      onBack={
+        definition
+          ? () => {
+              setShowCore(false);
+              if (linkedTab) setSearchParams({});
+            }
+          : undefined
+      }
+      backLabel={definition?.title}
+    />
+  );
+};
+
+const CoreReportsPage: React.FC<{ onlyTabs?: string[]; onBack?: () => void; backLabel?: string; initialTab?: string; initialRep?: string }> = ({
+  onlyTabs,
+  onBack,
+  backLabel,
+  initialTab,
+  initialRep,
+}) => {
   const { user, activeRole } = useAuth();
   const { showProjects } = useActiveExtension();
 
@@ -225,14 +298,13 @@ export const ReportsPage: React.FC = () => {
   const [activePeriod, setActivePeriod] = useState<ReportPeriod | null>('month');
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState<ReportTabId>('sales');
+  const [activeTab, setActiveTab] = useState<ReportTabId>(() => (initialTab && ALL_REPORT_TABS.some((t) => t.id === initialTab) ? (initialTab as ReportTabId) : 'sales'));
 
   // Loading & Data Cache
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
-  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // Cached data state for tabs
   const [tabData, setTabData] = useState<Record<string, unknown>>({});
@@ -249,10 +321,7 @@ export const ReportsPage: React.FC = () => {
   }, [exportOpen]);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
-    setToastMessage({ text, type });
-    setTimeout(() => {
-      setToastMessage((prev) => (prev?.text === text ? null : prev));
-    }, 4000);
+    notify.show(type, text);
   };
 
   const currentPerms = useMemo(() => getRolePermissions(activeRole), [activeRole]);
@@ -263,6 +332,8 @@ export const ReportsPage: React.FC = () => {
     const allowed = preset.allowedReports || [];
 
     return ALL_REPORT_TABS.filter((tab) => {
+      // An extension dashboard keeps only the core tabs it lists (keepCoreTabs).
+      if (onlyTabs && !onlyTabs.includes(tab.id)) return false;
       if (!allowed.includes(tab.id)) return false;
       // Project/task/time reports belong to the Project Delivery extension.
       if (!showProjects && PROJECT_REPORT_TABS.has(tab.id)) return false;
@@ -275,7 +346,7 @@ export const ReportsPage: React.FC = () => {
       }
       return true;
     });
-  }, [activeRole, currentPerms, showProjects]);
+  }, [activeRole, currentPerms, showProjects, onlyTabs]);
 
   // Ensure activeTab is always among visible tabs
   useEffect(() => {
@@ -472,26 +543,6 @@ export const ReportsPage: React.FC = () => {
 
   return (
     <div className="flex w-full flex-col gap-5 pb-12" data-tour="reports-root">
-      {/* Toast Feedback */}
-      {toastMessage && (
-        <div
-          className={`p-3 rounded-xl border flex items-center justify-between text-xs font-semibold ${
-            toastMessage.type === 'error'
-              ? 'bg-red-50 text-red-800 border-red-200'
-              : 'bg-zinc-950 text-white border-zinc-950'
-          }`}
-        >
-          <span>{toastMessage.text}</span>
-          <button
-            type="button"
-            onClick={() => setToastMessage(null)}
-            className="text-inherit hover:opacity-75 p-0 bg-transparent border-none cursor-pointer"
-          >
-            <CloseIcon sx={{ fontSize: 16 }} aria-label="Dismiss" />
-          </button>
-        </div>
-      )}
-
       {/* 1. Header (OpenNext CMS Style) */}
       <div
         data-tour="reports-header"
@@ -500,7 +551,12 @@ export const ReportsPage: React.FC = () => {
         <div data-tour="reports-title">
           <div className="flex items-center gap-2.5 flex-wrap">
             <CrmRoleIcon role={activeRole} className="h-6 w-6 shrink-0 text-zinc-700" />
-            <h1 className="text-2xl font-bold text-zinc-950 tracking-tight m-0">Reports</h1>
+            {onBack ? (
+              <button type="button" onClick={onBack} className="h-8 rounded-lg border border-zinc-300 bg-white px-2.5 text-xs font-semibold">
+                ← {backLabel || 'Back'}
+              </button>
+            ) : null}
+            <h1 className="text-2xl font-bold text-zinc-950 tracking-tight m-0">{onBack ? 'Finance Reports' : 'Reports'}</h1>
 
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 border border-zinc-200 rounded-lg text-xs font-semibold text-zinc-800">
               <CrmRoleIcon role={activeRole} className="h-4 w-4 shrink-0 text-zinc-700" />
@@ -696,6 +752,7 @@ export const ReportsPage: React.FC = () => {
           )}
           {activeTab === 'activity-location' && (
             <ActivityLocationReportTab
+              initialRep={initialRep}
               data={
                 (currentData as ActivityLocationReport) || {
                   rows: [],

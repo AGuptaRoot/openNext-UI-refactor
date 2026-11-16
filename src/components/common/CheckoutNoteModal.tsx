@@ -6,6 +6,7 @@ import AssignmentIcon from '@mui/icons-material/Assignment';
 import NoteAltOutlinedIcon from '@mui/icons-material/NoteAltOutlined';
 import { useTimer } from '../../context/TimerContext';
 import { displayLabel } from '../../utils/displayLabels';
+import { useNotifyMessage } from '@/components/notifications';
 
 const QUICK_NOTES = [
   'Completed checklist deliverable',
@@ -29,6 +30,7 @@ export const CheckoutNoteModal: React.FC = () => {
 
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error');
 
   // Reset form when modal opens
   useEffect(() => {
@@ -130,13 +132,6 @@ export const CheckoutNoteModal: React.FC = () => {
               )}
             </div>
           </div>
-
-          {/* Error Message */}
-          {error && (
-            <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-              {error}
-            </div>
-          )}
 
           {/* Note Input */}
           <div className="flex flex-col gap-1.5">

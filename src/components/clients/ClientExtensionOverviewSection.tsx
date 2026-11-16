@@ -101,7 +101,7 @@ function fallbackSections(
       continue;
     }
     if (Array.isArray(sectionValue) && sectionValue.some((v) => isPlainObject(v))) {
-      // Record arrays (passports) have their own tab — skip them here.
+      // Record arrays are not display sections — skip them here.
       continue;
     }
     const formatted = optionLabel(sectionKey, sectionValue);
@@ -122,7 +122,7 @@ function fallbackSections(
  * The enquiry itself lives on the source lead and is read through
  * `Company.leadId` — nothing is copied onto the client, so editing the lead
  * updates this immediately. Formatting is produced by the extension's own
- * `toDisplaySections`, so the CRM stays free of travel-specific knowledge.
+ * `toDisplaySections`, so the CRM stays free of extension-specific knowledge.
  */
 export const ClientExtensionOverviewSection: React.FC<ClientExtensionOverviewSectionProps> = ({
   section,

@@ -13,6 +13,8 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import { crmApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useActiveExtension } from '../../hooks/useActiveExtension';
+import { useSalesFlowConfig } from '../../hooks/useSalesFlowConfig';
+import { salesTerms } from '../../utils/salesTerms';
 import { useDialog } from '../../context/DialogContext';
 import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
 import type { InvoiceItem, InvoicePaymentRecord } from '../../types/invoices';
@@ -22,6 +24,8 @@ import { buildFullInvoicePortalLink } from '../../utils/portalLinks';
 import { loadRazorpayCheckoutScript } from '../../utils/razorpayCheckout';
 import { getRuntimeDefaultCurrency } from '../../utils/currency';
 import { CreditCard } from 'lucide-react';
+import { ExtensionActions } from '../../components/extensions/ExtensionActions';
+import { useNotifyMessage } from '@/components/notifications';
 
 function statusClass(status: string): string {
   const map: Record<string, string> = {
@@ -33,11 +37,17 @@ function statusClass(status: string): string {
     Overdue: 'bg-red-50 text-red-800',
     'Written Off': 'bg-stone-100 text-stone-700',
     Cancelled: 'bg-rose-50 text-rose-800',
+    Converted: 'bg-violet-50 text-violet-800',
   };
   return map[status] || 'bg-zinc-100 text-zinc-700';
 }
 
 export const InvoiceDetailPage: React.FC = () => {
+  // Services, not goods (salesFlow.hideShipping): the extension's wording, no quantity, no shipping.
+  const salesFlow = useSalesFlowConfig();
+  const terms = salesTerms(salesFlow);
+  // salesFlow.hideInvoiceWriteOff: the workspace extension turns write-offs off.
+  const canWriteOff = !salesFlow.hideInvoiceWriteOff;
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const { hasPermission, isClient, user, activeRole } = useAuth();
@@ -49,6 +59,7 @@ export const InvoiceDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  useNotifyMessage(error, 'error');
   const [writeOffOpen, setWriteOffOpen] = useState(false);
   const [writeOffReason, setWriteOffReason] = useState('');
   const [payingWithRazorpay, setPayingWithRazorpay] = useState(false);
@@ -330,6 +341,11 @@ export const InvoiceDetailPage: React.FC = () => {
    * it is converted.
    */
   const isProforma = invoice.documentType === 'proforma';
+  // Money from the server's verified payment records (paymentSummary), the stored fields as fallback.
+  const summary = invoice.paymentSummary || null;
+  const advancePaid = isProforma ? 0 : Number(summary ? summary.advancePaid : invoice.advancePaid) || 0;
+  const paidAmount = Number(summary ? summary.paid : invoice.amountPaid) || 0;
+  const balanceDue = Number(summary ? summary.balance : invoice.balanceDue ?? totals?.balanceDue ?? invoice.grandTotal) || 0;
   const canConvertProforma = isProforma && canWriteFinance && !invoice.convertedInvoiceId;
   const isSalesOrderDelivered = Boolean(
     invoice.isSalesOrderDelivered ||
@@ -345,7 +361,8 @@ export const InvoiceDetailPage: React.FC = () => {
       customerEmail: invoice.customerEmail,
       clientEmail: invoice.clientEmail,
       status: invoice.status,
-      balanceDue: Number(invoice.balanceDue ?? invoice.grandTotal),
+      // The server's balance from verified payments (advance included): no Pay button at 0.
+      balanceDue,
       grandTotal: Number(invoice.grandTotal || 0),
     },
     razorpayConfigured,
@@ -382,6 +399,12 @@ export const InvoiceDetailPage: React.FC = () => {
             <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${statusClass(invoice.status)}`}>
               {invoice.status}
             </span>
+            {/* Payment status from verified payments: Unpaid while nothing is paid. */}
+            {invoice.paymentStatus === 'Unpaid' && !['Draft', 'Cancelled', 'Written Off', 'Converted'].includes(String(invoice.status)) ? (
+              <span data-testid="invoice-unpaid" className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800">
+                Unpaid
+              </span>
+            ) : null}
             {isProforma && (
               <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-[11px] font-semibold text-violet-900">
                 Proforma
@@ -432,6 +455,16 @@ export const InvoiceDetailPage: React.FC = () => {
             <PictureAsPdfIcon sx={{ fontSize: 15 }} /> PDF
           </button>
           {payButton}
+          {/* Buttons of the active extension (json/actions.json page "invoiceDetail"), e.g. Open Booking. */}
+          {id ? (
+            <ExtensionActions
+              page="invoiceDetail"
+              record={{ type: 'invoice', id, data: invoice }}
+              state={{ status: invoice.status }}
+              onDone={(message) => void alert(message)}
+              onError={setError}
+            />
+          ) : null}
           {canConvertProforma && (
             <>
               {isSalesOrderDelivered && (
@@ -450,7 +483,7 @@ export const InvoiceDetailPage: React.FC = () => {
               </button>
             </>
           )}
-          {canWriteFinance && !readOnly && invoice.status !== 'Paid' && (
+          {canWriteFinance && canWriteOff && !readOnly && invoice.status !== 'Paid' && (
             <button type="button" disabled={busy} onClick={() => setWriteOffOpen(true)} className="inline-flex h-9 items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-900 cursor-pointer disabled:opacity-50">
               <MoneyOffIcon sx={{ fontSize: 15 }} /> Write off
             </button>
@@ -480,8 +513,6 @@ export const InvoiceDetailPage: React.FC = () => {
           )}
         </div>
       </header>
-
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
       {isProforma && (
         <div className="flex flex-col gap-3 rounded-xl border border-violet-200 bg-violet-50 p-4 text-xs text-violet-950">
@@ -619,14 +650,15 @@ export const InvoiceDetailPage: React.FC = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className={`grid grid-cols-2 gap-3 ${advancePaid > 0 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
         {[
           { label: 'Grand total', value: formatFinanceMoney(invoice.grandTotal, invoice.currency) },
-          { label: 'Amount paid', value: formatFinanceMoney(invoice.amountPaid || 0, invoice.currency) },
+          ...(advancePaid > 0 ? [{ label: 'Advance paid', value: formatFinanceMoney(advancePaid, invoice.currency) }] : []),
+          { label: 'Amount paid', value: formatFinanceMoney(paidAmount, invoice.currency) },
           { label: 'Credits', value: formatFinanceMoney(invoice.creditAmount || 0, invoice.currency) },
           {
             label: 'Balance due',
-            value: formatFinanceMoney(invoice.balanceDue ?? totals?.balanceDue ?? invoice.grandTotal, invoice.currency),
+            value: formatFinanceMoney(balanceDue, invoice.currency),
           },
         ].map((card) => (
           <div key={card.label} className="rounded-xl border border-zinc-300 bg-white p-4">
@@ -647,7 +679,7 @@ export const InvoiceDetailPage: React.FC = () => {
             <div><dt className="text-[11px] uppercase text-zinc-500">Tax calc</dt><dd className="m-0 font-medium">{invoice.taxCalculation}</dd></div>
             <div className="col-span-2"><dt className="text-[11px] uppercase text-zinc-500">Payment details</dt><dd className="m-0 whitespace-pre-wrap">{invoice.paymentDetails || '—'}</dd></div>
             <div><dt className="text-[11px] uppercase text-zinc-500">Billing</dt><dd className="m-0 whitespace-pre-wrap text-xs">{invoice.billingAddress || '—'}</dd></div>
-            <div><dt className="text-[11px] uppercase text-zinc-500">Shipping</dt><dd className="m-0 whitespace-pre-wrap text-xs">{invoice.shippingAddress || '—'}</dd></div>
+            {terms.hideShipping ? null : <div><dt className="text-[11px] uppercase text-zinc-500">Shipping</dt><dd className="m-0 whitespace-pre-wrap text-xs">{invoice.shippingAddress || '—'}</dd></div>}
             {invoice.writtenOffReason && (
               <div className="col-span-2">
                 <dt className="text-[11px] uppercase text-zinc-500">Write-off reason</dt>
@@ -658,8 +690,19 @@ export const InvoiceDetailPage: React.FC = () => {
         </section>
 
         <section className="rounded-xl border border-zinc-300 bg-white p-5">
-          <h2 className="text-sm font-semibold m-0 mb-3">Totals</h2>
-          {totals && (
+          <h2 className="text-sm font-semibold m-0 mb-3">{terms.hideShipping ? terms.commercialSummary : 'Totals'}</h2>
+          {totals && terms.hideShipping ? (
+            <div className="space-y-2 text-sm" data-testid="invoice-detail-commercial-summary">
+              <div className="flex justify-between"><span>{terms.subtotal}</span><strong>{formatFinanceMoney(totals.subtotal, invoice.currency)}</strong></div>
+              <div className="flex justify-between"><span>Tax</span><strong>{formatFinanceMoney(totals.taxTotal, invoice.currency)}</strong></div>
+              {Number(totals.discount) > 0 ? <div className="flex justify-between"><span>Discount</span><strong>-{formatFinanceMoney(totals.discount, invoice.currency)}</strong></div> : null}
+              <div className="flex justify-between border-t border-zinc-200 pt-2 text-base"><span>Grand total</span><strong>{formatFinanceMoney(totals.grandTotal, invoice.currency)}</strong></div>
+              {advancePaid > 0 ? <div className="flex justify-between"><span>Advance paid</span><strong>{formatFinanceMoney(advancePaid, invoice.currency)}</strong></div> : null}
+              <div className="flex justify-between"><span>Amount paid</span><strong>{formatFinanceMoney(paidAmount, invoice.currency)}</strong></div>
+              <div className="flex justify-between"><span>Balance due</span><strong>{formatFinanceMoney(balanceDue, invoice.currency)}</strong></div>
+              <div className="flex justify-between"><span>Currency</span><strong>{invoice.currency}</strong></div>
+            </div>
+          ) : totals && (
             <div className="space-y-2 text-sm">
               <div className="flex justify-between"><span>Subtotal</span><strong>{formatFinanceMoney(totals.subtotal, invoice.currency)}</strong></div>
               <div className="flex justify-between"><span>Discount</span><strong>-{formatFinanceMoney(totals.discount, invoice.currency)}</strong></div>
@@ -678,15 +721,15 @@ export const InvoiceDetailPage: React.FC = () => {
       </div>
 
       <section className="rounded-xl border border-zinc-300 bg-white overflow-hidden">
-        <div className="px-5 py-3 border-b border-zinc-200 text-sm font-semibold">Line items</div>
+        <div className="px-5 py-3 border-b border-zinc-200 text-sm font-semibold">{terms.hideShipping ? terms.lines : 'Line items'}</div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
             <thead className="bg-zinc-50 text-[11px] uppercase text-zinc-500">
               <tr>
-                <th className="px-4 py-2 text-left">Item</th>
-                <th className="px-4 py-2 text-right">Qty</th>
+                <th className="px-4 py-2 text-left">{terms.hideShipping ? terms.line : 'Item'}</th>
+                {terms.hideShipping ? null : <th className="px-4 py-2 text-right">Qty</th>}
                 <th className="px-4 py-2 text-right">Rate</th>
-                <th className="px-4 py-2 text-right">Tax %</th>
+                <th className="px-4 py-2 text-right">{terms.hideShipping ? 'Tax' : 'Tax %'}</th>
                 <th className="px-4 py-2 text-right">Amount</th>
               </tr>
             </thead>
@@ -697,12 +740,25 @@ export const InvoiceDetailPage: React.FC = () => {
                     <div className="font-medium">{line.name}</div>
                     {line.description && <div className="text-xs text-zinc-500">{line.description}</div>}
                   </td>
+                  {terms.hideShipping ? (
+                    <>
+                      {/* A service's price for all who travel (no quantity shown); tax as an amount. */}
+                      <td className="px-4 py-3 text-right">{formatFinanceMoney(line.qty * line.rate, invoice.currency)}</td>
+                      <td className="px-4 py-3 text-right">{formatFinanceMoney((line.qty * line.rate * (Number(line.tax) || 0)) / 100, invoice.currency)}</td>
+                      <td className="px-4 py-3 text-right font-semibold">
+                        {formatFinanceMoney(line.qty * line.rate * (1 + (Number(line.tax) || 0) / 100), invoice.currency)}
+                      </td>
+                    </>
+                  ) : (
+                    <>
                   <td className="px-4 py-3 text-right">{line.qty}</td>
                   <td className="px-4 py-3 text-right">{formatFinanceMoney(line.rate, invoice.currency)}</td>
                   <td className="px-4 py-3 text-right">{line.tax}</td>
                   <td className="px-4 py-3 text-right font-semibold">
                     {formatFinanceMoney(line.qty * line.rate, invoice.currency)}
                   </td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>
