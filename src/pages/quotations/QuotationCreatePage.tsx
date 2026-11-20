@@ -36,7 +36,7 @@ import {
   leadTabHref,
   type SalesFlowLineMeta,
 } from '../../components/finance/SalesFlowQuotationParts';
-import type { QuotationDateRules, SalesFlowCheck, SalesFlowConfig, SalesFlowDetail, SalesFlowPanel, SalesFlowSummaryItem, SalesFlowNotice } from '../../types/leads';
+import type { QuotationLeadChoice, QuotationLeadOptions, QuotationDateRules, SalesFlowCheck, SalesFlowConfig, SalesFlowDetail, SalesFlowPanel, SalesFlowSummaryItem, SalesFlowNotice } from '../../types/leads';
 import { ExtensionCreateFields } from '../../components/extensions/ExtensionCreateFields';
 import { useActiveExtension } from '../../hooks/useActiveExtension';
 import { extensionDataApi } from '../../services/extensionDataApi';
@@ -48,6 +48,7 @@ import {
   consumeFinancePdfScanDraft,
   linesFromPdfExtract,
   normalizeTaxCalculationValue,
+  sameScannedName,
 } from '../../utils/financePdfScanDraft';
 import { normalizeCurrencyCode, useDefaultCurrency } from '../../hooks/useDefaultCurrency';
 import type { QuotationPaymentType, QuotationAdvanceMode } from '../../types/quotations';
@@ -113,16 +114,18 @@ export const QuotationCreatePage: React.FC = () => {
   const presetClientId = String(searchParams.get('clientId') || '').trim();
   const fromScan = searchParams.get('fromScan') === '1';
   const { clients, leads, opportunities } = useFinanceOptions();
+  /** The active extension may hide Opportunities: quotations are then made from leads (no opportunity picker). */
+  const opportunitiesVisible = useActiveExtension().isModuleVisible('opportunities');
   /** Opportunities a new quotation may use: not Won / Lost and without an accepted quotation. */
   const openOpportunities = useMemo(
     () =>
-      opportunities.filter((item) => {
+      !opportunitiesVisible ? [] : opportunities.filter((item) => {
         if (item.acceptedQuotationId) return false;
         const type = String(item.stageType || '').toUpperCase();
         const stage = String(item.stage || '').toLowerCase();
         return type !== 'WON' && type !== 'LOST' && stage !== 'won' && stage !== 'lost';
       }),
-    [opportunities]
+    [opportunities, opportunitiesVisible]
   );
   const { alert, confirm, prompt } = useDialog();
   const { hasAnyPermission, isClient, features } = useAuth();
@@ -179,6 +182,8 @@ export const QuotationCreatePage: React.FC = () => {
   const [lineDetails, setLineDetails] = useState<Record<string, SalesFlowDetail[]>>({});
   /** Per line: selected, unit, extension column values, added by hand. */
   const [lineMeta, setLineMeta] = useState<Record<string, SalesFlowLineMeta>>({});
+  /** GST suite (CRM 3.53.0): place of supply / TCS rule from the extension's prefill or the loaded quotation. */
+  const [gstDoc, setGstDoc] = useState<{ placeOfSupply?: string; tcsRuleKey?: string }>({});
   /** Summary row, read-only lists and add-line choices from the extension. */
   const [salesExtras, setSalesExtras] = useState<{
     summary: SalesFlowSummaryItem[];
@@ -302,6 +307,7 @@ export const QuotationCreatePage: React.FC = () => {
         setDiscountType((quote.discountType as DiscountType) || 'percent');
         setDiscountValue(Number(quote.discountValue ?? quote.discountPercent) || 0);
         setShippingCharge(Number(quote.shippingCharge) || 0);
+        setGstDoc({ placeOfSupply: quote.placeOfSupply || '', tcsRuleKey: quote.tcsRuleKey || '' });
         if (Array.isArray(quote.lineItems) && quote.lineItems.length > 0) {
           const loaded = linesFromSource(quote.lineItems);
           setLines(loaded);
@@ -315,6 +321,8 @@ export const QuotationCreatePage: React.FC = () => {
                   extra: { ...(quote.lineItems[i]?.extra || {}) },
                   sourceRef: String(quote.lineItems[i]?.sourceRef || ''),
                   group: String(quote.lineItems[i]?.group || ''),
+                  sac: String(quote.lineItems[i]?.sac || ''),
+                  serviceType: String(quote.lineItems[i]?.serviceType || ''),
                 },
               ])
             )
@@ -379,11 +387,11 @@ export const QuotationCreatePage: React.FC = () => {
   useEffect(() => {
     if (!presetLeadId || presetOpportunityId || isEdit || presetLeadLinked.current) return;
     const opp = openOpportunities.find((item) => String(item.leadId || '') === presetLeadId);
-    if (!opp && !opportunities.length) return; // list not loaded yet
+    if (!opp && opportunitiesVisible && !opportunities.length) return; // list not loaded yet
     presetLeadLinked.current = true;
     if (opp) void onSelectOpportunity(opp._id);
     else void applySalesFlowPrefill({ leadId: presetLeadId });
-  }, [presetLeadId, presetOpportunityId, openOpportunities, opportunities.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [presetLeadId, presetOpportunityId, openOpportunities, opportunities.length, opportunitiesVisible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (currencyLockedRef.current) return;
@@ -440,34 +448,19 @@ export const QuotationCreatePage: React.FC = () => {
   useEffect(() => {
     if (!fromScan || !scanClientNameRef.current || !clients.length) return;
     if (clientId || leadId) return;
-    const needle = scanClientNameRef.current.toLowerCase();
-    const matchedClient = clients.find((c) => {
-      const name = String((c as { name?: string }).name || '').trim().toLowerCase();
-      const company = String((c as { company?: string }).company || '').trim().toLowerCase();
-      return (
-        name === needle ||
-        company === needle ||
-        (name && (name.includes(needle) || needle.includes(name))) ||
-        (company && (company.includes(needle) || needle.includes(company)))
-      );
-    });
-    if (matchedClient) {
+    // CRM 3.58.0: picked only on the exact same name (one match); otherwise the user chooses.
+    const scanned = scanClientNameRef.current;
+    const matchedClients = clients.filter((c) => sameScannedName(scanned, (c as { name?: string }).name, (c as { company?: string }).company));
+    if (matchedClients.length === 1) {
       setRecipientType('client');
-      setClientId(matchedClient._id);
+      setClientId(matchedClients[0]._id);
       return;
     }
-    const matchedLead = leads.find((l) => {
-      const name = String((l as { name?: string }).name || '').trim().toLowerCase();
-      const company = String((l as { company?: string }).company || '').trim().toLowerCase();
-      return (
-        name === needle ||
-        company === needle ||
-        (name && (name.includes(needle) || needle.includes(name)))
-      );
-    });
-    if (matchedLead) {
+    if (matchedClients.length) return;
+    const matchedLeads = leads.filter((l) => sameScannedName(scanned, (l as { name?: string }).name, (l as { company?: string }).company));
+    if (matchedLeads.length === 1) {
       setRecipientType('lead');
-      setLeadId(matchedLead._id);
+      setLeadId(matchedLeads[0]._id);
     }
   }, [fromScan, clients, leads, clientId, leadId]);
 
@@ -503,7 +496,7 @@ export const QuotationCreatePage: React.FC = () => {
   const waitingLines =
     Boolean(quoteForm) && Boolean(salesFlow.lockQuotationLines) && !lockLines && recipientType === 'lead' && !fromScan;
   const fieldsWaiting = Boolean(quoteForm) && !leadId && !opportunityId && !clientId;
-  const waitingText = quoteForm?.emptyText || 'Select a lead or an opportunity first.';
+  const waitingText = quoteForm?.emptyText || (opportunitiesVisible ? 'Select a lead or an opportunity first.' : 'Select a lead first.');
 
   /** The lines that go on the quotation (unticked extension lines are left out). */
   const pricedLines = useMemo(
@@ -536,11 +529,12 @@ export const QuotationCreatePage: React.FC = () => {
       // CRM 3.45.1: a client quotation made for the client's enquiry needs no opportunity.
       if (recipientType === 'client' && salesLeadId && !opportunityId) rows.push({ label: 'Linked to the client’s enquiry', ok: true });
       else if (recipientType === 'client' && clientRecordId) rows.push({ label: 'Linked to the client’s trip', ok: true });
+      else if (!opportunitiesVisible) rows.push({ label: 'Linked to a lead', ok: Boolean(salesLeadId) });
       else rows.push({ label: 'Linked to an opportunity', ok: Boolean(opportunityId) });
       rows.push({ label: 'Every selected line has a rate', ok: named.length > 0 && named.every((l) => l.rate > 0) });
     }
     return rows;
-  }, [salesChecks, quoteForm, pricedLines, opportunityId, recipientType, salesLeadId, clientRecordId]);
+  }, [salesChecks, quoteForm, pricedLines, opportunityId, recipientType, salesLeadId, clientRecordId, opportunitiesVisible]);
 
   const cgst = gstMode === 'intra' ? totals.taxTotal / 2 : 0;
   const sgst = gstMode === 'intra' ? totals.taxTotal / 2 : 0;
@@ -620,7 +614,7 @@ export const QuotationCreatePage: React.FC = () => {
 
 
   /** Settings → Lead workflow (or the extension): a new quotation needs an opportunity. */
-  const opportunityRule = Boolean(salesFlow.requireOpportunityForQuotation) && !isEdit;
+  const opportunityRule = Boolean(salesFlow.requireOpportunityForQuotation) && !isEdit && opportunitiesVisible;
   /**
    * salesFlow.clientQuotation (CRM 3.34.0): "Client account" lists only the clients the extension allows
    * (e.g. a completed Travel Requirement); choosing one asks what the extension needs first (e.g. who
@@ -636,6 +630,60 @@ export const QuotationCreatePage: React.FC = () => {
    */
   const clientNoOpportunity = Boolean(clientQuote && clientQuote.withoutOpportunity) && recipientType === 'client';
   const needsOpportunity = opportunityRule && !clientNoOpportunity;
+  // Leads a new quotation may use (GET /sales-flow/quotation-leads): open, of the workspace's request type,
+  // ready when the active extension says so. An older server without it: every lead, as before.
+  const [leadQuery, setLeadQuery] = useState('');
+  const [leadOptions, setLeadOptions] = useState<QuotationLeadOptions | null>(null);
+  const [leadOptionsFailed, setLeadOptionsFailed] = useState(false);
+  useEffect(() => {
+    if (!canWriteFinance) return undefined;
+    let alive = true;
+    const timer = window.setTimeout(
+      () => {
+        crmApi
+          .getQuotationLeads({ q: leadQuery.trim(), include: presetLeadId })
+          .then((res) => {
+            if (!alive) return;
+            if (res.data) setLeadOptions(res.data);
+            else setLeadOptionsFailed(true);
+          })
+          .catch(() => alive && setLeadOptionsFailed(true));
+      },
+      leadQuery.trim() ? 300 : 0
+    );
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [leadQuery, presetLeadId, canWriteFinance]);
+  const leadChoices: QuotationLeadChoice[] = useMemo(() => {
+    if (leadOptions) return leadOptions.leads;
+    if (!leadOptionsFailed) return [];
+    return leads.map((item) => ({
+      _id: String(item._id),
+      name: String(item.name || ''),
+      company: String(item.company || ''),
+      email: String(item.email || ''),
+      phone: String(item.phone || ''),
+      stage: String(item.stage || '')
+    }));
+  }, [leadOptions, leadOptionsFailed, leads]);
+  const chosenLead = leadChoices.find((item) => item._id === leadId) || null;
+  /** A new quotation straight from the lead (the server checks the lead then; not from an opportunity). */
+  const quotingFromLead = !isEdit && recipientType === 'lead' && !needsOpportunity && !opportunityId;
+  const presetLeadBlock =
+    quotingFromLead && presetLeadId && leadId === presetLeadId && leadOptions?.included && !leadOptions.included.allowed
+      ? leadOptions.included
+      : null;
+  const presetLeadBlockText = presetLeadBlock
+    ? presetLeadBlock.reason === 'notReady'
+      ? `This lead is not ready for a quotation${presetLeadBlock.reasons.length ? `: ${presetLeadBlock.reasons.join('; ')}` : ''}.`
+      : presetLeadBlock.message || 'This lead cannot get a new quotation.'
+    : '';
+  const fallbackLeadLabel = (id: string) => {
+    const known = leads.find((item) => String(item._id) === id);
+    return known ? String(known.company || known.name || 'Linked lead') : 'Linked lead';
+  };
   useEffect(() => {
     if (!clientQuoteActive) return undefined;
     let alive = true;
@@ -718,10 +766,13 @@ export const QuotationCreatePage: React.FC = () => {
             extra: { ...(data.lines?.[i]?.extra || {}) },
             sourceRef: data.lines?.[i]?.sourceRef || '',
             group: data.lines?.[i]?.group || '',
+            sac: data.lines?.[i]?.sac || '',
+            serviceType: data.lines?.[i]?.serviceType || '',
           },
         ])
       )
     );
+    setGstDoc({ placeOfSupply: data.placeOfSupply || '', tcsRuleKey: data.tcsRuleKey || '' });
     setSalesExtras({
       summary: data.summary || [],
       panels: data.panels || [],
@@ -888,6 +939,10 @@ export const QuotationCreatePage: React.FC = () => {
   const submit = async (asDraft: boolean) => {
     setError(null);
     const recipientId = recipientType === 'lead' ? leadId : clientId;
+    if (presetLeadBlock) {
+      setError(presetLeadBlockText);
+      return;
+    }
     if (needsOpportunity && !opportunityId) {
       setError('Choose the opportunity this quotation belongs to (create one from the lead first).');
       return;
@@ -999,6 +1054,8 @@ export const QuotationCreatePage: React.FC = () => {
                 unit: lineMeta[line.key].unit.trim() || undefined,
                 sourceRef: lineMeta[line.key].sourceRef || undefined,
                 group: lineMeta[line.key].group || undefined,
+                sac: lineMeta[line.key].sac || undefined,
+                serviceType: lineMeta[line.key].serviceType || undefined,
                 extra: Object.fromEntries(
                   Object.entries(lineMeta[line.key].extra).filter(([, v]) => String(v || '').trim())
                 ),
@@ -1010,6 +1067,9 @@ export const QuotationCreatePage: React.FC = () => {
         shippingCharge: terms.hideShipping ? 0 : shippingCharge,
         recipientNotes: recipientNotes.trim(),
         sections: cleanSections,
+        // GST suite (CRM 3.53.0): from the extension's prefill (or the quotation being edited).
+        ...(gstDoc.placeOfSupply !== undefined ? { placeOfSupply: gstDoc.placeOfSupply } : {}),
+        ...(gstDoc.tcsRuleKey !== undefined ? { tcsRuleKey: gstDoc.tcsRuleKey } : {}),
         ...(proformaEnabled
           ? {
               paymentType,
@@ -1317,14 +1377,61 @@ export const QuotationCreatePage: React.FC = () => {
                   onChange={(e) => onSelectLead(e.target.value)}
                 >
                   <option value="">{needsOpportunity ? 'From the opportunity' : 'Select lead…'}</option>
-                  {leadId && !leads.some((item) => item._id === leadId) ? <option value={leadId}>Linked lead</option> : null}
-                  {leads.map((item) => (
-                    <option key={item._id} value={item._id}>
-                      {item.company || item.name}
-                      {item.email ? ` · ${item.email}` : ''}
-                    </option>
-                  ))}
+                  {leadId && !leadChoices.some((item) => item._id === leadId) ? (
+                    <option value={leadId}>{presetLeadBlock ? presetLeadBlock.name || fallbackLeadLabel(leadId) : fallbackLeadLabel(leadId)}</option>
+                  ) : null}
+                  {leadChoices.map((item) => {
+                    const open = item.openQuotations || [];
+                    return (
+                      <option key={item._id} value={item._id}>
+                        {item.name && item.company && item.name !== item.company ? `${item.name} / ${item.company}` : item.company || item.name}
+                        {open.length ? ` · has ${open.map((quote) => `${quote.quotationNo} (${quote.status})`).join(', ')}` : ''}
+                      </option>
+                    );
+                  })}
                 </select>
+                {!needsOpportunity ? (
+                  <input
+                    type="search"
+                    className={`${financeFieldClass} mt-1.5`}
+                    placeholder="Search leads…"
+                    value={leadQuery}
+                    onChange={(e) => setLeadQuery(e.target.value)}
+                    aria-label="Search leads"
+                    data-testid="quotation-lead-search"
+                  />
+                ) : null}
+                {chosenLead && chosenLead.noEmail ? (
+                  <p className="m-0 mt-1.5 text-[11px] text-amber-700" data-testid="quotation-lead-no-email">
+                    No email on this lead: the quotation can't be emailed.
+                  </p>
+                ) : null}
+                {presetLeadBlock ? (
+                  <p className="m-0 mt-1.5 text-[11px] text-red-700" data-testid="quotation-lead-blocked">
+                    {presetLeadBlockText}{' '}
+                    <Link to={`/leads/${encodeURIComponent(presetLeadBlock._id)}`} className="font-semibold underline">
+                      Open lead
+                    </Link>
+                  </p>
+                ) : null}
+                {!needsOpportunity && leadOptions && leadOptions.notReady.length ? (
+                  <details className="mt-1.5 text-[11px] text-zinc-500" data-testid="quotation-lead-not-ready">
+                    <summary className="cursor-pointer select-none font-semibold">Not ready ({leadOptions.notReady.length})</summary>
+                    <ul className="m-0 mt-1 list-none p-0 space-y-1">
+                      {leadOptions.notReady.map((item) => (
+                        <li key={item._id} className="opacity-70">
+                          <span className="text-zinc-700">
+                            {item.name && item.company && item.name !== item.company ? `${item.name} / ${item.company}` : item.company || item.name}
+                          </span>
+                          {item.reasons.length ? <span>: {item.reasons.join('; ')}</span> : null}{' '}
+                          <Link to={`/leads/${encodeURIComponent(item._id)}`} className="font-semibold text-zinc-900 underline">
+                            Open lead
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
               </FormField>
             ) : (
               <FormField label="Client" required>
@@ -1366,7 +1473,7 @@ export const QuotationCreatePage: React.FC = () => {
               </FormField>
             )}
 
-            {needsOpportunity || clientNoOpportunity ? null : (
+            {needsOpportunity || clientNoOpportunity || !opportunitiesVisible ? null : (
             <FormField label="Opportunity">
               <select
                 className={financeFieldClass}
@@ -1886,7 +1993,7 @@ export const QuotationCreatePage: React.FC = () => {
             {!isEdit && (
               <button
                 type="button"
-                disabled={saving}
+                disabled={saving || Boolean(presetLeadBlock)}
                 onClick={() => submit(true)}
                 className="h-9 px-3 text-xs font-semibold rounded-lg border border-zinc-300 bg-white cursor-pointer disabled:opacity-50"
               >
@@ -1895,7 +2002,7 @@ export const QuotationCreatePage: React.FC = () => {
             )}
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || Boolean(presetLeadBlock)}
               className="h-9 px-3.5 text-xs font-semibold rounded-lg border border-zinc-950 bg-zinc-950 text-white cursor-pointer disabled:opacity-50"
             >
               {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Quotation'}

@@ -10,6 +10,7 @@ import type { EmployeeWorkReport } from '../../types/workReports';
 import { triggerFileDownload } from '../../utils/fileDownload';
 import { useNotifyMessage } from '@/components/notifications';
 import { formatClock, formatDay, formatHours, formatSpan, localIsoDate, plural } from '../../components/tasks/workReportFormat';
+import { DayChart, TaskBars } from '../../components/tasks/WorkReportVisuals';
 
 type Period = 'day' | 'month';
 
@@ -97,6 +98,7 @@ export const EmployeeWorkReportPage: React.FC = () => {
 
   const summary = report?.summary;
   const maxDayHours = Math.max(1, ...(report?.days || []).map((d) => d.hours));
+
   const atLatest = period === 'month' ? month >= today.slice(0, 7) : date >= today;
 
   return (
@@ -221,6 +223,13 @@ export const EmployeeWorkReportPage: React.FC = () => {
               </div>
             ))}
           </div>
+
+          {/* One graph: hours per day (monthly) or hours per task (daily). */}
+          {period === 'month' ? (
+            <DayChart report={report} today={today} onOpenDay={(d) => update({ period: 'day', date: d })} />
+          ) : (
+            <TaskBars report={report} title="Hours per task" limit={10} />
+          )}
 
           <section className="overflow-hidden rounded-xl border border-zinc-300 bg-white">
             <h2 className="m-0 border-b border-zinc-200 px-4 py-3 text-sm font-bold text-zinc-950">Tasks worked on</h2>

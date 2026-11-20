@@ -18,10 +18,13 @@ export interface ExistingClientLookup {
   personContactId?: string;
   email?: string;
   phone?: string;
+  /** CRM 3.57.1: person / family lead — only person / family clients of this person. */
+  personOnly?: boolean;
 }
 
 const lookupKey = (l: ExistingClientLookup) =>
   [
+    l.personOnly ? 'person' : 'any',
     String(l.company || '').trim().toLowerCase().replace(/\s+/g, ' '),
     String(l.personContactId || ''),
     String(l.email || '').trim().toLowerCase(),

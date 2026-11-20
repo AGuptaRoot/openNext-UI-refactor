@@ -22,6 +22,7 @@ import {
   LeadQualification,
   LeadCustomFieldDef,
   LeadImportPreviewResult,
+  LeadImportFieldsResult,
   LeadImportExecuteResult,
   LeadOcrExtractResult,
   LeadNote,
@@ -32,6 +33,7 @@ import {
   LeadPortalAccessState,
   LeadWorkflowFacts,
   OpportunityLeadOptions,
+  QuotationLeadOptions,
   OpportunityPrefill,
   OpportunityStartStage,
   QuotationPrefill,
@@ -41,7 +43,13 @@ import {
   SalesFlowSavedResult,
   SalesFlowSummaryItem,
 } from '../types/leads';
-import type { ActivityLocationReport, ExtensionReportDefinition, ExtensionReportSectionData } from '../types/reports';
+import type {
+  ActivityLocationReport,
+  ExtensionReportDefinition,
+  ExtensionReportSectionData,
+  LocationWiseQuery,
+  LocationWiseReport,
+} from '../types/reports';
 import type { CrmNotificationFeed } from '../types/notifications';
 import type { EmployeeWorkReport, WorkReportEmployees, WorkReportQuery } from '../types/workReports';
 import { parseCsvString } from '../utils/csvParser';
@@ -381,9 +389,14 @@ import type {
   SettingsEmailStatus,
   SettingsWorkspaceUser,
   GroqIntegrationStatus,
+  FcmIntegrationStatus,
   GoogleMapsIntegrationStatus,
   GoogleMapsClientKey,
 } from '../types/admin';
+import type { GstSaveResult, GstSeedResult, GstSettings, GstSettingsResponse, GstinCheck } from '../types/gst';
+import type { CashBookView, CashCategories, CashEntry, CashEntryInput, CashSummary, PreferredPaymentMethod } from '../types/cashbook';
+import type { BankImportResult, BankLinesResponse, BankRow, BankSuggestion, GatewayFeeSummary } from '../types/reconciliation';
+import type { GstAdvancesReport, GstCreditNotesReport, Gstr1Report, TcsRegister } from '../types/gstReports';
 import { STANDARD_STATE_SHIPPING_RATES, normalizeCustomFields } from '../types/admin';
 
 const PLUGIN_ID = 'openext-crm-suite';
@@ -1257,6 +1270,8 @@ function normalizeCrmSettings(raw?: Partial<CrmSettings> | null): CrmSettings {
       raw?.lead_statuses?.length ? raw.lead_statuses : DEFAULT_ADMIN_SETTINGS.lead_statuses
     ),
     lead_types: raw?.lead_types?.length ? raw.lead_types : DEFAULT_ADMIN_SETTINGS.lead_types,
+    // CRM 3.57.0: never saved → the defaults.
+    person_lead_types: Array.isArray(raw?.person_lead_types) ? raw.person_lead_types : ['Individual', 'Family'],
     lead_priorities: raw?.lead_priorities?.length
       ? raw.lead_priorities
       : DEFAULT_ADMIN_SETTINGS.lead_priorities,
@@ -3599,7 +3614,7 @@ function computeLocalDataQuality(params: DataQualityQuery = {}): ApiResponse<Dat
       { key: 'phone', label: 'Company mobile number', weight: rules.clientWeights.phone ?? 15, complete: present(c.phone || c.mobile) },
       { key: 'website', label: 'Website', weight: rules.clientWeights.website ?? 10, complete: present(c.website) },
       { key: 'address', label: 'Complete billing address', weight: rules.clientWeights.address ?? 15, complete: addressComplete },
-      { key: 'taxId', label: 'Tax ID', weight: rules.clientWeights.taxId ?? 10, complete: present(c.taxId) },
+      { key: 'taxId', label: 'Client code', weight: rules.clientWeights.taxId ?? 10, complete: present(c.taxId) },
       { key: 'contact', label: 'At least one contact', weight: rules.clientWeights.contact ?? 10, complete: !!c.primaryContact || (c.contactCount || 0) > 0 },
       { key: 'duplicates', label: 'No possible duplicate', weight: rules.clientWeights.duplicates ?? 10, complete: matches.length === 0 },
     ];
@@ -3907,6 +3922,10 @@ export const crmApi = {
     if (params.tag) query.set('tag', params.tag);
     if (params.matchScore) query.set('matchScore', params.matchScore);
     if (params.needsSampleRequest) query.set('needsSampleRequest', params.needsSampleRequest);
+    for (const key of ['assignedTo', 'state', 'district', 'city', 'stateNotSet', 'districtNotSet', 'cityNotSet', 'locationNotSet'] as const) {
+      const value = params[key];
+      if (value) query.set(key, value);
+    }
     if (params.search) query.set('search', params.search);
     if (params.sort) query.set('sort', params.sort);
     if (params.order) query.set('order', params.order);
@@ -4121,6 +4140,15 @@ export const crmApi = {
     if (include) params.set('include', include);
     const qs = params.toString();
     return request<OpportunityLeadOptions>(`/lead-workflow/opportunity-leads${qs ? `?${qs}` : ''}`, { method: 'GET' });
+  },
+
+  /** Leads offered on the Create Quotation page (open, right request type, ready when the extension says so). */
+  getQuotationLeads: async ({ q = '', include = '' }: { q?: string; include?: string } = {}): Promise<ApiResponse<QuotationLeadOptions>> => {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (include) params.set('include', include);
+    const qs = params.toString();
+    return request<QuotationLeadOptions>(`/sales-flow/quotation-leads${qs ? `?${qs}` : ''}`, { method: 'GET' });
   },
 
   /** Runs a record action of the active extension (json/actions.json). */
@@ -4570,6 +4598,15 @@ export const crmApi = {
     }
   },
 
+  /** CRM 3.54.0: extension lead fields a CSV may fill (empty when the active extension declares none). */
+  getLeadImportFields: async (): Promise<ApiResponse<LeadImportFieldsResult>> => {
+    try {
+      return await request<LeadImportFieldsResult>('/leads/import/fields');
+    } catch {
+      return { success: true, data: { extensionId: '', extensionName: '', maxRows: 200, fields: [] } } as ApiResponse<LeadImportFieldsResult>;
+    }
+  },
+
   previewLeadImport: async (body: {
     rows?: Array<Record<string, unknown>>;
     options?: Record<string, unknown>;
@@ -4651,6 +4688,7 @@ export const crmApi = {
             requestType,
             value: Number(pickImportField(row, [...LEAD_IMPORT_ALIASES.value]) || 0) || 0,
             city: pickImportField(row, [...LEAD_IMPORT_ALIASES.city]),
+            district: pickImportField(row, [...LEAD_IMPORT_ALIASES.district]),
             state: pickImportField(row, [...LEAD_IMPORT_ALIASES.state]),
             country: pickImportField(row, [...LEAD_IMPORT_ALIASES.country]),
             pan: pickImportField(row, [...LEAD_IMPORT_ALIASES.pan]),
@@ -5033,6 +5071,16 @@ export const crmApi = {
     }
   },
 
+  /** CRM 3.57.0: lead types for a person / family (no company). */
+  getPersonLeadTypes: async (): Promise<ApiResponse<string[]>> => {
+    try {
+      return await request<string[]>('/leads/person-types', { method: 'GET' });
+    } catch (error) {
+      rethrowUnlessMockFallback(error);
+      return { success: true, data: ['Individual', 'Family'] };
+    }
+  },
+
   addLeadType: async (name: string): Promise<ApiResponse<string[]>> => {
     try {
       return await request<string[]>('/leads/types', {
@@ -5089,6 +5137,7 @@ export const crmApi = {
     if (params.search?.trim()) query.set('search', params.search.trim());
     if (params.leadId?.trim()) query.set('leadId', params.leadId.trim());
     if (params.clientId?.trim()) query.set('clientId', params.clientId.trim());
+    if (params.sameCompanyAsClient?.trim()) query.set('sameCompanyAsClient', params.sameCompanyAsClient.trim());
     const qs = query.toString();
     try {
       const res = await request<PersonContact[]>(qs ? `/contacts?${qs}` : '/contacts', {
@@ -5818,6 +5867,16 @@ export const crmApi = {
     }
   },
 
+  /** Location Wise Leads & Clients — counted on the server (State → District → City). */
+  getLocationWiseReport: async (params: LocationWiseQuery = {}): Promise<ApiResponse<LocationWiseReport>> => {
+    const qs = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && String(value).trim() !== '') qs.set(key, String(value));
+    });
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request<LocationWiseReport>(`/reports/location-wise${suffix}`, { method: 'GET' });
+  },
+
   getActivityLocationReport: async (
     params: Record<string, string | number | undefined> = {}
   ): Promise<ApiResponse<ActivityLocationReport>> => {
@@ -6093,6 +6152,11 @@ export const crmApi = {
     if (params.category) query.set('category', params.category);
     if (params.tag) query.set('tag', params.tag);
     if (params.status) query.set('status', params.status);
+    if (params.source) query.set('source', params.source);
+    for (const key of ['assignedTo', 'state', 'district', 'city', 'stateNotSet', 'districtNotSet', 'cityNotSet', 'locationNotSet'] as const) {
+      const value = params[key];
+      if (value) query.set(key, value);
+    }
     const qs = query.toString();
     try {
       return await request<ClientItem[]>(qs ? `/clients?${qs}` : '/clients', { method: 'GET' });
@@ -6451,10 +6515,13 @@ export const crmApi = {
       const clients = getLocalClients();
       const idx = clients.findIndex((c) => c._id === id);
       if (idx < 0) throw new ApiError('Client not found', 404);
-      const { primaryContact: _pc, ...rest } = body;
+      const { primaryContact: _pc, gst: gstInput, ...rest } = body;
       const updated: ClientItem = {
         ...clients[idx],
         ...rest,
+        ...(gstInput
+          ? { gst: { gstin: gstInput.gstin, pan: '', isSEZ: gstInput.isSEZ === true, isDeemedExport: gstInput.isDeemedExport === true } }
+          : {}),
         city: body.billingAddress?.city ?? clients[idx].city,
         country: body.billingAddress?.country ?? clients[idx].country,
         updatedAt: new Date().toISOString(),
@@ -6557,6 +6624,7 @@ export const crmApi = {
     personContactId?: string;
     email?: string;
     phone?: string;
+    personOnly?: boolean;
   }): Promise<ApiResponse<ClientCompanyMatch[]>> =>
     request<ClientCompanyMatch[]>('/clients/company-match', {
       method: 'POST',
@@ -6565,6 +6633,7 @@ export const crmApi = {
         personContactId: lookup.personContactId || undefined,
         email: String(lookup.email || '').trim() || undefined,
         phone: String(lookup.phone || '').trim() || undefined,
+        personOnly: lookup.personOnly === true ? true : undefined,
       }),
     }),
 
@@ -8912,12 +8981,13 @@ export const crmApi = {
     }
   },
 
-  getNextInvoiceNumber: async (): Promise<ApiResponse<{ invoiceNo: string }>> => {
+  getNextInvoiceNumber: async (): Promise<ApiResponse<{ invoiceNo: string; gstSeries?: boolean }>> => {
     try {
-      const response = await request<{ invoiceNo?: string; nextNumber?: string }>('/invoices/next-number', { method: 'GET' });
+      const response = await request<{ invoiceNo?: string; nextNumber?: string; gstSeries?: boolean }>('/invoices/next-number', { method: 'GET' });
       return {
         ...response,
-        data: { invoiceNo: response.data.invoiceNo || response.data.nextNumber || '' },
+        // GST suite (CRM 3.53.0): gstSeries = the CRM gives the GST number on save (shown read-only).
+        data: { invoiceNo: response.data.invoiceNo || response.data.nextNumber || '', gstSeries: response.data.gstSeries === true },
       };
     } catch {
       const count = getLocalFinanceList(INVOICES_STORE_KEY, INITIAL_FINANCE_INVOICES).length;
@@ -9953,7 +10023,9 @@ export const crmApi = {
     try {
       const response = await request<PaymentItem>(`/payments/${encodeURIComponent(id)}`, { method: 'GET' });
       return { ...response, data: normalizePaymentRecord(response.data) };
-    } catch {
+    } catch (error) {
+      // 3.54.0: a real server error is shown as it is (the local sample data is for mock mode only).
+      rethrowUnlessMockFallback(error);
       const item = getLocalFinanceList(PAYMENTS_STORE_KEY, INITIAL_FINANCE_PAYMENTS).find((entry) => entry._id === id);
       if (!item) throw new ApiError('Payment not found', 404);
       return { success: true, data: normalizePaymentRecord(item) };
@@ -16743,6 +16815,113 @@ export const crmApi = {
     }
   },
 
+  // GST suite (CRM 3.53.0): bank statement matching and Razorpay fees.
+  importBankStatement: async (body: { account: string; fileName: string; rows: BankRow[] }): Promise<ApiResponse<BankImportResult>> =>
+    request<BankImportResult>('/reconciliation/statements', { method: 'POST', body: JSON.stringify(body) }),
+  getBankLines: async (params: { status?: string; account?: string } = {}): Promise<ApiResponse<BankLinesResponse>> => {
+    const q = new URLSearchParams();
+    if (params.status) q.set('status', params.status);
+    if (params.account) q.set('account', params.account);
+    return request<BankLinesResponse>(`/reconciliation/lines?${q.toString()}`, { method: 'GET' });
+  },
+  pickBankEntries: async (statementId: string, lineId: string, search: string): Promise<ApiResponse<BankSuggestion[]>> => {
+    const q = new URLSearchParams({ statementId, lineId, search });
+    return request<BankSuggestion[]>(`/reconciliation/pick?${q.toString()}`, { method: 'GET' });
+  },
+  matchBankLine: async (statementId: string, lineId: string, entryKey: string): Promise<ApiResponse<unknown>> =>
+    request<unknown>('/reconciliation/match', { method: 'POST', body: JSON.stringify({ statementId, lineId, entryKey }) }),
+  unmatchBankLine: async (statementId: string, lineId: string): Promise<ApiResponse<unknown>> =>
+    request<unknown>('/reconciliation/unmatch', { method: 'POST', body: JSON.stringify({ statementId, lineId }) }),
+  ignoreBankLine: async (statementId: string, lineId: string): Promise<ApiResponse<unknown>> =>
+    request<unknown>('/reconciliation/ignore', { method: 'POST', body: JSON.stringify({ statementId, lineId }) }),
+  getGatewayFees: async (month: string): Promise<ApiResponse<GatewayFeeSummary>> =>
+    request<GatewayFeeSummary>(`/reconciliation/gateway-fees?month=${encodeURIComponent(month)}`, { method: 'GET' }),
+  refreshGatewayFees: async (): Promise<ApiResponse<{ checked: number; feesFilled: number; settlementsFilled: number }>> =>
+    request<{ checked: number; feesFilled: number; settlementsFilled: number }>('/reconciliation/gateway-fees/refresh', { method: 'POST', body: '{}' }),
+
+  // GST suite (Step 5): GSTR-1, advances (11A / 11B), credit notes and the TCS register. Read-only.
+  getGstr1Report: async (params: { fy: string; period: string }): Promise<ApiResponse<Gstr1Report>> =>
+    request<Gstr1Report>(`/gst/reports/gstr1?${new URLSearchParams(params).toString()}`, { method: 'GET' }),
+  getGstAdvances: async (params: { from: string; to: string }): Promise<ApiResponse<GstAdvancesReport>> =>
+    request<GstAdvancesReport>(`/gst/reports/advances?${new URLSearchParams(params).toString()}`, { method: 'GET' }),
+  getGstCreditNotes: async (params: { from: string; to: string }): Promise<ApiResponse<GstCreditNotesReport>> =>
+    request<GstCreditNotesReport>(`/gst/reports/credit-notes?${new URLSearchParams(params).toString()}`, { method: 'GET' }),
+  getTcsRegister: async (params: { fy: string; quarter?: string; rule?: string }): Promise<ApiResponse<TcsRegister>> => {
+    const q = new URLSearchParams({ fy: params.fy });
+    if (params.quarter) q.set('quarter', params.quarter);
+    if (params.rule) q.set('rule', params.rule);
+    return request<TcsRegister>(`/gst/reports/tcs?${q.toString()}`, { method: 'GET' });
+  },
+  /**
+   * Downloads a GST report file (portal JSON or CSV). These endpoints send the file itself, not the
+   * `{ success, data }` envelope; an error comes back as JSON with a message.
+   */
+  downloadGstReport: async (
+    kind: 'gstr1-json' | 'gstr1-csv' | 'credit-notes' | 'tcs',
+    params: Record<string, string>
+  ): Promise<string> => {
+    const q = new URLSearchParams(params);
+    const path = kind === 'gstr1-json' || kind === 'gstr1-csv' ? '/gst/reports/gstr1/export'
+      : kind === 'credit-notes' ? '/gst/reports/credit-notes' : '/gst/reports/tcs';
+    q.set('format', kind === 'gstr1-json' ? 'json' : 'csv');
+    const response = await fetch(`${API_BASE}${path}?${q.toString()}`, { credentials: 'include' });
+    if (!response.ok) {
+      let message = `Download failed (${response.status})`;
+      try {
+        const payload = (await response.json()) as { error?: string };
+        if (payload?.error) message = payload.error;
+      } catch {
+        // keep the default message
+      }
+      throw new ApiError(message, response.status);
+    }
+    const blob = await response.blob();
+    const isJson = kind === 'gstr1-json';
+    const filename =
+      response.headers.get('content-disposition')?.match(/filename="?([^"]+)"?/)?.[1] || (isJson ? 'GSTR1.json' : 'GST_report.csv');
+    triggerFileDownload({ filename, content: blob, format: isJson ? 'json' : 'csv' });
+    return filename;
+  },
+
+  // GST suite (CRM 3.53.0): cash book, Record payment and the preferred payment method.
+  getCashBook: async (params: { from?: string; to?: string; search?: string } = {}): Promise<ApiResponse<CashBookView>> => {
+    const q = new URLSearchParams();
+    if (params.from) q.set('from', params.from);
+    if (params.to) q.set('to', params.to);
+    if (params.search) q.set('search', params.search);
+    const qs = q.toString();
+    return request<CashBookView>(`/cashbook${qs ? `?${qs}` : ''}`, { method: 'GET' });
+  },
+  getCashSummary: async (): Promise<ApiResponse<CashSummary>> => request<CashSummary>('/cashbook/summary', { method: 'GET' }),
+  getCashCategories: async (): Promise<ApiResponse<CashCategories>> => request<CashCategories>('/cashbook/categories', { method: 'GET' }),
+  addCashEntry: async (body: CashEntryInput): Promise<ApiResponse<CashEntry>> =>
+    request<CashEntry>('/cashbook/entry', { method: 'POST', body: JSON.stringify(body) }),
+  updateCashEntry: async (id: string, body: Partial<CashEntryInput>): Promise<ApiResponse<CashEntry>> =>
+    request<CashEntry>(`/cashbook/entry/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteCashEntry: async (id: string): Promise<ApiResponse<{ id: string; deleted: boolean }>> =>
+    request<{ id: string; deleted: boolean }>(`/cashbook/entry/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  cashContra: async (body: { direction: 'deposit' | 'withdraw'; amount: number; date: string; note?: string }): Promise<ApiResponse<CashEntry>> =>
+    request<CashEntry>('/cashbook/contra', { method: 'POST', body: JSON.stringify(body) }),
+  setInvoicePaymentPreference: async (id: string, preferredPaymentMethod: PreferredPaymentMethod): Promise<ApiResponse<InvoiceItem>> =>
+    request<InvoiceItem>(`/invoices/${encodeURIComponent(id)}/payment-preference`, { method: 'PUT', body: JSON.stringify({ preferredPaymentMethod }) }),
+
+  // GST suite (CRM 3.53.0): Settings → GST and the GSTIN check used by the client page.
+  getGstSettings: async (): Promise<ApiResponse<GstSettingsResponse>> => {
+    return request<GstSettingsResponse>('/gst/settings', { method: 'GET' });
+  },
+
+  saveGstSettings: async (body: Partial<GstSettings>): Promise<ApiResponse<GstSaveResult>> => {
+    return request<GstSaveResult>('/gst/settings', { method: 'PUT', body: JSON.stringify(body) });
+  },
+
+  seedGstServices: async (): Promise<ApiResponse<GstSeedResult>> => {
+    return request<GstSeedResult>('/gst/settings/seed-services', { method: 'POST', body: '{}' });
+  },
+
+  validateGstin: async (gstin: string): Promise<ApiResponse<GstinCheck>> => {
+    return request<GstinCheck>('/gst/validate-gstin', { method: 'POST', body: JSON.stringify({ gstin }) });
+  },
+
   getGroqIntegration: async (): Promise<ApiResponse<GroqIntegrationStatus>> => {
     return request<GroqIntegrationStatus>('/settings/integrations/groq', { method: 'GET' });
   },
@@ -16756,6 +16935,19 @@ export const crmApi = {
       method: 'PUT',
       body: JSON.stringify(body),
     });
+  },
+
+  /** CRM 3.59.0: push notifications (Firebase Cloud Messaging). */
+  getFcmIntegration: async (): Promise<ApiResponse<FcmIntegrationStatus>> => {
+    return request<FcmIntegrationStatus>('/settings/integrations/fcm', { method: 'GET' });
+  },
+
+  updateFcmIntegration: async (body: { serviceAccount?: string; clearKey?: boolean }): Promise<ApiResponse<FcmIntegrationStatus>> => {
+    return request<FcmIntegrationStatus>('/settings/integrations/fcm', { method: 'PUT', body: JSON.stringify(body) });
+  },
+
+  sendTestPush: async (): Promise<ApiResponse<{ keyOk: boolean; devices: number; sent?: number; message: string }>> => {
+    return request<{ keyOk: boolean; devices: number; sent?: number; message: string }>('/devices/test', { method: 'POST', body: '{}' });
   },
 
   getGoogleMapsIntegration: async (): Promise<ApiResponse<GoogleMapsIntegrationStatus>> => {

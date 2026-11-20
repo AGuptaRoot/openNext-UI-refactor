@@ -28,6 +28,7 @@ import { QuotationInvoiceCreate } from './QuotationInvoiceCreate';
 import { calculateFinanceTotals, clampDiscountValue } from '../../utils/financeTotals';
 import {
   consumeFinancePdfScanDraft,
+  sameScannedName,
   linesFromPdfExtract,
   normalizeTaxCalculationValue,
 } from '../../utils/financePdfScanDraft';
@@ -102,6 +103,8 @@ const StandardInvoiceCreatePage: React.FC = () => {
   const settingsCurrency = useDefaultCurrency();
   const currencyLockedRef = useRef(false);
   const [invoiceNo, setInvoiceNo] = useState('');
+  /** GST suite (CRM 3.53.0): the number comes from the GST series on save; the box is read-only. */
+  const [gstNumbering, setGstNumbering] = useState(false);
   const [issueDate, setIssueDate] = useState(localToday());
   const [dueDate, setDueDate] = useState(addDays(localToday(), 30));
   const [currency, setCurrency] = useState(settingsCurrency);
@@ -176,7 +179,7 @@ const StandardInvoiceCreatePage: React.FC = () => {
 
   useEffect(() => {
     if (!fromScan) {
-      crmApi.getNextInvoiceNumber().then((result) => setInvoiceNo(result.data.invoiceNo)).catch(() => setInvoiceNo(''));
+      crmApi.getNextInvoiceNumber().then((result) => { setInvoiceNo(result.data.invoiceNo); setGstNumbering(result.data.gstSeries === true); }).catch(() => setInvoiceNo(''));
     }
     crmApi.listQuotations({ limit: 200, status: 'Converted' }).then((r) => setQuotations(r.data || [])).catch(() => setQuotations([]));
     if (showSalesOrders) {
@@ -268,7 +271,7 @@ const StandardInvoiceCreatePage: React.FC = () => {
     if (!extracted) {
       setScanNotice('No scanned PDF data found. You can fill the form manually.');
       scanAppliedRef.current = true;
-      crmApi.getNextInvoiceNumber().then((result) => setInvoiceNo(result.data.invoiceNo)).catch(() => setInvoiceNo(''));
+      crmApi.getNextInvoiceNumber().then((result) => { setInvoiceNo(result.data.invoiceNo); setGstNumbering(result.data.gstSeries === true); }).catch(() => setInvoiceNo(''));
       return;
     }
     scanAppliedRef.current = true;
@@ -277,10 +280,10 @@ const StandardInvoiceCreatePage: React.FC = () => {
     );
     scanClientNameRef.current = (extracted.clientName || '').trim();
 
-    if (extracted.documentNumber?.trim()) setInvoiceNo(extracted.documentNumber.trim());
-    else {
-      crmApi.getNextInvoiceNumber().then((result) => setInvoiceNo(result.data.invoiceNo)).catch(() => setInvoiceNo(''));
-    }
+    // CRM 3.58.0: the PDF's number is another party's number — the invoice always gets this CRM's next
+    // number (GST series stay in order); the PDF number is kept in the notes as the reference.
+    crmApi.getNextInvoiceNumber().then((result) => { setInvoiceNo(result.data.invoiceNo); setGstNumbering(result.data.gstSeries === true); }).catch(() => setInvoiceNo(''));
+    const scannedRef = extracted.documentNumber?.trim() ? `Reference no. (scanned PDF): ${extracted.documentNumber.trim()}` : '';
     if (extracted.issueDate) setIssueDate(extracted.issueDate);
     if (extracted.dueDate) setDueDate(extracted.dueDate);
     currencyLockedRef.current = true;
@@ -290,7 +293,8 @@ const StandardInvoiceCreatePage: React.FC = () => {
     if (extracted.paymentDetails?.trim()) setPaymentDetails(extracted.paymentDetails.trim());
     if (extracted.billingAddress?.trim()) setBillingAddress(extracted.billingAddress.trim());
     if (extracted.shippingAddress?.trim()) setShippingAddress(extracted.shippingAddress.trim());
-    if (extracted.notes?.trim()) setNotes(extracted.notes.trim());
+    const scannedNotes = [scannedRef, extracted.notes?.trim() || ''].filter(Boolean).join('\n');
+    if (scannedNotes) setNotes(scannedNotes);
     setLines(linesFromPdfExtract(extracted, catalog));
 
     setScanNotice(
@@ -300,18 +304,10 @@ const StandardInvoiceCreatePage: React.FC = () => {
 
   useEffect(() => {
     if (!fromScan || !scanClientNameRef.current || clientId || !clients.length) return;
-    const needle = scanClientNameRef.current.toLowerCase();
-    const matched = clients.find((c) => {
-      const name = String((c as { name?: string }).name || '').trim().toLowerCase();
-      const company = String((c as { company?: string }).company || '').trim().toLowerCase();
-      return (
-        name === needle ||
-        company === needle ||
-        (name && (name.includes(needle) || needle.includes(name))) ||
-        (company && (company.includes(needle) || needle.includes(company)))
-      );
-    });
-    if (matched) setClientId(matched._id);
+    // CRM 3.58.0: picked only on the exact same name; otherwise the user chooses.
+    const scanned = scanClientNameRef.current;
+    const matched = clients.filter((c) => sameScannedName(scanned, (c as { name?: string }).name, (c as { company?: string }).company));
+    if (matched.length === 1) setClientId(matched[0]._id);
   }, [fromScan, clients, clientId]);
 
   useEffect(() => {
@@ -682,7 +678,14 @@ const StandardInvoiceCreatePage: React.FC = () => {
         <FormSection title="Invoice & client details">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <FormField label="Invoice number" required>
-              <input className={financeFieldClass} value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} />
+              <input
+                className={financeFieldClass}
+                value={invoiceNo}
+                readOnly={gstNumbering}
+                title={gstNumbering ? 'GST tax invoices are numbered by the CRM when saved' : undefined}
+                onChange={(e) => { if (!gstNumbering) setInvoiceNo(e.target.value); }}
+              />
+              {gstNumbering ? <p className="m-0 mt-1 text-[11px] text-zinc-500">GST series: the CRM gives the next number when you save.</p> : null}
             </FormField>
             <FormField label="Issue date" required>
               <input

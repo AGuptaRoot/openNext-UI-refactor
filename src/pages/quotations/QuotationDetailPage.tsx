@@ -41,6 +41,7 @@ import type { InvoiceItem } from '../../types/invoices';
 import { formatDocumentDate } from '../../utils/dateFormat';
 import { calculateFinanceTotals } from '../../utils/financeTotals';
 import { buildFullQuotationPortalLink } from '../../utils/portalLinks';
+import { QuotationLeadPortal } from '../../components/quotations/QuotationLeadPortal';
 import { loadRazorpayCheckoutScript } from '../../utils/razorpayCheckout';
 import { computeQuotationPayable } from '../../utils/quotationPayment';
 import { getRuntimeDefaultCurrency } from '../../utils/currency';
@@ -820,6 +821,11 @@ export const QuotationDetailPage: React.FC = () => {
               <LinkIcon sx={{ fontSize: 15 }} /> Portal token
             </button>
           )}
+          {/* CRM 3.56.0: a lead's sent quotation → give the lead a portal login (username + password emailed). */}
+          {canWriteQuotes && ['Sent', 'Accepted'].includes(String(quote.status || '')) && !quote.clientId && (() => {
+            const leadRef = quote.leadId && typeof quote.leadId === 'object' ? String((quote.leadId as { _id?: string })._id || '') : String(quote.leadId || '');
+            return leadRef ? <QuotationLeadPortal leadId={leadRef} canWrite={canWriteQuotes} /> : null;
+          })()}
           {canAccept && (
             <button
               type="button"

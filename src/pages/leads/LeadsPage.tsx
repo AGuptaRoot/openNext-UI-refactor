@@ -8,6 +8,15 @@ import PhotoCameraOutlinedIcon from '@mui/icons-material/PhotoCameraOutlined';
 import { useAuth } from '../../context/AuthContext';
 import { useDialog } from '../../context/DialogContext';
 import { crmApi } from '../../services/api';
+import {
+  type LocationFilter,
+  readLocationFilter,
+  writeLocationFilter,
+  sameLocationFilter,
+  hasLocationFilter,
+  locationFilterLabel,
+} from '../../utils/locationFilter';
+import { RemovableFilterChip } from '../../components/common/RemovableFilterChip';
 import { canAssignToOtherUsers, canChangeLeadStage } from '../../utils/permissions';
 import {
   LeadItem,
@@ -104,6 +113,9 @@ export const LeadsPage: React.FC = () => {
   );
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '');
   const [selectedPreset, setSelectedPreset] = useState('');
+  // Location Wise report drill-down: ?state= &district= &city= (+ *NotSet) and ?assignedTo=
+  const [locationFilter, setLocationFilter] = useState<LocationFilter>(() => readLocationFilter(searchParams));
+  const [filterAssignedTo, setFilterAssignedTo] = useState(() => searchParams.get('assignedTo') || '');
 
   useEffect(() => {
     const nextStage = searchParams.get('stage') || '';
@@ -118,6 +130,10 @@ export const LeadsPage: React.FC = () => {
     setFilterMatchScore((prev) => (prev === nextMatch ? prev : nextMatch));
     setFilterNeedsSample((prev) => (prev === nextNeedsSample ? prev : nextNeedsSample));
     setSearchQuery((prev) => (prev === nextQ ? prev : nextQ));
+    const nextLocation = readLocationFilter(searchParams);
+    setLocationFilter((prev) => (sameLocationFilter(prev, nextLocation) ? prev : nextLocation));
+    const nextOwner = searchParams.get('assignedTo') || '';
+    setFilterAssignedTo((prev) => (prev === nextOwner ? prev : nextOwner));
   }, [searchParams]);
 
   useEffect(() => {
@@ -128,6 +144,8 @@ export const LeadsPage: React.FC = () => {
     if (filterMatchScore) params.set('matchScore', filterMatchScore);
     if (filterNeedsSample) params.set('needsSampleRequest', filterNeedsSample);
     if (searchQuery) params.set('q', searchQuery);
+    writeLocationFilter(params, locationFilter);
+    if (filterAssignedTo) params.set('assignedTo', filterAssignedTo);
     setSearchParams(params, { replace: true });
   }, [
     filterStage,
@@ -136,6 +154,8 @@ export const LeadsPage: React.FC = () => {
     filterMatchScore,
     filterNeedsSample,
     searchQuery,
+    locationFilter,
+    filterAssignedTo,
     setSearchParams,
   ]);
 
@@ -264,6 +284,8 @@ export const LeadsPage: React.FC = () => {
         source: filterSource || undefined,
         matchScore: filterMatchScore || undefined,
         needsSampleRequest: filterNeedsSample || undefined,
+        ...locationFilter,
+        assignedTo: filterAssignedTo || undefined,
         search: debouncedSearch.trim() || undefined,
         ...(currentSortField === 'createdAt'
           ? { sort: 'createdAt', order: currentSortAsc ? ('asc' as const) : ('desc' as const) }
@@ -331,6 +353,8 @@ export const LeadsPage: React.FC = () => {
     filterSource,
     filterMatchScore,
     filterNeedsSample,
+    locationFilter,
+    filterAssignedTo,
     debouncedSearch,
     currentSortField,
     currentSortAsc,
@@ -398,6 +422,8 @@ export const LeadsPage: React.FC = () => {
     setFilterNeedsSample('');
     setSearchQuery('');
     setSelectedPreset('');
+    setLocationFilter({});
+    setFilterAssignedTo('');
     setPage(1);
   };
 
@@ -1003,6 +1029,31 @@ export const LeadsPage: React.FC = () => {
         </div>
       </div>
       )}
+
+      {currentView !== 'activity' && (hasLocationFilter(locationFilter) || filterAssignedTo) ? (
+        <div className="flex flex-wrap items-center gap-2" data-tour="leads-drilldown-chips">
+          {hasLocationFilter(locationFilter) ? (
+            <RemovableFilterChip
+              label={locationFilterLabel(locationFilter)}
+              onRemove={() => {
+                setLocationFilter({});
+                setPage(1);
+              }}
+            />
+          ) : null}
+          {filterAssignedTo ? (
+            <RemovableFilterChip
+              label={`Sales person: ${
+                assignableUsers.find((u) => [u.id, u._id, u.userId].includes(filterAssignedTo))?.name || filterAssignedTo
+              }`}
+              onRemove={() => {
+                setFilterAssignedTo('');
+                setPage(1);
+              }}
+            />
+          ) : null}
+        </div>
+      ) : null}
 
       {/* 4. Main View Content */}
       {currentView === 'activity' ? (

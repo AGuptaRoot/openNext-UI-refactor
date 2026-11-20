@@ -45,7 +45,10 @@ export const QuotationsPage: React.FC = () => {
   const canWriteQuotes =
     hasAnyPermission('crm.quotes.write', 'crm.finance.write') && !isClient;
   // The active extension can leave quotation templates out (salesFlow.hideQuotationTemplates).
-  const hideTemplates = Boolean(useSalesFlowConfig().hideQuotationTemplates);
+  const salesFlowRules = useSalesFlowConfig();
+  const hideTemplates = Boolean(salesFlowRules.hideQuotationTemplates);
+  // CRM 3.58.0: no scan when the extension gives the quotation lines (salesFlow.lockQuotationLines).
+  const hideScan = Boolean(salesFlowRules.lockQuotationLines);
   const [items, setItems] = useState<QuotationItem[]>([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState(() => searchParams.get('status') || '');
@@ -258,7 +261,7 @@ export const QuotationsPage: React.FC = () => {
               <FolderOpenIcon sx={{ fontSize: 15 }} /> Templates
             </button>
           )}
-          {canWriteQuotes && (
+          {canWriteQuotes && !hideScan && (
             <button
               type="button"
               data-tour="quotations-scan-pdf-btn"

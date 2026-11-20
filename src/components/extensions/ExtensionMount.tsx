@@ -92,6 +92,13 @@ export interface ExtensionMountContext {
    * the values; nothing is saved by the form.
    */
   fieldsForm?: (element: HTMLElement, options: FieldsFormOptions) => FieldsFormHandle;
+  /**
+   * CRM 3.58.0: file helpers. pdfToImages turns the first pages of a PDF (max 5) into JPEG data URLs in
+   * the browser (for sdk.ai.readImage({ images })). Nothing is uploaded or kept.
+   */
+  files: {
+    pdfToImages: (file: File, options?: { maxPages?: number }) => Promise<{ images: string[]; pageCount: number }>;
+  };
   /** The page URL's query parameters (e.g. { id } on an extension page). */
   query: Record<string, string>;
   /** Called when the query parameters change (e.g. after ctx.navigate to the same page). Returns an unsubscribe function. */
@@ -438,6 +445,15 @@ export const ExtensionMount: React.FC<ExtensionMountProps> = ({
           window.dispatchEvent(new CustomEvent('crm-record-changed', { detail: { type: rec.type, id: rec.id } }));
         },
         assetUrl: getAssetUrl,
+        files: {
+          pdfToImages: async (file: File, options?: { maxPages?: number }) => {
+            if (!(file instanceof Blob)) throw new Error('pdfToImages: a PDF file is required');
+            const { pdfFileToImageDataUrls } = await import('../../utils/pdfToImages');
+            const maxPages = Math.max(1, Math.min(5, Number(options?.maxPages) || 5));
+            const { imageDataUrls, pageCount } = await pdfFileToImageDataUrls(file as File, { maxPages, scale: 2, quality: 0.8 });
+            return { images: imageDataUrls, pageCount };
+          },
+        },
         libs: {
           React,
           ReactDOMClient,

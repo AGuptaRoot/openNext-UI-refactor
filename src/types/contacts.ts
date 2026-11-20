@@ -59,6 +59,8 @@ export interface PersonContactQueryParams {
   leadId?: string;
   /** When set, only contacts related to this client (via converted leads) are returned. */
   clientId?: string;
+  /** CRM 3.56.0: contacts with this client's company name that are not on this client yet. */
+  sameCompanyAsClient?: string;
 }
 
 export interface PersonContactPaginationMeta {

@@ -44,11 +44,13 @@ import { AgeingReportTab } from '../../components/reports/tabs/AgeingReportTab';
 import { RecurringInvoicesReportTab } from '../../components/reports/tabs/RecurringInvoicesReportTab';
 import { PaymentReconciliationReportTab } from '../../components/reports/tabs/PaymentReconciliationReportTab';
 import { ActivityLocationReportTab } from '../../components/reports/tabs/ActivityLocationReportTab';
+import { LocationWiseReportTab } from '../../components/reports/tabs/LocationWiseReportTab';
 import { ExtensionReportsDashboard } from '../../components/reports/ExtensionReportsDashboard';
 
 export const ALL_REPORT_TABS: ReportTabDefinition[] = [
   { id: 'sales', label: 'Sales Pipeline', exportKey: 'sales', requiredPerm: null },
   { id: 'conversion', label: 'Lead Conversion', exportKey: 'lead-conversion', requiredPerm: null },
+  { id: 'location-wise', label: 'Location Wise Leads & Clients', exportKey: 'location-wise', requiredPerm: null },
   { id: 'activity-location', label: 'Activity Location', exportKey: 'activity-location', requiredPerm: null },
   { id: 'projects', label: 'Projects & Tasks', exportKey: 'projects', requiredPerm: 'canProjects' },
   { id: 'employees', label: 'Employees', exportKey: 'employees', requiredPerm: 'canProjects' },
@@ -66,6 +68,7 @@ export const ROLE_PRESETS: Record<string, ReportRolePreset> = {
     allowedReports: [
       'sales',
       'conversion',
+      'location-wise',
       'activity-location',
       'projects',
       'employees',
@@ -79,12 +82,12 @@ export const ROLE_PRESETS: Record<string, ReportRolePreset> = {
   'sales-manager': {
     title: 'Sales Manager',
     subtitle: 'Sales pipeline progression, lead conversion funnel, quotation metrics, and recurring contracts.',
-    allowedReports: ['sales', 'conversion', 'activity-location', 'recurring-invoices'],
+    allowedReports: ['sales', 'conversion', 'location-wise', 'activity-location', 'recurring-invoices'],
   },
   'sales-representative': {
     title: 'Sales Representative',
     subtitle: 'My deal pipeline progression, quotation status, and inbound lead conversion performance.',
-    allowedReports: ['sales', 'conversion'],
+    allowedReports: ['sales', 'conversion', 'location-wise'],
   },
   'project-manager': {
     title: 'Project Lead',
@@ -415,6 +418,8 @@ const CoreReportsPage: React.FC<{ onlyTabs?: string[]; onBack?: () => void; back
   // Fetch report data for active tab
   const loadActiveTabData = useCallback(
     async (force = false) => {
+      // The Location Wise tab loads its own data with its own filters.
+      if (activeTab === 'location-wise') return;
       const cacheKey = `${activeTab}_${queryParams.from}_${queryParams.to}_${queryParams.clientId || ''}`;
       if (!force && tabData[cacheKey]) {
         return;
@@ -573,7 +578,7 @@ const CoreReportsPage: React.FC<{ onlyTabs?: string[]; onBack?: () => void; back
 
         {/* Header Actions: Export & Refresh */}
         <div className="flex items-center gap-2 flex-wrap">
-          {currentPerms.canExport && (
+          {currentPerms.canExport && activeTab !== 'location-wise' && (
             <div className="relative" ref={exportRef} data-tour="reports-export-btn">
               <button
                 type="button"
@@ -608,6 +613,7 @@ const CoreReportsPage: React.FC<{ onlyTabs?: string[]; onBack?: () => void; back
             </div>
           )}
 
+          {activeTab !== 'location-wise' && (
           <button
             type="button"
             data-tour="reports-refresh-btn"
@@ -621,6 +627,7 @@ const CoreReportsPage: React.FC<{ onlyTabs?: string[]; onBack?: () => void; back
             <RefreshIcon sx={{ fontSize: 16 }} className={loading ? 'animate-spin' : ''} />
             <span>Refresh</span>
           </button>
+          )}
 
           <TourButton
             moduleId="reports"
@@ -630,7 +637,8 @@ const CoreReportsPage: React.FC<{ onlyTabs?: string[]; onBack?: () => void; back
         </div>
       </div>
 
-      {/* 2. Filter Toolbar */}
+      {/* 2. Filter Toolbar (the Location Wise tab has its own filters row) */}
+      {activeTab !== 'location-wise' && (
       <section
         data-tour="reports-filters"
         className="bg-white border border-zinc-300 rounded-xl p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
@@ -710,6 +718,7 @@ const CoreReportsPage: React.FC<{ onlyTabs?: string[]; onBack?: () => void; back
           </button>
         </div>
       </section>
+      )}
 
       {/* 3. Role-Filtered Report Tabs Bar */}
       <div
@@ -737,7 +746,13 @@ const CoreReportsPage: React.FC<{ onlyTabs?: string[]; onBack?: () => void; back
       </div>
 
       {/* 4. Active Tab Content / Loading State */}
-      {loading && !currentData ? (
+      {activeTab === 'location-wise' ? (
+        <LocationWiseReportTab
+          initialFrom={dateFrom}
+          initialTo={dateTo}
+          canPickSalesPerson={!currentPerms.isClient && activeRole !== 'sales-representative'}
+        />
+      ) : loading && !currentData ? (
         <div className="bg-white border border-zinc-300 rounded-xl p-16 text-center flex flex-col items-center justify-center gap-3">
           <CircularProgress size={28} sx={{ color: 'var(--foreground)' }} />
           <span className="text-xs font-medium text-zinc-500">Loading report intelligence…</span>

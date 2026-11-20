@@ -7,7 +7,8 @@ export interface FinancePdfOcrLineItem {
   description?: string;
   quantity: number;
   price: number;
-  tax: number;
+  /** GST / VAT percent; null = the PDF shows no rate (CRM 3.58.0). */
+  tax: number | null;
   amount: number;
   /** Matched catalog product id (filled client-side). */
   catalogProductId?: string;
@@ -26,9 +27,13 @@ export interface FinancePdfOcrExtractResult {
   shippingAddress: string;
   clientName: string;
   notes: string;
+  /** The total printed on the PDF (0 = not shown). */
+  grandTotal?: number;
   items: FinancePdfOcrLineItem[];
   model?: string;
   pageCount?: number;
+  /** Pages after the first 5 that were not read. */
+  skippedPages?: number;
   extractionMode?: string;
 }
 

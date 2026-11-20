@@ -25,6 +25,13 @@ interface ContactSelectProps {
    * Unrelated directory contacts are never shown once a scope is active.
    */
   requireRelatedScope?: boolean;
+  /**
+   * CRM 3.56.0 (client Contacts tab): only people whose company name is this client's name and who are not
+   * on this client yet. Replaces the other scopes.
+   */
+  sameCompanyAsClientId?: string;
+  /** Text above the search box. */
+  label?: string;
 }
 
 function mapClientContact(contact: ClientContact): PersonContact {
@@ -60,7 +67,10 @@ export const ContactSelect: React.FC<ContactSelectProps> = ({
   leadId = '',
   clientId = '',
   requireRelatedScope = false,
+  sameCompanyAsClientId = '',
+  label = 'Select from Contacts',
 }) => {
+  const sameCompanyId = String(sameCompanyAsClientId || '').trim();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PersonContact[]>([]);
   const [searching, setSearching] = useState(false);
@@ -109,16 +119,20 @@ export const ContactSelect: React.FC<ContactSelectProps> = ({
       setSearchError(null);
       try {
         const q = query.trim();
-        const personRes = await crmApi.listContacts({
-          search: q || undefined,
-          limit: SEARCH_LIMIT,
-          leadId: scopedLeadId || undefined,
-          clientId: scopedClientId || undefined,
-        });
+        const personRes = await crmApi.listContacts(
+          sameCompanyId
+            ? { search: q || undefined, limit: SEARCH_LIMIT, sameCompanyAsClient: sameCompanyId }
+            : {
+                search: q || undefined,
+                limit: SEARCH_LIMIT,
+                leadId: scopedLeadId || undefined,
+                clientId: scopedClientId || undefined,
+              }
+        );
         let merged: PersonContact[] = Array.isArray(personRes.data) ? [...personRes.data] : [];
 
         // Client company contacts (separate collection) for client-scoped picks.
-        if (scopedClientId) {
+        if (scopedClientId && !sameCompanyId) {
           try {
             const clientRes = await crmApi.getClientContacts(scopedClientId);
             const clientContacts = (Array.isArray(clientRes.data) ? clientRes.data : [])
@@ -153,7 +167,7 @@ export const ContactSelect: React.FC<ContactSelectProps> = ({
       }
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [query, open, value, inputDisabled, scopedLeadId, scopedClientId]);
+  }, [query, open, value, inputDisabled, scopedLeadId, scopedClientId, sameCompanyId]);
 
   if (value) {
     return (
@@ -196,7 +210,7 @@ export const ContactSelect: React.FC<ContactSelectProps> = ({
   return (
     <div ref={rootRef} className={`relative text-xs ${className}`.trim()}>
       <label className="block text-xs font-semibold text-zinc-700 mb-1">
-        Select from Contacts
+        {label}
       </label>
       <div className="relative">
         <SearchIcon
@@ -231,7 +245,11 @@ export const ContactSelect: React.FC<ContactSelectProps> = ({
             <p className="m-0 p-3 text-red-600">{searchError}</p>
           ) : results.length === 0 ? (
             <p className="m-0 p-3 text-zinc-500">
-              {query.trim()
+              {sameCompanyId
+                ? query.trim()
+                  ? 'No contact of this company matches your search.'
+                  : 'No other contacts of this company. Use “Create contact” to add a new person.'
+                : query.trim()
                 ? 'No related contacts match your search.'
                 : hasScope
                   ? 'No contacts linked to this lead/client yet.'

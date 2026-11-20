@@ -20,9 +20,10 @@ import { crmApi } from '../../services/api';
 import { triggerFileDownload } from '../../utils/fileDownload';
 import {
   parseCsvString,
-  generateSampleLeadCsv,
+  generateSampleLeadCsvWith,
   generateSampleClientCsv,
 } from '../../utils/csvParser';
+import type { LeadImportFieldsResult } from '../../types/leads';
 
 export type ImportEntityType = 'leads' | 'clients';
 
@@ -101,6 +102,29 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // CRM 3.54.0: lead fields of the active extension (e.g. Travel Information) a CSV may fill.
+  const [extensionFields, setExtensionFields] = useState<LeadImportFieldsResult | null>(null);
+  const [requestTypeNames, setRequestTypeNames] = useState<Array<{ key: string; name: string }>>([]);
+  useEffect(() => {
+    if (!isOpen || entityType !== 'leads') return;
+    let alive = true;
+    crmApi.getLeadImportFields().then((res) => {
+      if (alive) setExtensionFields(res.data && res.data.fields?.length ? res.data : null);
+    });
+    crmApi
+      .listRequestTypes()
+      .then((res) => {
+        const list = Array.isArray(res?.data) ? res.data : [];
+        if (alive) setRequestTypeNames(list.map((t) => ({ key: String(t.key || ''), name: String(t.name || '') })));
+      })
+      .catch(() => null);
+    return () => {
+      alive = false;
+    };
+  }, [isOpen, entityType]);
+  const extensionTypeKey = extensionFields?.fields.find((f) => f.requestTypeKey)?.requestTypeKey || '';
+  const extensionTypeName = requestTypeNames.find((t) => t.key === extensionTypeKey)?.name || extensionTypeKey;
+
   useEffect(() => {
     if (isOpen) {
       setStep(1);
@@ -118,7 +142,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
 
   // Handle sample download
   const handleDownloadSample = () => {
-    const csvContent = isLeads ? generateSampleLeadCsv() : generateSampleClientCsv();
+    const csvContent = isLeads ? generateSampleLeadCsvWith(extensionFields?.fields || [], extensionTypeName) : generateSampleClientCsv();
     const filename = isLeads ? 'leads_import_sample_template.csv' : 'clients_sample_import.csv';
     triggerFileDownload({
       filename,
@@ -372,6 +396,80 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                   <span>Download Sample CSV Template</span>
                 </button>
               </div>
+
+              {isLeads && extensionFields && (
+                <details open className="rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-xs text-zinc-700">
+                  <summary className="cursor-pointer font-semibold text-zinc-900">
+                    {extensionFields.extensionName} data in the import (optional) — {extensionFields.fields.length} extra columns
+                  </summary>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleDownloadSample}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                    >
+                      <FileDownloadOutlinedIcon sx={{ fontSize: 16 }} />
+                      <span>Download sample CSV with {extensionFields.extensionName} columns</span>
+                    </button>
+                    <span className="text-zinc-500">The sample already has these columns filled with allowed values.</span>
+                  </div>
+                  <div className="mt-2 overflow-x-auto rounded border border-zinc-200 bg-white">
+                    <table className="w-full text-left text-[11px]">
+                      <thead>
+                        <tr className="bg-zinc-100">
+                          <th className="px-2 py-1">Name</th>
+                          <th className="px-2 py-1">Required Type</th>
+                          {extensionFields.fields.slice(0, 8).map((f) => (
+                            <th key={f.key} className="px-2 py-1 font-mono">{f.key}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td className="px-2 py-1">Rahul Mehta</td>
+                          <td className="px-2 py-1">{extensionTypeName || '—'}</td>
+                          {extensionFields.fields.slice(0, 8).map((f) => {
+                            const opts = (f.options || []).map((o) => o.value);
+                            const example =
+                              f.type === 'multiselect'
+                                ? JSON.stringify(opts.slice(0, 2))
+                                : f.type === 'select' || f.type === 'radio'
+                                  ? opts[0] || ''
+                                  : f.type === 'date'
+                                    ? '2026-12-20'
+                                    : f.type === 'number' || f.type === 'currency'
+                                      ? '2'
+                                      : '';
+                            return (
+                              <td key={f.key} className="px-2 py-1 font-mono">{example || '—'}</td>
+                            );
+                          })}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="mt-2 mb-2">
+                    Use the column name shown in bold. Values are checked like the lead form.
+                    {extensionTypeKey ? <> These columns need <strong>Required Type</strong> = <strong>{extensionTypeName}</strong>.</> : null}
+                    {' '}For lists, write keys like <code>["hotel","bus_ticket"]</code> or <code>hotel, bus_ticket</code>, never the display names.
+                    Dates as YYYY-MM-DD. At most {extensionFields.maxRows} rows per file with these columns. A row with a wrong value is not imported.
+                  </p>
+                  <ul className="m-0 flex list-none flex-col gap-1 p-0">
+                    {extensionFields.fields.map((f) => (
+                      <li key={f.key}>
+                        <strong className="font-mono">{f.key}</strong> — {f.label}
+                        {f.required ? ' (required)' : ''} · {f.type}
+                        {f.options && f.options.length ? (
+                          <span className="text-zinc-500">
+                            {' '}· allowed: {f.options.slice(0, 12).map((o) => (o.value === o.label ? o.value : `${o.value} (${o.label})`)).join(', ')}
+                            {f.options.length > 12 ? ` … +${f.options.length - 12} more` : ''}
+                          </span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
 
               {/* Drag & Drop Zone */}
               <div
@@ -657,10 +755,16 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
                             <td className="p-2 pr-3 text-zinc-500">+91 98765 43210</td>
                           </tr>
                           <tr className="bg-zinc-50/40">
-                            <td className="p-2 pl-3 font-semibold text-zinc-900">Tax ID / GSTIN</td>
-                            <td className="p-2 font-mono text-[11px]">Tax ID, GSTIN, VAT</td>
-                            <td className="p-2 text-zinc-500">Optional</td>
+                            <td className="p-2 pl-3 font-semibold text-zinc-900">Client code</td>
+                            <td className="p-2 font-mono text-[11px]">Client code, Tax ID</td>
+                            <td className="p-2 text-zinc-500">Optional (auto when empty)</td>
                             <td className="p-2 pr-3 text-zinc-500">TAX-2026-0001</td>
+                          </tr>
+                          <tr>
+                            <td className="p-2 pl-3 font-semibold text-zinc-900">GSTIN</td>
+                            <td className="p-2 font-mono text-[11px]">GSTIN, GST Number</td>
+                            <td className="p-2 text-zinc-500">Optional — fills the client's GST card (B2B)</td>
+                            <td className="p-2 pr-3 text-zinc-500">27AAAAA0000A1Z5</td>
                           </tr>
                           <tr>
                             <td className="p-2 pl-3 font-semibold text-zinc-900">Primary Contact</td>

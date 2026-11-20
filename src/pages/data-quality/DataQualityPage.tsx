@@ -1112,7 +1112,7 @@ export const DataQualityPage: React.FC = () => {
                     { key: 'phone', label: 'Company Mobile' },
                     { key: 'website', label: 'Website' },
                     { key: 'address', label: 'Billing Address' },
-                    { key: 'taxId', label: 'Tax ID (GST/VAT)' },
+                    { key: 'taxId', label: 'Client code' },
                     { key: 'contact', label: 'Contact Added' },
                     { key: 'duplicates', label: 'No Duplicates' },
                   ].map(({ key, label }) => (

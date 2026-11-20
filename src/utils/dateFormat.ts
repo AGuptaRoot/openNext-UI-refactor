@@ -48,3 +48,18 @@ export function formatDocumentDateShort(value: unknown, fallback = '—'): strin
     ? `${pad(parsed.getUTCDate())}-${pad(parsed.getUTCMonth() + 1)}-${parsed.getUTCFullYear()}`
     : `${pad(parsed.getDate())}-${pad(parsed.getMonth() + 1)}-${parsed.getFullYear()}`;
 }
+
+/**
+ * CRM 3.55.0: friendly date for money screens. A stored date (midnight UTC) → "18 Nov 2026"; a real
+ * moment → "19 Nov 2026, 4:15 pm" in the viewer's time. Raw ISO text is never shown.
+ */
+export function formatFriendlyDateTime(value: unknown, fallback = '—'): string {
+  const parsed = parseDocumentDate(value);
+  if (!parsed) return value ? String(value) : fallback;
+  if (isDateOnly(parsed)) {
+    return parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  }
+  const date = parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const time = parsed.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase();
+  return `${date}, ${time}`;
+}

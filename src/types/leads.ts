@@ -53,6 +53,8 @@ export interface LeadItem {
   /** Formatted address alias (same as address when returned by Places). */
   formattedAddress?: string;
   city?: string;
+  /** Optional district (between state and city in the location report). */
+  district?: string;
   state?: string;
   country?: string;
   postalCode?: string;
@@ -63,6 +65,10 @@ export interface LeadItem {
   visitingCardUrl?: string;
   avatarUrl?: string;
   convertedClientId?: string | null;
+  /** CRM 3.56.0: the existing client this lead is an enquiry for (accepted quotation goes to it). */
+  forClientId?: string | null;
+  /** CRM 3.57.0: a person / family lead (no company; "Family / person name"). */
+  isPersonLead?: boolean;
   convertedAt?: string | null;
   isPortal?: boolean;
   portalEnabledAt?: string | null;
@@ -324,6 +330,16 @@ export interface LeadQueryParams {
   matchScore?: string;
   /** Filter by Commercial Requirement "Lead needs sample request" (true|false) */
   needsSampleRequest?: string;
+  /** Owner (sales person) user id. */
+  assignedTo?: string;
+  /** Location drill-down: state / district / city (case-insensitive exact) and *NotSet flags. */
+  state?: string;
+  district?: string;
+  city?: string;
+  stateNotSet?: string;
+  districtNotSet?: string;
+  cityNotSet?: string;
+  locationNotSet?: string;
   search?: string;
   sort?: string;
   /** Sort direction sent as `order` (the server reads direction from here). */
@@ -342,6 +358,8 @@ export function leadNeedsSampleRequest(lead: {
 
 export interface LeadCreateInput {
   title?: string;
+  /** CRM 3.56.0: "Create lead for this client" — the existing client this lead is an enquiry for. */
+  forClientId?: string;
   /** Denormalized contact person name. */
   name: string;
   contactId?: string;
@@ -368,6 +386,7 @@ export interface LeadCreateInput {
   notes?: string;
   address?: string;
   city?: string;
+  district?: string;
   state?: string;
   latitude?: number | null;
   longitude?: number | null;
@@ -441,6 +460,25 @@ export interface LeadImportPreviewRow {
   status?: string;
   source?: string;
   requestType?: string;
+}
+
+/** CRM 3.54.0: a lead field of the active extension that a bulk import CSV may fill. */
+export interface LeadImportField {
+  key: string;
+  label: string;
+  type: string;
+  required: boolean;
+  /** The field applies only to leads with this Request Type key ('' = every lead). */
+  requestTypeKey: string;
+  /** Allowed values: put the value (key) in the CSV, never the label. */
+  options?: Array<{ value: string; label: string }>;
+}
+
+export interface LeadImportFieldsResult {
+  extensionId: string;
+  extensionName: string;
+  maxRows: number;
+  fields: LeadImportField[];
 }
 
 export interface LeadImportPreviewResult {
@@ -579,6 +617,9 @@ export interface SalesFlowLine {
   details?: SalesFlowDetail[];
   /** Key of one of salesFlow.quotationLineGroups ('' or missing = ungrouped). */
   group?: string;
+  /** GST suite (CRM 3.53.0): SAC code and service key of the line. */
+  sac?: string;
+  serviceType?: string;
 }
 
 /** One row of the extension's checklist on a create page (prefill `checks`). */
@@ -696,6 +737,8 @@ export interface SalesFlowConfig {
   bookingAfterAdvance?: boolean;
   /** CRM 3.34.0: a Won (or converted) lead is read-only. */
   lockWonLead?: boolean;
+  /** GST suite (CRM 3.53.0): the optional preferred payment method on proformas / invoices. */
+  paymentPreference?: { enabled: boolean; default: '' | 'razorpay' | 'cash' | 'bank' };
   /** CRM 3.34.0: a quotation for a client goes through the extension (eligible clients, a picker, a start step). */
   clientQuotation?: {
     notEligibleText?: string;
@@ -792,6 +835,45 @@ export interface QuotationPrefill {
   validTillMax?: string;
   checks?: SalesFlowCheck[];
   notices?: SalesFlowNotice[];
+  /** GST suite (CRM 3.53.0): place of supply ('' = the client's state) and TCS rule of the quotation. */
+  placeOfSupply?: string;
+  tcsRuleKey?: string;
+}
+
+/** A lead offered on the Create Quotation page (GET /sales-flow/quotation-leads). */
+export interface QuotationLeadChoice {
+  _id: string;
+  name: string;
+  company: string;
+  email: string;
+  phone: string;
+  stage: string;
+  /** Draft / Sent quotations the lead already has. */
+  openQuotations?: Array<{ id: string; quotationNo: string; status: string }>;
+  /** The lead has no email: the quotation cannot be emailed. */
+  noEmail?: boolean;
+}
+
+/** A lead the active extension does not report as ready yet. */
+export interface QuotationLeadNotReady extends QuotationLeadChoice {
+  reasons: string[];
+  summary?: string;
+}
+
+export interface QuotationLeadOptions {
+  leads: QuotationLeadChoice[];
+  notReady: QuotationLeadNotReady[];
+  hidden: { closed: number; accepted: number; otherType: number };
+  hasReadiness: boolean;
+  /** Only with ?include=: whether that lead may get a new quotation, and why not. */
+  included?: {
+    _id: string;
+    allowed: boolean;
+    reason: '' | 'notFound' | 'converted' | 'won' | 'closed' | 'otherType' | 'accepted' | 'notReady';
+    message: string;
+    reasons: string[];
+    name: string;
+  };
 }
 
 export interface OpportunityLeadOptions {

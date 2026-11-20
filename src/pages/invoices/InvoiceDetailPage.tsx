@@ -26,6 +26,11 @@ import { getRuntimeDefaultCurrency } from '../../utils/currency';
 import { CreditCard } from 'lucide-react';
 import { ExtensionActions } from '../../components/extensions/ExtensionActions';
 import { useNotifyMessage } from '@/components/notifications';
+import { RecordPaymentDialog } from '../../components/finance/RecordPaymentDialog';
+import { RefundPaymentDialog } from '../../components/finance/RefundPaymentDialog';
+
+import { formatFriendlyDateTime as formatPaymentWhen } from '../../utils/dateFormat';
+import { PREFERRED_PAYMENT_LABELS, type PreferredPaymentMethod } from '../../types/cashbook';
 
 function statusClass(status: string): string {
   const map: Record<string, string> = {
@@ -56,6 +61,8 @@ export const InvoiceDetailPage: React.FC = () => {
   const canWriteFinance = hasPermission('crm.finance.write') && !isClient;
   const [invoice, setInvoice] = useState<InvoiceItem | null>(null);
   const [payments, setPayments] = useState<InvoicePaymentRecord[]>([]);
+  // CRM 3.54.0: refunds are made here (a dialog), not on the Payments page an extension may hide.
+  const [refundFor, setRefundFor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -66,6 +73,9 @@ export const InvoiceDetailPage: React.FC = () => {
   const [portalLink, setPortalLink] = useState('');
   const [razorpayConfigured, setRazorpayConfigured] = useState(false);
   const [salesOrderDelivered, setSalesOrderDelivered] = useState(false);
+  // GST suite (CRM 3.53.0): Record payment (cash / UPI / bank) and the preferred payment method.
+  const [recordOpen, setRecordOpen] = useState(false);
+  const [prefSaving, setPrefSaving] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -368,7 +378,37 @@ export const InvoiceDetailPage: React.FC = () => {
     razorpayConfigured,
   });
 
-  const payButton = canPayWithRazorpay ? (
+  // GST suite (CRM 3.53.0): the client is asked to pay in cash / by bank, so the portal shows no Razorpay button.
+  const preferred = (invoice.preferredPaymentMethod || '') as PreferredPaymentMethod;
+  const offlinePreferred = isClient && (preferred === 'cash' || preferred === 'bank');
+  const openForMoney = balanceDue > 0.005 && !['Draft', 'Cancelled', 'Converted', 'Written Off'].includes(String(invoice.status));
+  const canRecordPayment = canWriteFinance && !isClient && openForMoney && !(isProforma && invoice.convertedInvoiceId);
+  const showPreference = Boolean(salesFlow.paymentPreference?.enabled) && canWriteFinance && !isClient && openForMoney;
+  const changePreference = async (value: PreferredPaymentMethod) => {
+    if (!id) return;
+    setPrefSaving(true);
+    try {
+      await crmApi.setInvoicePaymentPreference(id, value);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not save the payment preference');
+    } finally {
+      setPrefSaving(false);
+    }
+  };
+  const recordButton = canRecordPayment ? (
+    <button
+      type="button"
+      id="btn-record-payment"
+      disabled={busy}
+      onClick={() => setRecordOpen(true)}
+      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-800 cursor-pointer disabled:opacity-50 hover:bg-zinc-50"
+    >
+      Record payment
+    </button>
+  ) : null;
+
+  const payButton = canPayWithRazorpay && !offlinePreferred ? (
     <button
       type="button"
       id="btn-razorpay-pay-detail"
@@ -389,6 +429,29 @@ export const InvoiceDetailPage: React.FC = () => {
 
   return (
     <div data-tour="invoices-detail" className="flex flex-col gap-5">
+      {refundFor ? (
+        <RefundPaymentDialog
+          paymentId={refundFor}
+          invoiceNo={invoice.invoiceNo}
+          currency={invoice.currency || 'INR'}
+          canWrite={canWriteFinance}
+          onClose={() => setRefundFor(null)}
+          onChanged={() => void load()}
+        />
+      ) : null}
+      {recordOpen && id ? (
+        <RecordPaymentDialog
+          invoiceId={id}
+          invoiceNo={invoice.invoiceNo}
+          balanceDue={Math.round(balanceDue * 100) / 100}
+          currency={invoice.currency || 'INR'}
+          onClose={() => setRecordOpen(false)}
+          onSaved={() => {
+            setRecordOpen(false);
+            void load();
+          }}
+        />
+      ) : null}
       <header className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 pb-4 border-b border-zinc-200">
         <div>
           <Link to="/invoices" className="text-xs font-semibold text-zinc-500 no-underline hover:text-zinc-950">
@@ -455,6 +518,7 @@ export const InvoiceDetailPage: React.FC = () => {
             <PictureAsPdfIcon sx={{ fontSize: 15 }} /> PDF
           </button>
           {payButton}
+          {recordButton}
           {/* Buttons of the active extension (json/actions.json page "invoiceDetail"), e.g. Open Booking. */}
           {id ? (
             <ExtensionActions
@@ -769,8 +833,32 @@ export const InvoiceDetailPage: React.FC = () => {
       <section className="rounded-xl border border-zinc-300 bg-white overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-b border-zinc-200">
           <div className="text-sm font-semibold">Payments</div>
-          {payButton}
+          <div className="flex flex-wrap items-center gap-2">
+            {showPreference ? (
+              <label className="inline-flex items-center gap-1.5 text-xs text-zinc-600">
+                Client pays by
+                <select
+                  className="h-9 rounded-lg border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-800"
+                  value={preferred}
+                  disabled={prefSaving}
+                  title="Only a hint shown to the client; payments are recorded with their real mode"
+                  onChange={(e) => void changePreference(e.target.value as PreferredPaymentMethod)}
+                >
+                  {(Object.keys(PREFERRED_PAYMENT_LABELS) as PreferredPaymentMethod[]).map((k) => (
+                    <option key={k || 'none'} value={k}>{PREFERRED_PAYMENT_LABELS[k]}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {payButton}
+            {recordButton}
+          </div>
         </div>
+        {offlinePreferred && openForMoney ? (
+          <div className="mx-5 mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+            {preferred === 'cash' ? 'Please pay in cash at our office.' : 'Please pay by bank transfer or UPI. The bank details are on the invoice PDF.'}
+          </div>
+        ) : null}
         {!razorpayConfigured && canWriteFinance && !isClient ? (
           <div className="mx-5 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
             Razorpay is not configured. Configure the payment gateway in CRM settings to enable Pay with Razorpay.
@@ -799,9 +887,12 @@ export const InvoiceDetailPage: React.FC = () => {
                 {payments.map((payment) => {
                   const status = String(payment.status || '');
                   const canRefund = !['Refunded', 'Cancelled', 'Failed'].includes(status);
+                  // CRM 3.55.0: the refunds of this payment are listed under it.
+                  const refunds = Array.isArray(payment.refunds) ? payment.refunds : [];
                   return (
-                  <tr key={payment._id} className="border-t border-zinc-100">
-                    <td className="px-4 py-3">{payment.paymentDate}</td>
+                  <React.Fragment key={payment._id}>
+                  <tr className="border-t border-zinc-100">
+                    <td className="px-4 py-3 whitespace-nowrap">{formatPaymentWhen(payment.paymentDate)}</td>
                     <td className="px-4 py-3">{payment.mode || '—'}</td>
                     <td className="px-4 py-3 text-right font-semibold">
                       {formatFinanceMoney(payment.amount, payment.currency || invoice.currency)}
@@ -809,21 +900,73 @@ export const InvoiceDetailPage: React.FC = () => {
                     <td className="px-4 py-3">{payment.status || '—'}</td>
                     <td className="px-4 py-3 text-xs text-zinc-500">{payment.transactionId || '—'}</td>
                     <td className="px-4 py-3">
-                      {canRefund ? (
-                        <Link
-                          to={`/payments/${payment._id}`}
-                          className="inline-flex h-7 items-center px-2.5 text-[11px] font-semibold rounded-md border border-amber-200 bg-amber-50 text-amber-900 no-underline"
+                      {canRefund && canWriteFinance ? (
+                        <button
+                          type="button"
+                          onClick={() => setRefundFor(payment._id)}
+                          className="inline-flex h-7 cursor-pointer items-center px-2.5 text-[11px] font-semibold rounded-md border border-amber-200 bg-amber-50 text-amber-900"
                         >
                           Refund
-                        </Link>
+                        </button>
                       ) : (
                         <span className="text-xs text-zinc-400">—</span>
                       )}
                     </td>
                   </tr>
+                  {refunds.map((refund) => {
+                    const rs = String(refund.status || '');
+                    const tone = rs === 'Rejected' ? 'bg-zinc-100 text-zinc-500' : rs === 'Pending Approval' ? 'bg-amber-50 text-amber-800' : 'bg-red-50 text-red-700';
+                    const when = refund.approvedAt || refund.requestedAt ? formatPaymentWhen(refund.approvedAt || refund.requestedAt) : '';
+                    return (
+                      <tr key={refund._id} className="bg-zinc-50/60 text-xs">
+                        <td className="px-4 py-2 pl-8 text-zinc-500">↳ Refund {when ? `· ${when}` : ''}</td>
+                        <td className="px-4 py-2 text-zinc-600">{refund.mode || '—'}</td>
+                        <td className={`px-4 py-2 text-right font-semibold ${rs === 'Rejected' ? 'text-zinc-400 line-through' : 'text-red-700'}`}>
+                          − {formatFinanceMoney(refund.amount, payment.currency || invoice.currency)}
+                        </td>
+                        <td className="px-4 py-2">
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${tone}`}>{rs || '—'}</span>
+                        </td>
+                        <td className="px-4 py-2 text-zinc-500" colSpan={2}>
+                          {[refund.transactionId, !isClient ? refund.reason : ''].filter(Boolean).join(' · ') || '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  </React.Fragment>
                   );
                 })}
               </tbody>
+              {(() => {
+                const cur = invoice.currency || 'INR';
+                const received = payments.reduce((s, p) => s + (['Cancelled', 'Failed'].includes(String(p.status || '')) ? 0 : Number(p.amount) || 0), 0);
+                const refunded = payments.reduce((s, p) => s + (Number(p.refundedAmount) || 0), 0);
+                const pending = payments.reduce(
+                  (s, p) => s + (Array.isArray(p.refunds) ? p.refunds : []).filter((r) => r.status === 'Pending Approval').reduce((t, r) => t + (Number(r.amount) || 0), 0),
+                  0
+                );
+                if (!(refunded > 0) && !(pending > 0)) return null;
+                return (
+                  <tfoot>
+                    <tr className="border-t border-zinc-200 bg-white text-xs">
+                      <td className="px-4 py-2.5 font-semibold text-zinc-700" colSpan={2}>Payments after refunds</td>
+                      <td className="px-4 py-2.5 text-right" colSpan={4}>
+                        <span className="text-zinc-600">Received {formatFinanceMoney(received, cur)}</span>
+                        <span className="mx-2 text-zinc-300">|</span>
+                        <span className="font-semibold text-red-700">Refunded − {formatFinanceMoney(refunded, cur)}</span>
+                        {pending > 0 ? (
+                          <>
+                            <span className="mx-2 text-zinc-300">|</span>
+                            <span className="text-amber-800">Waiting for approval {formatFinanceMoney(pending, cur)}</span>
+                          </>
+                        ) : null}
+                        <span className="mx-2 text-zinc-300">|</span>
+                        <span className="font-bold text-zinc-900">Net {formatFinanceMoney(received - refunded, cur)}</span>
+                      </td>
+                    </tr>
+                  </tfoot>
+                );
+              })()}
             </table>
           </div>
         )}

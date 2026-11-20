@@ -27,6 +27,11 @@ export interface ClientCompanyMatchModalProps {
   onSelect: (id: string) => void;
   onAddSecondary: () => void;
   onContinueLead: () => void;
+  /**
+   * CRM 3.56.0 (lead create only): "Create lead for this client" — the lead is the chosen client's enquiry,
+   * so its accepted quotation goes to that client (no second client with the same name).
+   */
+  onCreateForClient?: () => void;
   onClose: () => void;
   loading?: boolean;
   error?: string | null;
@@ -53,6 +58,7 @@ export const ClientCompanyMatchModal: React.FC<ClientCompanyMatchModalProps> = (
   onSelect,
   onAddSecondary,
   onContinueLead,
+  onCreateForClient,
   onClose,
   loading = false,
   error = null,
@@ -155,6 +161,12 @@ export const ClientCompanyMatchModal: React.FC<ClientCompanyMatchModalProps> = (
           <p className="m-0">
             <strong className="text-foreground">Add as Secondary Contact</strong>: {addNote}
           </p>
+          {onCreateForClient ? (
+            <p className="m-0 mt-1">
+              <strong className="text-foreground">Create lead for this client</strong>: the lead is this client’s new
+              enquiry. When its quotation is accepted, it goes to this client (no new client is made).
+            </p>
+          ) : null}
           <p className="m-0 mt-1">
             <strong className="text-foreground">{continueLabel}</strong>: {continueNote}
           </p>
@@ -177,6 +189,17 @@ export const ClientCompanyMatchModal: React.FC<ClientCompanyMatchModalProps> = (
           >
             {continueLabel}
           </button>
+          {onCreateForClient ? (
+            <button
+              type="button"
+              disabled={loading || !selected}
+              onClick={onCreateForClient}
+              className="cursor-pointer rounded-lg border border-primary bg-card px-4 py-2.5 text-xs font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              data-testid="client-company-match-for-client"
+            >
+              Create lead for this client
+            </button>
+          ) : null}
           <button
             type="button"
             disabled={loading || !canAdd}

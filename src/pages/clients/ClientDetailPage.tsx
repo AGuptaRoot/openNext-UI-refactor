@@ -36,6 +36,7 @@ import {
   ExtensionFieldsSection,
 } from '../../components/extensions';
 import { useExtensions } from '../../hooks/useExtensions';
+import { ClientGstCard } from '../../components/clients/ClientGstCard';
 import { PersonContact, formatContactName } from '../../types/contacts';
 import {
   ClientAddress,
@@ -462,19 +463,12 @@ export const ClientDetailPage: React.FC = () => {
   const [editBilling, setEditBilling] = useState({
     street: '',
     city: '',
+    district: '',
     state: '',
     country: 'India',
     zip: '',
   });
 
-  const [contactForm, setContactForm] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    designation: '',
-    isPrimary: false,
-  });
-  const [editingContactId, setEditingContactId] = useState<string | null>(null);
 
   const [addressForm, setAddressForm] = useState({
     type: 'billing',
@@ -578,6 +572,7 @@ export const ClientDetailPage: React.FC = () => {
       setEditBilling({
         street: c.data.billingAddress?.street || '',
         city: c.data.billingAddress?.city || '',
+        district: c.data.billingAddress?.district || '',
         state: c.data.billingAddress?.state || '',
         country: c.data.billingAddress?.country || 'India',
         zip: c.data.billingAddress?.zip || '',
@@ -753,6 +748,7 @@ export const ClientDetailPage: React.FC = () => {
         billingAddress: {
           street: editBilling.street || undefined,
           city: editBilling.city || undefined,
+          district: editBilling.district || undefined,
           state: editBilling.state || undefined,
           country: editBilling.country || 'India',
           zip: editBilling.zip || undefined,
@@ -792,7 +788,7 @@ export const ClientDetailPage: React.FC = () => {
     ? `/clients/${id}?tab=contacts`
     : '/clients';
 
-  const handleLinkPersonContact = async (person: PersonContact | null) => {
+  const handleLinkPersonContact = async (person: PersonContact | null, options: { sameCompanyOnly?: boolean } = {}) => {
     if (!person || !id || !canWrite) {
       setPickerContact(null);
       return;
@@ -843,6 +839,7 @@ export const ClientDetailPage: React.FC = () => {
         designation: person.jobTitle || '',
         isPrimary: contacts.length === 0,
         personContactId: person._id,
+        ...(options.sameCompanyOnly ? { sameCompanyOnly: true } : {}),
       });
       setPickerContact(null);
       await refreshContacts();
@@ -881,28 +878,6 @@ export const ClientDetailPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per linkContact param
   }, [searchParams, id, canWrite]);
 
-  const handleSaveContact = async () => {
-    if (!id || !editingContactId || !contactForm.name.trim()) return;
-    if (contactForm.phone.trim()) {
-      const split = splitPhoneNumber(contactForm.phone);
-      if (split.dial && split.national) {
-        const check = validateNationalNumber(split.dial, split.national);
-        if (check.state === 'invalid' || check.state === 'incomplete') {
-          showToast(`Phone: ${check.message}`, 'warning');
-          return;
-        }
-      }
-    }
-    try {
-      await crmApi.updateClientContact(id, editingContactId, contactForm);
-      setContactForm({ name: '', email: '', phone: '', designation: '', isPrimary: false });
-      setEditingContactId(null);
-      await refreshContacts();
-      showToast('Contact updated');
-    } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Failed to save contact', 'error');
-    }
-  };
 
   /** CRM 3.46.0: a Secondary contact becomes the Primary one (the old Primary becomes Secondary). */
   const handleMakePrimaryContact = async (contactId: string) => {
@@ -1226,7 +1201,7 @@ export const ClientDetailPage: React.FC = () => {
                   ) : null}
                   {client.taxId ? (
                     <span className="rounded-full border border-border bg-card px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                      Tax: {client.taxId}
+                      Code: {client.taxId}
                     </span>
                   ) : null}
                 </div>
@@ -1274,7 +1249,6 @@ export const ClientDetailPage: React.FC = () => {
                   data-tour="clients-summary-add-contact"
                   onClick={() => {
                     setTab('contacts');
-                    setEditingContactId(null);
                   }}
                   className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-zinc-300 bg-white px-2.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50"
                 >
@@ -1381,7 +1355,7 @@ export const ClientDetailPage: React.FC = () => {
                   <dd className="m-0 font-semibold text-zinc-900">{summary?.openTasks ?? 0}</dd>
                 </div>
                 <div className="flex justify-between gap-3">
-                  <dt className="text-zinc-500">Tax ID</dt>
+                  <dt className="text-zinc-500" title="The client's reference code (not a tax number). GSTIN and PAN are on the GST card.">Client code</dt>
                   <dd className="m-0 font-semibold text-zinc-900">{client.taxId || '—'}</dd>
                 </div>
                 <div className="flex justify-between gap-3">
@@ -1447,6 +1421,7 @@ export const ClientDetailPage: React.FC = () => {
                 </div>
               )}
             </div>
+            <ClientGstCard client={client} canEdit={canWrite} onSaved={(updated) => setClient((prev) => (prev ? { ...prev, ...updated } : updated))} />
           </aside>
 
           <div className="flex flex-col gap-4 lg:col-span-8">
@@ -1455,13 +1430,13 @@ export const ClientDetailPage: React.FC = () => {
               data-tour="clients-overview-company"
               className="rounded-xl border border-zinc-300 bg-white p-5 scroll-mt-24"
             >
-              <h3 className="m-0 mb-1 text-sm font-bold text-zinc-950">Company information</h3>
+              <h3 className="m-0 mb-1 text-sm font-bold text-zinc-950">{client?.clientKind === 'person' ? 'Family / person information' : 'Company information'}</h3>
               <p className="m-0 mb-4 text-[11px] text-zinc-500">
                 Core account details used across projects, finance, and portal access.
               </p>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <label className="flex flex-col gap-1 sm:col-span-2">
-                  <span className="text-[11px] font-semibold uppercase text-zinc-500">Name</span>
+                  <span className="text-[11px] font-semibold uppercase text-zinc-500">{client?.clientKind === 'person' ? 'Family / person name' : 'Name'}</span>
                   <input
                     className={fieldClass}
                     value={editName}
@@ -1540,7 +1515,7 @@ export const ClientDetailPage: React.FC = () => {
                   />
                 </div>
                 <label className="flex flex-col gap-1">
-                  <span className="text-[11px] font-semibold uppercase text-zinc-500">Tax ID</span>
+                  <span className="text-[11px] font-semibold uppercase text-zinc-500">Client code</span>
                   <input className={fieldClass} value={editTaxId} disabled={!canWrite} onChange={(e) => setEditTaxId(e.target.value)} />
                 </label>
                 <label className="flex flex-col gap-1">
@@ -1656,7 +1631,7 @@ export const ClientDetailPage: React.FC = () => {
             <div data-tour="clients-overview-billing" className="rounded-xl border border-zinc-300 bg-white p-5">
               <h3 className="m-0 mb-3 text-sm font-bold text-zinc-950">Billing address</h3>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {(['street', 'city', 'state', 'country', 'zip'] as const).map((key) => (
+                {(['street', 'city', 'district', 'state', 'country', 'zip'] as const).map((key) => (
                   <label key={key} className={`flex flex-col gap-1 ${key === 'street' ? 'sm:col-span-2' : ''}`}>
                     <span className="text-[11px] font-semibold uppercase text-zinc-500">{key}</span>
                     <input
@@ -1745,70 +1720,23 @@ export const ClientDetailPage: React.FC = () => {
               <ContactSelect
                 value={pickerContact}
                 disabled={linkingContact || saving}
-                onChange={(contact) => void handleLinkPersonContact(contact)}
+                onChange={(contact) => void handleLinkPersonContact(contact, { sameCompanyOnly: true })}
+                sameCompanyAsClientId={id}
+                label={`Add a contact of ${client?.name || 'this company'}`}
                 hint={
                   linkingContact
                     ? 'Linking contact to this client…'
-                    : linkedContact
-                      ? 'Search and select a contact from the Contacts module to add them as a Secondary contact.'
-                      : 'Search and select a contact from the Contacts module to link them as the Primary contact.'
+                    : `Only contacts whose company is “${client?.name || 'this client'}” and who are not added yet. ${linkedContact ? 'They join as Secondary contacts.' : 'The first one becomes the Primary contact.'}`
                 }
               />
             </div>
           )}
 
-          {canWrite && editingContactId && (
-            <div className="grid grid-cols-1 items-end gap-3 rounded-xl border border-zinc-300 bg-white p-4 sm:grid-cols-2 lg:grid-cols-6">
-              <input
-                className={fieldClass}
-                placeholder="Name *"
-                value={contactForm.name}
-                onChange={(e) => setContactForm((p) => ({ ...p, name: e.target.value }))}
-              />
-              <input
-                className={fieldClass}
-                placeholder="Email"
-                value={contactForm.email}
-                onChange={(e) => setContactForm((p) => ({ ...p, email: e.target.value }))}
-              />
-              <PhoneNumberField
-                inputClassName={fieldClass}
-                placeholder="Phone"
-                value={contactForm.phone}
-                onChange={(phone) => setContactForm((p) => ({ ...p, phone }))}
-              />
-              <input
-                className={fieldClass}
-                placeholder="Designation"
-                value={contactForm.designation}
-                onChange={(e) => setContactForm((p) => ({ ...p, designation: e.target.value }))}
-              />
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleSaveContact}
-                  className="h-9 flex-1 cursor-pointer rounded-lg border-none bg-zinc-950 px-3 text-xs font-semibold text-white"
-                >
-                  Update
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingContactId(null);
-                    setContactForm({
-                      name: '',
-                      email: '',
-                      phone: '',
-                      designation: '',
-                      isPrimary: false,
-                    });
-                  }}
-                  className="h-9 cursor-pointer rounded-lg border border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-700"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
+          {/* CRM 3.54.0: contacts are not edited here. The row shows the Contact record's live data; edit it on the Contact page. */}
+          {shownContacts.length > 0 && (
+            <p className="m-0 text-xs text-zinc-500">
+              Contact details come from the Contacts module. To change a name, email or phone, open the contact and edit it there.
+            </p>
           )}
 
           {shownContacts.length === 0 ? (
@@ -1860,6 +1788,15 @@ export const ClientDetailPage: React.FC = () => {
                             ) : (
                               <div className="font-semibold text-zinc-900">{c.name}</div>
                             )}
+                            {c.contactDeleted ? (
+                              <span className="mr-1 inline-flex rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700" title="The contact record was deleted; last known details are shown.">
+                                Contact deleted
+                              </span>
+                            ) : c.linked === false ? (
+                              <span className="mr-1 inline-flex rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800" title="Not linked to a contact record yet; use Link contact to pick the person.">
+                                Not linked
+                              </span>
+                            ) : null}
                             {c === linkedContact ? (
                               <span className="inline-flex rounded bg-zinc-950 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                                 Primary
@@ -1887,22 +1824,6 @@ export const ClientDetailPage: React.FC = () => {
                         ) : null}
                         {canWrite && (
                           <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingContactId(c._id);
-                                setContactForm({
-                                  name: c.name,
-                                  email: c.email || '',
-                                  phone: c.phone || '',
-                                  designation: c.designation || '',
-                                  isPrimary: !!c.isPrimary,
-                                });
-                              }}
-                              className="cursor-pointer border-none bg-transparent text-xs text-zinc-700"
-                            >
-                              Edit
-                            </button>
                             {c !== linkedContact ? (
                               <button
                                 type="button"

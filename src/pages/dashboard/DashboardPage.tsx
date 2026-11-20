@@ -300,6 +300,10 @@ const CoreDashboardPage: React.FC = () => {
     if (!isModuleVisible('expenses')) {
       sections = sections.filter((s) => s !== 'expenses_approvals');
     }
+    // The deals pipeline / forecast card needs Opportunities (hidden by some extensions).
+    if (!isModuleVisible('opportunities')) {
+      sections = sections.filter((s) => s !== 'sales_pipeline');
+    }
     return sections;
   }, [activeRole, isClient, showProjects, isModuleVisible]);
 

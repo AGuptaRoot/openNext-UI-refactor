@@ -9,6 +9,8 @@ import { crmApi } from '../../services/api';
 import { triggerFileDownload } from '../../utils/fileDownload';
 import { formatCrmMoney } from '../../utils/currency';
 import { ChartCard, MetricCard, useChartTheme } from './ReportCharts';
+import { LocationWiseReportTab } from './tabs/LocationWiseReportTab';
+import { useAuth } from '../../context/AuthContext';
 import type {
   ExtensionReportDefinition,
   ExtensionReportItem,
@@ -89,6 +91,8 @@ export const ExtensionReportsDashboard: React.FC<{
   const seq = useRef(0);
   // Tabs (reports.json tabs): sections without a tab stay above them.
   const tabs = definition.tabs || [];
+  const { activeRole, isClient } = useAuth();
+  const canPickSalesPerson = !isClient && activeRole !== 'sales-representative';
   const [activeTab, setActiveTab] = useState(tabs[0]?.id || '');
 
   // Names for "user" columns: the options of a users filter (the CRM filled them).
@@ -438,7 +442,7 @@ export const ExtensionReportsDashboard: React.FC<{
         <div className="flex flex-wrap items-center gap-2">
           {onOpenCoreReports ? (
             <button type="button" onClick={onOpenCoreReports} className="h-9 rounded-lg border border-border bg-card px-3 text-xs font-semibold">
-              Finance reports
+              More reports
             </button>
           ) : null}
           <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex h-9 items-center gap-1 rounded-lg border border-border bg-card px-3 text-xs font-semibold disabled:opacity-50">
@@ -511,7 +515,19 @@ export const ExtensionReportsDashboard: React.FC<{
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">{definition.sections.filter((s) => s.tab === activeTab).map(renderSection)}</div>
+          {(() => {
+            const core = tabs.find((t) => t.id === activeTab)?.coreTab;
+            // CRM 3.56.0: a core report shown as this tab; it has its own filters (the ones above do not apply).
+            if (core === 'location-wise') {
+              return (
+                <div className="flex flex-col gap-2">
+                  <p className="m-0 text-[11px] text-muted-foreground">This tab uses its own filters below.</p>
+                  <LocationWiseReportTab canPickSalesPerson={canPickSalesPerson} />
+                </div>
+              );
+            }
+            return <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">{definition.sections.filter((s) => s.tab === activeTab).map(renderSection)}</div>;
+          })()}
         </>
       ) : null}
     </div>

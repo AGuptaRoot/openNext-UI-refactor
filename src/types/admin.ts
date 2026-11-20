@@ -19,6 +19,10 @@ export interface AdminCustomField {
 export interface CrmSettings {
   company_name: string;
   company_state: string;
+  /** CRM 3.57.0: lead types for a person / family (no company). */
+  person_lead_types?: string[];
+  /** CRM 3.56.0: login page sent in client portal emails; empty = the site address + /login. */
+  client_portal_login_url?: string;
   office_address?: string;
   office_addresses?: string[];
   sample_units_of_measure?: string[];
@@ -119,6 +123,7 @@ export type SettingsTabId =
   | 'extensions'
   | 'shipping'
   | 'finance'
+  | 'gst'
   | 'email'
   | 'integrations'
   | 'projects'
@@ -144,6 +149,15 @@ export interface GroqIntegrationStatus {
   model: string;
   source: 'settings' | 'env' | 'none';
   message: string;
+}
+
+/** CRM 3.59.0: push notifications (Firebase) — status only, never the key. */
+export interface FcmIntegrationStatus {
+  configured: boolean;
+  hint: string;
+  projectId: string;
+  message: string;
+  types?: Array<{ type: string; label: string }>;
 }
 
 /** Google Maps / Places — status never returns the raw key (use client-key endpoint). */
@@ -184,6 +198,7 @@ export const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string }> = [
   { id: 'extensions', label: 'Extensions' },
   { id: 'shipping', label: 'Shipping' },
   { id: 'finance', label: 'Finance' },
+  { id: 'gst', label: 'GST' },
   { id: 'email', label: 'Email' },
   { id: 'integrations', label: 'Integrations' },
   { id: 'projects', label: 'Projects' },

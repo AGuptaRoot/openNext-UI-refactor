@@ -74,7 +74,6 @@ import {
 } from '../../components/common/AttachmentPreviewModal';
 import { FileUploadField } from '../../components/common/FileUploadField';
 import { DocumentUploadControl } from '../../components/common/DocumentUploadControl';
-import { PhoneNumberField } from '../../components/common/PhoneNumberField';
 import { splitPhoneNumber, validateNationalNumber } from '../../utils/phoneCountryCodes';
 import {
   LeadItem,
@@ -102,6 +101,7 @@ import { formatFinanceMoney } from '../../components/finance/FinanceListPage';
 import { formatCrmMoney, getCurrencySymbol, getRuntimeDefaultCurrency } from '../../utils/currency';
 import { ExtensionActions } from '../../components/extensions/ExtensionActions';
 import { notify } from '@/components/notifications';
+import { LeadContactPicker } from '../../components/leads/LeadContactPicker';
 
 const LEAD_DOC_ACCEPT =
   '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.md,.markdown,.txt,.csv,.rtf,image/jpeg,image/png,image/webp,image/gif,application/pdf';
@@ -249,6 +249,9 @@ export const LeadDetailPage: React.FC = () => {
   // The active extension can leave Samples out (manifest hiddenModules); the tab follows the sidebar.
   const { isModuleVisible } = useActiveExtension();
   const samplesModuleVisible = isModuleVisible('samples');
+  // The active extension may hide Opportunities: no Create Opportunity, Interested or open-deal links
+  // then (quotations are made from the lead; the server refuses new opportunities too).
+  const opportunitiesVisible = isModuleVisible('opportunities');
   const {
     leadTabsForRequestType,
     createFieldsForRequestType,
@@ -295,9 +298,10 @@ export const LeadDetailPage: React.FC = () => {
     (hasPermission('crm.opportunities.read') ||
       hasPermission('crm.opportunities.write') ||
       hasPermission('crm.leads.read')) &&
-    !isClient;
+    !isClient &&
+    opportunitiesVisible;
   const canWriteOpportunities =
-    (hasPermission('crm.opportunities.write') || hasPermission('crm.leads.write')) && !isClient && !leadLocked;
+    (hasPermission('crm.opportunities.write') || hasPermission('crm.leads.write')) && !isClient && !leadLocked && opportunitiesVisible;
   const canReadSamples =
     samplesModuleVisible &&
     (hasPermission('crm.samples.read') ||
@@ -400,6 +404,7 @@ export const LeadDetailPage: React.FC = () => {
     requestTypeId: '',
     address: '',
     city: '',
+    district: '',
     state: '',
     country: '',
     postalCode: '',
@@ -583,6 +588,7 @@ export const LeadDetailPage: React.FC = () => {
         requestTypeId: resolvedRequestTypeId,
         address: leadData.address || leadData.formattedAddress || '',
         city: leadData.city || '',
+        district: leadData.district || '',
         state: leadData.state || '',
         country: leadData.country || '',
         postalCode: leadData.postalCode || '',
@@ -857,7 +863,7 @@ export const LeadDetailPage: React.FC = () => {
   // A deal can exist before the lead reaches Qualified (the "Interested" action
   // on a commercial requirement creates one at Contacted), so never hide the
   // tab while there are records in it.
-  const showDealTab = showProposalTab || opportunities.length > 0;
+  const showDealTab = opportunitiesVisible && (showProposalTab || opportunities.length > 0);
 
   /**
    * A lead gets one opportunity from these two entry points.
@@ -1322,6 +1328,7 @@ export const LeadDetailPage: React.FC = () => {
         address: detailsForm.address.trim(),
         formattedAddress: detailsForm.address.trim(),
         city: detailsForm.city.trim(),
+        district: detailsForm.district.trim(),
         state: detailsForm.state.trim(),
         country: detailsForm.country.trim(),
         postalCode: detailsForm.postalCode.trim(),
@@ -1772,6 +1779,16 @@ export const LeadDetailPage: React.FC = () => {
                     Converted Client
                   </span>
                 )}
+                {!lead.convertedClientId && lead.forClientId ? (
+                  <Link
+                    to={`/clients/${encodeURIComponent(String(lead.forClientId))}`}
+                    className="text-[10px] font-bold bg-sky-50 text-sky-800 border border-sky-200 px-1.5 py-0.5 rounded inline-flex items-center gap-1 no-underline"
+                    title="This lead is a new enquiry of an existing client. Its accepted quotation goes to that client."
+                    data-testid="lead-for-client-badge"
+                  >
+                    Enquiry for existing client
+                  </Link>
+                ) : null}
                 {leadLocked && (
                   <span
                     className="text-[10px] font-bold bg-zinc-100 text-zinc-700 border border-zinc-300 px-1.5 py-0.5 rounded inline-flex items-center gap-1"
@@ -2352,54 +2369,24 @@ export const LeadDetailPage: React.FC = () => {
               {/* Contact & Company */}
               <div className="bg-white border border-zinc-300 rounded-lg p-6">
                 <h3 className="text-sm font-bold text-zinc-950 mb-1">Contact & Company</h3>
-                <p className="text-xs text-zinc-500 mb-4">Communication coordinates and corporate details.</p>
+                <p className="text-xs text-zinc-500 mb-4">From the lead's contact (Contacts module).</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-700 mb-1">
-                      Email <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      value={detailsForm.email}
-                      onChange={(e) => setDetailsForm({ ...detailsForm, email: e.target.value })}
-                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded focus:border-zinc-950 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-700 mb-1">
-                      Mobile number <span className="text-red-500">*</span>
-                    </label>
-                    <PhoneNumberField
-                      value={detailsForm.phone}
-                      onChange={(phone) => setDetailsForm({ ...detailsForm, phone })}
-                      inputClassName="w-full px-3 py-2 text-xs border border-zinc-200 rounded focus:border-zinc-950 focus:outline-none"
-                      placeholder="98765 43210"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-700 mb-1">
-                      Company name <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={detailsForm.company}
-                      onChange={(e) => setDetailsForm({ ...detailsForm, company: e.target.value })}
-                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded focus:border-zinc-950 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-700 mb-1">PAN number</label>
-                    <input
-                      type="text"
-                      placeholder="ABCDE1234F"
-                      value={detailsForm.pan}
-                      onChange={(e) => setDetailsForm({ ...detailsForm, pan: e.target.value.toUpperCase() })}
-                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded focus:border-zinc-950 focus:outline-none"
-                    />
-                    <span className="text-[11px] text-zinc-400 mt-1 block">Format: 5 letters, 4 digits, 1 letter.</span>
-                  </div>
+                  {/* CRM 3.55.0: contact details are not edited here — open the contact, or choose another one. */}
+                  <LeadContactPicker
+                    leadId={String(id || '')}
+                    contactId={lead.contactId ? String(lead.contactId) : ''}
+                    name={lead.name}
+                    email={lead.email}
+                    phone={lead.phone}
+                    company={lead.company}
+                    pan={lead.pan}
+                    personLead={Boolean(lead.isPersonLead)}
+                    canEdit={canWrite}
+                    onChanged={async () => {
+                      await loadLeadData();
+                      notify.success('Contact changed');
+                    }}
+                  />
                   <div>
                     <label className="block text-xs font-medium text-zinc-700 mb-1">
                       Deal Value ({getCurrencySymbol(lead.currency || settingsCurrency)})
@@ -2859,6 +2846,16 @@ export const LeadDetailPage: React.FC = () => {
                       maxLength={120}
                       value={detailsForm.city}
                       onChange={(e) => setDetailsForm({ ...detailsForm, city: e.target.value })}
+                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded focus:border-zinc-950 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 mb-1">District</label>
+                    <input
+                      type="text"
+                      maxLength={120}
+                      value={detailsForm.district}
+                      onChange={(e) => setDetailsForm({ ...detailsForm, district: e.target.value })}
                       className="w-full px-3 py-2 text-xs border border-zinc-200 rounded focus:border-zinc-950 focus:outline-none"
                     />
                   </div>
@@ -3604,6 +3601,7 @@ export const LeadDetailPage: React.FC = () => {
                           <td className="py-3 px-4 text-right">
                             <div className="flex items-center justify-end gap-2">
                               {canWrite &&
+                                opportunitiesVisible &&
                                 !hasOpportunity &&
                                 ev.source === 'commercial_requirement' &&
                                 !ev.convertedOpportunityId && (
@@ -4526,7 +4524,7 @@ export const LeadDetailPage: React.FC = () => {
         mimeType={previewDoc?.mimeType}
       />
 
-      {interestedEvent && id ? (
+      {interestedEvent && id && opportunitiesVisible ? (
         <InterestedOpportunityModal
           leadId={id}
           eventId={interestedEvent._id}

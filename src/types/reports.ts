@@ -1,6 +1,7 @@
 export type ReportTabId =
   | 'sales'
   | 'conversion'
+  | 'location-wise'
   | 'activity-location'
   | 'projects'
   | 'employees'
@@ -443,7 +444,8 @@ export interface ExtensionReportDefinition {
   filters: ExtensionReportFilter[];
   /** Header buttons (e.g. "+ New Travel Lead"). */
   actions?: Array<{ label: string; link: string }>;
-  tabs?: Array<{ id: string; label: string }>;
+  /** CRM 3.56.0: coreTab = a CRM core report shown as this tab (e.g. "location-wise"). */
+  tabs?: Array<{ id: string; label: string; coreTab?: string }>;
   sections: ExtensionReportSectionDef[];
 }
 
@@ -493,4 +495,51 @@ export interface ExtensionDashboardListItem {
   tone?: 'neutral' | 'success' | 'warning' | 'danger' | 'info';
   actionLabel?: string;
   link?: string;
+}
+
+/* ------------------------------------------------------------------ Location Wise Leads & Clients */
+
+export interface LocationWiseQuery {
+  from?: string;
+  to?: string;
+  state?: string;
+  district?: string;
+  city?: string;
+  /** Sales person (assigned user id). Ignored for sales reps (their own scope applies). */
+  assignedTo?: string;
+  source?: string;
+}
+
+/** Drill-down filter carried by each row (state / district / city or a "*NotSet" flag). */
+export type LocationRowFilter = Partial<
+  Record<'state' | 'district' | 'city' | 'stateNotSet' | 'districtNotSet' | 'cityNotSet' | 'locationNotSet', string>
+>;
+
+export interface LocationWiseRow {
+  level: 'state' | 'district' | 'city';
+  key: string;
+  name: string;
+  leads: number;
+  clients: number;
+  converted: number;
+  /** Converted ÷ leads × 100, one decimal; null when the location has 0 leads. */
+  rate: number | null;
+  filter: LocationRowFilter;
+  children: LocationWiseRow[];
+}
+
+export interface LocationWiseSummary {
+  totalLeads: number;
+  totalClients: number;
+  convertedLeads: number;
+  topLocation: { name: string; leads: number } | null;
+  bestConversion: { name: string; rate: number; leads: number } | null;
+}
+
+export interface LocationWiseReport {
+  summary: LocationWiseSummary;
+  rows: LocationWiseRow[];
+  options: { states: string[]; districts: string[]; cities: string[]; leadSources: string[] };
+  filters?: Record<string, string | null>;
+  meta?: { canFilterSalesPerson: boolean; bestConversionMinLeads: number };
 }

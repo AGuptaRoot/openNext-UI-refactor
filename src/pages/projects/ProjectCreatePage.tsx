@@ -564,7 +564,7 @@ export const ProjectCreatePage: React.FC = () => {
                     )}
                     {selectedClient.taxId && (
                       <div className="flex justify-between items-center py-1 border-t border-zinc-50">
-                        <span className="text-zinc-400 text-[11px]">Tax ID</span>
+                        <span className="text-zinc-400 text-[11px]">Client code</span>
                         <span className="font-mono text-zinc-800 text-[11px]">
                           {selectedClient.taxId}
                         </span>

@@ -481,7 +481,8 @@ export const InvoicesPage: React.FC = () => {
                   <FolderOpenIcon sx={{ fontSize: 15 }} /> Templates
                 </button>
               )}
-              {canWriteFinance && (
+              {/* CRM 3.58.0: no scan when invoices are raised from an accepted quotation (salesFlow.invoiceFromQuotation). */}
+              {canWriteFinance && !salesFlow.invoiceFromQuotation && (
                 <button
                   type="button"
                   data-tour="invoices-scan-pdf-btn"

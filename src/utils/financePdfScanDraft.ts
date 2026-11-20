@@ -61,14 +61,24 @@ function matchCatalogProduct(
 ): CatalogProduct | null {
   const needle = name.trim().toLowerCase();
   if (!needle || !catalog.length) return null;
-  const exact = catalog.find((p) => p.name.trim().toLowerCase() === needle);
-  if (exact) return exact;
-  const partial = catalog.find(
-    (p) =>
-      p.name.trim().toLowerCase().includes(needle) ||
-      needle.includes(p.name.trim().toLowerCase())
-  );
-  return partial || null;
+  // CRM 3.58.0: exact name only — a loose match replaced details such as "DEL–BOM 6E-213" with "Flight".
+  return catalog.find((p) => p.name.trim().toLowerCase() === needle) || null;
+}
+
+/** CRM 3.58.0: the scanned name picks a client / lead only when it is exactly the same name. */
+export function sameScannedName(scanned: string, ...names: Array<string | undefined>): boolean {
+  const clean = (v: string | undefined) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const needle = clean(scanned);
+  return Boolean(needle) && names.some((n) => clean(n) === needle);
+}
+
+/** CRM 3.58.0: the PDF's printed total against the scanned lines (null = nothing to compare). */
+export function scannedTotalGap(extracted: FinancePdfOcrExtractResult): { pdfTotal: number; linesTotal: number } | null {
+  const pdfTotal = Number(extracted.grandTotal) || 0;
+  const items = Array.isArray(extracted.items) ? extracted.items : [];
+  if (pdfTotal <= 0 || !items.length) return null;
+  const linesTotal = Math.round(items.reduce((sum, i) => sum + (Number(i.amount) || 0), 0) * 100) / 100;
+  return Math.abs(linesTotal - pdfTotal) > 1 ? { pdfTotal, linesTotal } : null;
 }
 
 /**
@@ -90,15 +100,16 @@ export function linesFromPdfExtract(
         : matched
           ? Number(matched.unitPrice) || 0
           : 0;
+    // CRM 3.58.0: the PDF's own rate (0% stays 0%); no rate on the PDF → the catalog rate, else 0 (never a guessed 18%).
     const tax =
-      Number(item.tax) > 0
+      item.tax !== null && item.tax !== undefined && Number.isFinite(Number(item.tax))
         ? Number(item.tax)
         : matched
           ? Number(matched.taxRate) || 0
-          : 18;
+          : 0;
     return {
       ...newEditableLine(),
-      name: matched?.name || item.name || '',
+      name: item.name || matched?.name || '',
       description: item.description || matched?.description || '',
       qty,
       rate,

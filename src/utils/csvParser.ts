@@ -130,6 +130,76 @@ export function parseCsvString(text: string): Array<Record<string, string>> {
   return objects;
 }
 
+/** Sample cell for an extension field (the first allowed keys, a date, a number…). */
+function sampleExtensionCell(field: { type: string; options?: Array<{ value: string }> }, row: number): string {
+  const opts = (field.options || []).map((o) => o.value);
+  switch (field.type) {
+    case 'multiselect':
+      return opts.length ? JSON.stringify(opts.slice(row, row + 2).length ? opts.slice(row, row + 2) : opts.slice(0, 1)) : '[]';
+    case 'select':
+    case 'radio':
+      return opts[Math.min(row, opts.length - 1)] || '';
+    case 'number':
+    case 'currency':
+      return String(row + 2);
+    case 'date': {
+      const d = new Date();
+      d.setDate(d.getDate() + 30 + row * 7);
+      return d.toISOString().slice(0, 10);
+    }
+    case 'checkbox':
+      return row ? 'No' : 'Yes';
+    default:
+      return '';
+  }
+}
+
+/**
+ * Lead template; CRM 3.54.0: the active extension's importable lead fields are added as columns
+ * (header = field key; the Required Type column then needs the field's Request Type).
+ */
+export function generateSampleLeadCsvWith(
+  fields: Array<{ key: string; type: string; requestTypeKey?: string; options?: Array<{ value: string }> }>,
+  requestTypeName = ''
+): string {
+  const baseCsv = generateSampleLeadCsv();
+  if (!fields.length) return baseCsv;
+  const escapeCell = (val: string) => `"${val.replace(/"/g, '""')}"`;
+  const lines = baseCsv.split('\r\n');
+  const rtIndex = 4; // "Required Type" is the 5th column
+  return lines
+    .map((line, i) => {
+      const cells = parseCsvRowCells(line);
+      if (i > 0 && requestTypeName) cells[rtIndex] = requestTypeName;
+      const extra = i === 0 ? fields.map((f) => f.key) : fields.map((f) => sampleExtensionCell(f, i - 1));
+      return [...cells, ...extra].map(escapeCell).join(',');
+    })
+    .join('\r\n');
+}
+
+/** One CSV line → its cells (quotes handled). */
+function parseCsvRowCells(line: string): string[] {
+  const out: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') {
+        cell += '"';
+        i += 1;
+      } else if (ch === '"') quoted = false;
+      else cell += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ',') {
+      out.push(cell);
+      cell = '';
+    } else cell += ch;
+  }
+  out.push(cell);
+  return out;
+}
+
 export function generateSampleLeadCsv(): string {
   const headers = [
     'Name',
@@ -193,7 +263,8 @@ export function generateSampleClientCsv(): string {
     'Company Email',
     'Company Phone',
     'Website',
-    'Tax ID',
+    'Client code',
+    'GSTIN',
     'Category',
     'Status',
     'Tags',
@@ -215,6 +286,7 @@ export function generateSampleClientCsv(): string {
       '+91 98765 43210',
       'https://acme.com',
       'TAX-2026-0001',
+      '',
       'Enterprise',
       'Active',
       'Key Account, Tier 1',
@@ -234,6 +306,7 @@ export function generateSampleClientCsv(): string {
       '+91 99887 76655',
       'https://zenithretail.in',
       'TAX-2026-0003',
+      '',
       'Retainer',
       'Active',
       'Referral Partner',

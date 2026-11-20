@@ -195,6 +195,9 @@ export interface SalesFlowLineMeta {
   sourceRef?: string;
   /** Key of the extension's line group (salesFlow.quotationLineGroups); '' = ungrouped. */
   group?: string;
+  /** GST suite (CRM 3.53.0): SAC code and service key (sent back unchanged). */
+  sac?: string;
+  serviceType?: string;
 }
 
 /** Colours for select values, by the tone the extension gives each option (quotationLineFields[].tones). */

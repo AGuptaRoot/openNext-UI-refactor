@@ -8,7 +8,7 @@ import DocumentScannerOutlinedIcon from '@mui/icons-material/DocumentScannerOutl
 import { ApiError, crmApi } from '../../services/api';
 import type { FinancePdfDocumentType, FinancePdfOcrExtractResult } from '../../types/financePdfOcr';
 import { pdfFileToImageDataUrls } from '../../utils/pdfToImages';
-import { saveFinancePdfScanDraft } from '../../utils/financePdfScanDraft';
+import { saveFinancePdfScanDraft, scannedTotalGap } from '../../utils/financePdfScanDraft';
 import { getRuntimeDefaultCurrency } from '../../utils/currency';
 import { useNotifyMessage } from '@/components/notifications';
 
@@ -31,6 +31,8 @@ export const FinancePdfScanModal: React.FC<FinancePdfScanModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   useNotifyMessage(error, 'error', () => setError(null));
   const [preview, setPreview] = useState<FinancePdfOcrExtractResult | null>(null);
+  const [pageInfo, setPageInfo] = useState<{ total: number; read: number } | null>(null);
+  const totalGap = preview ? scannedTotalGap(preview) : null;
 
   const label = documentType === 'quotation' ? 'Quotation' : 'Invoice';
   const createPath = documentType === 'quotation' ? '/quotations/create' : '/invoices/create';
@@ -41,6 +43,7 @@ export const FinancePdfScanModal: React.FC<FinancePdfScanModalProps> = ({
     setStatus(null);
     setError(null);
     setPreview(null);
+    setPageInfo(null);
     if (inputRef.current) inputRef.current.value = '';
   };
 
@@ -57,10 +60,12 @@ export const FinancePdfScanModal: React.FC<FinancePdfScanModalProps> = ({
     setStatus('Reading PDF pages…');
     try {
       const { imageDataUrls, pageCount } = await pdfFileToImageDataUrls(pdf, {
-        maxPages: 6,
-        scale: 1.4,
-        quality: 0.7,
+        // CRM 3.58.0: the AI reads 5 pages at most; sharper pages for small ticket / bill text.
+        maxPages: 5,
+        scale: 2,
+        quality: 0.8,
       });
+      setPageInfo({ total: pageCount, read: imageDataUrls.length });
       setStatus(`Scanning ${Math.min(pageCount, imageDataUrls.length)} page(s) with AI…`);
       const res =
         documentType === 'quotation'
@@ -159,6 +164,16 @@ export const FinancePdfScanModal: React.FC<FinancePdfScanModalProps> = ({
           ) : null}
 
           {status ? <p className="m-0 text-xs text-zinc-600">{status}</p> : null}
+          {pageInfo && pageInfo.total > pageInfo.read ? (
+            <p className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Only the first {pageInfo.read} of {pageInfo.total} pages were read. Add the items from the other pages yourself.
+            </p>
+          ) : null}
+          {totalGap ? (
+            <p className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Check the lines: the PDF total is {totalGap.pdfTotal}, but the scanned lines add up to {totalGap.linesTotal}.
+            </p>
+          ) : null}
 
           {preview ? (
             <div className="rounded-xl border border-zinc-200 bg-white p-3 text-xs text-zinc-800">
@@ -167,7 +182,7 @@ export const FinancePdfScanModal: React.FC<FinancePdfScanModalProps> = ({
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
-                  <span className="text-zinc-500">Number *:</span>{' '}
+                  <span className="text-zinc-500">{documentType === 'invoice' ? 'PDF number (saved as reference):' : 'Number:'}</span>{' '}
                   {preview.documentNumber || '—'}
                 </div>
                 <div>
@@ -198,7 +213,7 @@ export const FinancePdfScanModal: React.FC<FinancePdfScanModalProps> = ({
                       <strong>{item.name}</strong>
                       <span className="text-zinc-500">
                         {' '}
-                        · qty {item.quantity} · price {item.price} · tax {item.tax}% · amt{' '}
+                        · qty {item.quantity} · price {item.price} · tax {item.tax === null || item.tax === undefined ? 'not shown' : `${item.tax}%`} · amt{' '}
                         {item.amount}
                       </span>
                     </li>

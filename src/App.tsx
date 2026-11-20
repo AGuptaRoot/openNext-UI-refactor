@@ -45,6 +45,9 @@ import {
   InvoiceTemplateCreatePage,
 } from './pages/invoices';
 import { PaymentsPage, PaymentCreatePage, PaymentDetailPage } from './pages/payments';
+import { CashBookPage } from './pages/cashbook/CashBookPage';
+import { ReconciliationPage } from './pages/reconciliation/ReconciliationPage';
+import { GstReportsPage } from './pages/gst-reports/GstReportsPage';
 import { SalesOrdersPage, SalesOrderCreatePage, SalesOrderDetailPage } from './pages/sales-orders';
 import { SamplesPage, SampleCreatePage, SampleRequestDetailPage } from './pages/samples';
 import { ExtensionPage } from './pages/extensions/ExtensionPage';
@@ -235,6 +238,9 @@ export const App: React.FC<AppProps> = ({ router = 'hash', initialPath = '/' }) 
               <Route path="/invoice-templates/create" element={<Guarded><InvoiceTemplateCreatePage /></Guarded>} />
 
               <Route path="/payments" element={<Guarded><PaymentsPage /></Guarded>} />
+              <Route path="/cashbook" element={<Guarded><CashBookPage /></Guarded>} />
+              <Route path="/reconciliation" element={<Guarded><ReconciliationPage /></Guarded>} />
+              <Route path="/gst-reports" element={<Guarded><GstReportsPage /></Guarded>} />
               <Route path="/payments/create" element={<Guarded><PaymentCreatePage /></Guarded>} />
               <Route path="/payments/:id" element={<Guarded><PaymentDetailPage /></Guarded>} />
 

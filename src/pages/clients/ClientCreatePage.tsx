@@ -86,6 +86,7 @@ export const ClientCreatePage: React.FC = () => {
 
   const [street, setStreet] = useState('');
   const [city, setCity] = useState('');
+  const [district, setDistrict] = useState('');
   const [state, setState] = useState('');
   const [country, setCountry] = useState('India');
   const [zip, setZip] = useState('');
@@ -312,6 +313,7 @@ export const ClientCreatePage: React.FC = () => {
     const billing = {
       street: street.trim() || undefined,
       city: city.trim() || undefined,
+      district: district.trim() || undefined,
       state: state.trim() || undefined,
       country: country.trim() || 'India',
       zip: zip.trim() || undefined,
@@ -932,6 +934,16 @@ export const ClientCreatePage: React.FC = () => {
                 />
               </label>
               <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-semibold text-zinc-500 uppercase">District</span>
+                <input
+                  className={fieldClass}
+                  value={district}
+                  onChange={(e) => setDistrict(e.target.value)}
+                  maxLength={120}
+                  placeholder="Mumbai Suburban"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-semibold text-zinc-500 uppercase">
                   State / Province
                 </span>
@@ -1416,14 +1428,14 @@ export const ClientCreatePage: React.FC = () => {
           </section>
 
           <section className="bg-white border border-zinc-300 rounded-xl p-4">
-            <h3 className="text-sm font-semibold text-zinc-950 m-0 mb-1">Tax ID & invoicing</h3>
+            <h3 className="text-sm font-semibold text-zinc-950 m-0 mb-1">Client code</h3>
             <p className="text-[11px] text-zinc-500 m-0 mb-3">Assigned automatically</p>
             <div className="text-xs">
-              <div className="text-zinc-400 mb-1">Tax ID</div>
+              <div className="text-zinc-400 mb-1">Client code</div>
               <div className="font-mono font-bold text-zinc-800">Auto-generated on save</div>
               <p className="text-[11px] text-zinc-500 m-0 mt-2 leading-relaxed">
-                Each client receives a unique tax identification number when created for quotes and
-                invoices. Manual Tax ID entry is not required.
+                Each client gets a unique reference code (e.g. TAX-0001) when created. It is not a tax
+                number: the client's GSTIN and PAN go on the GST card after saving.
               </p>
             </div>
           </section>

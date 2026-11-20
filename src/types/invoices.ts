@@ -29,6 +29,18 @@ export interface InvoicePaymentRecord {
   paymentGateway?: string;
   status?: string;
   remark?: string;
+  /** CRM 3.55.0: money given back on this payment (approved / processed refunds). */
+  refundedAmount?: number;
+  refunds?: Array<{
+    _id: string;
+    amount: number;
+    mode?: string;
+    status?: string;
+    reason?: string;
+    transactionId?: string;
+    requestedAt?: string;
+    approvedAt?: string;
+  }>;
 }
 
 /**
@@ -44,6 +56,25 @@ export type InvoiceDocumentType = 'tax' | 'proforma';
 export interface InvoiceItem {
   _id: string;
   invoiceNo: string;
+  /** GST suite (CRM 3.53.0): optional hint for how the client should pay ('' = none). */
+  preferredPaymentMethod?: '' | 'razorpay' | 'cash' | 'bank';
+  /** GST suite (CRM 3.53.0): place of supply and the frozen GST figures (tax invoices). */
+  placeOfSupply?: string;
+  gst?: {
+    engine?: string;
+    issuedAt?: string | null;
+    isInterstate?: boolean;
+    placeOfSupply?: string;
+    posCode?: string;
+    taxableAmount?: number;
+    cgst?: number;
+    sgst?: number;
+    utgst?: number;
+    igst?: number;
+    totalTax?: number;
+    total?: number;
+    warnings?: string[];
+  };
   /** From verified payments (CRM 3.28.0): Unpaid / Partially Paid / Paid. */
   paymentStatus?: 'Unpaid' | 'Partially Paid' | 'Paid';
   documentType?: InvoiceDocumentType;

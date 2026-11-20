@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
@@ -18,6 +18,13 @@ import {
 } from '../../types/clients';
 import { ClientListView } from '../../components/clients/ClientListView';
 import { CsvImportModal } from '../../components/common/CsvImportModal';
+import { RemovableFilterChip } from '../../components/common/RemovableFilterChip';
+import {
+  LOCATION_FILTER_KEYS,
+  readLocationFilter,
+  hasLocationFilter,
+  locationFilterLabel,
+} from '../../utils/locationFilter';
 
 export const ClientsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -43,6 +50,35 @@ export const ClientsPage: React.FC = () => {
   const [exportOpen, setExportOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
+
+  // Location Wise report drill-down, read from the URL: ?state= &district= &city= (+ *NotSet),
+  // ?source= (the source lead's source) and ?assignedTo= (sales person).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const locationKey = LOCATION_FILTER_KEYS.map((key) => `${key}=${searchParams.get(key) || ''}`).join('&');
+  const locationFilter = useMemo(() => readLocationFilter(new URLSearchParams(locationKey)), [locationKey]);
+  const drillSource = searchParams.get('source') || '';
+  const drillAssignedTo = searchParams.get('assignedTo') || '';
+  const [salesPersonName, setSalesPersonName] = useState('');
+  useEffect(() => {
+    if (!drillAssignedTo) return;
+    let alive = true;
+    crmApi
+      .getAssignableUsers()
+      .then((res) => {
+        const found = (res.data || []).find((u) => [u.id, u._id, u.userId].includes(drillAssignedTo));
+        if (alive) setSalesPersonName(found?.name || '');
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [drillAssignedTo]);
+  const clearDrillDown = (keys: readonly string[]) => {
+    const next = new URLSearchParams(searchParams);
+    keys.forEach((key) => next.delete(key));
+    setSearchParams(next, { replace: true });
+    setPage(1);
+  };
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     notify.show(type, text);
@@ -95,6 +131,9 @@ export const ClientsPage: React.FC = () => {
         category: filterCategory || undefined,
         tag: filterTag || undefined,
         status: filterStatus || undefined,
+        source: drillSource || undefined,
+        assignedTo: drillAssignedTo || undefined,
+        ...locationFilter,
       });
       setClients(res.data || []);
       setPagination(res.pagination || null);
@@ -103,7 +142,7 @@ export const ClientsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, debouncedSearch, filterCategory, filterTag, filterStatus, canRead]);
+  }, [page, debouncedSearch, filterCategory, filterTag, filterStatus, drillSource, drillAssignedTo, locationFilter, canRead]);
 
   useEffect(() => {
     loadClients();
@@ -150,6 +189,7 @@ export const ClientsPage: React.FC = () => {
     setFilterCategory('');
     setFilterTag('');
     setFilterStatus('');
+    clearDrillDown([...LOCATION_FILTER_KEYS, 'source', 'assignedTo']);
   };
 
   if (!canRead) {
@@ -334,6 +374,23 @@ export const ClientsPage: React.FC = () => {
           Reset
         </button>
       </div>
+
+      {hasLocationFilter(locationFilter) || drillSource || drillAssignedTo ? (
+        <div className="flex flex-wrap items-center gap-2" data-tour="clients-drilldown-chips">
+          {hasLocationFilter(locationFilter) ? (
+            <RemovableFilterChip label={locationFilterLabel(locationFilter)} onRemove={() => clearDrillDown(LOCATION_FILTER_KEYS)} />
+          ) : null}
+          {drillSource ? (
+            <RemovableFilterChip label={`Lead source: ${drillSource}`} onRemove={() => clearDrillDown(['source'])} />
+          ) : null}
+          {drillAssignedTo ? (
+            <RemovableFilterChip
+              label={`Sales person: ${salesPersonName || drillAssignedTo}`}
+              onRemove={() => clearDrillDown(['assignedTo'])}
+            />
+          ) : null}
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="bg-white border border-zinc-300 rounded-xl p-12 text-center text-sm text-zinc-500 animate-pulse">

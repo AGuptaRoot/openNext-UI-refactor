@@ -129,6 +129,10 @@ export const LeadCreatePage: React.FC = () => {
   const [title, setTitle] = useState('');
   const [leadType, setLeadType] = useState('');
   const [company, setCompany] = useState('');
+  // CRM 3.57.0: lead types from Settings; person / family types have no company (a Family / person name).
+  const [leadTypeOptions, setLeadTypeOptions] = useState<string[]>([...DEFAULT_LEAD_TYPES]);
+  const [personLeadTypes, setPersonLeadTypes] = useState<string[]>(['Individual', 'Family']);
+  const [familyNameEdited, setFamilyNameEdited] = useState(false);
   const [priority, setPriority] = useState('');
   const [nextFollowUp, setNextFollowUp] = useState('');
   const [status, setStatus] = useState('');
@@ -167,6 +171,7 @@ export const LeadCreatePage: React.FC = () => {
   // C) Location
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
+  const [district, setDistrict] = useState('');
   const [state, setState] = useState('');
   const [latitude, setLatitude] = useState<number | ''>('');
   const [longitude, setLongitude] = useState<number | ''>('');
@@ -201,6 +206,8 @@ export const LeadCreatePage: React.FC = () => {
   const clientMatch = useExistingClientMatch<'submit' | 'duplicate' | 'existing'>();
   /** CRM 3.50.5: the existing contact chosen in the duplicate banner, while the modal asks about it. */
   const matchContactRef = useRef<PersonContact | null>(null);
+  /** CRM 3.56.0: the client chosen with "Create lead for this client" (the lead is its enquiry). */
+  const forClientRef = useRef('');
   /**
    * CRM 3.47.0: the active extension's "sync" checkbox (e.g. Sync Travel Information to Client), checked by
    * default, shown only when the extension allows it for the selected client (checked on the server again).
@@ -326,7 +333,7 @@ export const LeadCreatePage: React.FC = () => {
 
         // Defaults for required fields: Stage = New, Request Type = Project (software)
         if (stages.length) {
-          setStage((prev) => prev || (stages.includes('New') ? 'New' : stages[0]));
+          setStage((prev) => prev || (stages.slice(0, 2).includes('New') ? 'New' : stages[0]));
         }
         if (statuses.length) setStatus((prev) => prev || statuses[0]);
         // Default = the Request Type fixed by the active CRM extension.
@@ -555,6 +562,43 @@ export const LeadCreatePage: React.FC = () => {
       });
   }, [presetContactId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ─── CRM 3.57.0: person / family lead type ───────────────────────────────
+  const isPersonLead = personLeadTypes.some((t) => t.toLowerCase() === String(leadType || '').trim().toLowerCase());
+  useEffect(() => {
+    let alive = true;
+    void Promise.allSettled([crmApi.getLeadTypes(), crmApi.getPersonLeadTypes()]).then(([types, person]) => {
+      if (!alive) return;
+      if (types.status === 'fulfilled' && Array.isArray(types.value.data) && types.value.data.length) setLeadTypeOptions(types.value.data);
+      if (person.status === 'fulfilled' && Array.isArray(person.value.data)) setPersonLeadTypes(person.value.data);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  /** "<Surname> Family" for a family type, otherwise the person's name (salutations left out). */
+  const personNameFor = (fullName: string, type: string) => {
+    const words = String(fullName || '')
+      .split(/\s+/)
+      .map((w) => w.trim())
+      .filter((w) => w && !/^(mr|mrs|ms|miss|dr|prof|shri|smt|sri)\.?$/i.test(w));
+    if (!words.length) return '';
+    return /family/i.test(type) ? `${words[words.length - 1]} Family` : words.join(' ');
+  };
+  const personSourceName = selectedContact ? formatContactName(selectedContact) || selectedContact.name : newContact.name;
+  const wasPersonLead = useRef(false);
+  useEffect(() => {
+    if (isPersonLead) {
+      wasPersonLead.current = true;
+      if (!familyNameEdited) setCompany(personNameFor(String(personSourceName || ''), leadType));
+    } else if (wasPersonLead.current) {
+      // Switched back to a company type: the company comes from the contact again.
+      wasPersonLead.current = false;
+      setFamilyNameEdited(false);
+      setCompany(selectedContact ? String(selectedContact.companyName || (selectedContact as any).company || '').trim() : String(newContact.companyName || '').trim());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPersonLead, leadType, personSourceName, familyNameEdited]);
+
   // ─── Contact helpers ──────────────────────────────────────────────────────
   const chooseContact = (contact: PersonContact) => {
     setSelectedContact(contact);
@@ -565,7 +609,8 @@ export const LeadCreatePage: React.FC = () => {
     clearContactDuplicates();
     setError(null);
     const compName = String(contact.companyName || (contact as any).company || '').trim();
-    setCompany(compName);
+    // A person / family lead keeps its family name (made from the person by the effect above).
+    if (!isPersonLead) setCompany(compName);
   };
 
   /** Create the lead linked to an already-resolved contact. */
@@ -605,6 +650,7 @@ export const LeadCreatePage: React.FC = () => {
 
     const created = await crmApi.createLead({
       title: title.trim(),
+      ...(forClientRef.current ? { forClientId: forClientRef.current } : {}),
       contactId: contact._id,
       name: contact.name,
       salutation: contact.salutation || undefined,
@@ -634,6 +680,7 @@ export const LeadCreatePage: React.FC = () => {
       tags: selectedTags,
       address: address.trim() || undefined,
       city: city.trim() || undefined,
+      district: district.trim() || undefined,
       state: state.trim() || undefined,
       latitude: latitude !== '' ? Number(latitude) : null,
       longitude: longitude !== '' ? Number(longitude) : null,
@@ -716,12 +763,37 @@ export const LeadCreatePage: React.FC = () => {
     resume: 'submit' | 'duplicate' | 'existing',
     existing: PersonContact | null = selectedContact
   ): Promise<boolean> => {
-    const shown = await clientMatch.ask({ company: company.trim(), personContactId: existing?._id || undefined }, resume);
+    forClientRef.current = '';
+    // CRM 3.57.0: a person / family lead is matched by the person only (family names repeat).
+    const shown = await clientMatch.ask(
+      isPersonLead
+        ? {
+            company: '',
+            personContactId: existing?._id || undefined,
+            email: existing ? undefined : newContact.email,
+            phone: existing ? undefined : newContact.phone,
+            personOnly: true,
+          }
+        : { company: company.trim(), personContactId: existing?._id || undefined },
+      resume
+    );
     if (shown) setSyncChecked(true);
     return shown;
   };
 
+  /** CRM 3.56.0: create the lead as the chosen client's enquiry, then continue as "Continue Creating Lead". */
+  const handleClientMatchForClient = () => {
+    const match = clientMatch.selected;
+    if (!match) return;
+    const resume = clientMatch.continueAnyway();
+    forClientRef.current = match.id;
+    if (resume === 'duplicate') void handleCreateNewLeadDespiteDuplicate();
+    else if (resume === 'submit') void handleSubmit({ preventDefault() {} } as React.FormEvent);
+    else if (resume === 'existing' && matchContactRef.current) void handleChooseExistingContactAndCreate(matchContactRef.current);
+  };
+
   const handleClientMatchContinue = () => {
+    forClientRef.current = '';
     const resume = clientMatch.continueAnyway();
     if (resume === 'duplicate') void handleCreateNewLeadDespiteDuplicate();
     else if (resume === 'submit') void handleSubmit({ preventDefault() {} } as React.FormEvent);
@@ -747,7 +819,7 @@ export const LeadCreatePage: React.FC = () => {
       const input = existingContact
         ? { name: formatContactName(existingContact) || existingContact.name }
         : contactFormToInput(newContact);
-      if (!existingContact && !input.companyName && company.trim()) input.companyName = company.trim();
+      if (!existingContact && !input.companyName && company.trim() && !isPersonLead) input.companyName = company.trim();
       const res = await crmApi.addSecondaryClientContact(
         match.id,
         existingContact
@@ -822,7 +894,7 @@ export const LeadCreatePage: React.FC = () => {
       return;
     }
     if (!company.trim()) {
-      setError('Company Name is required.');
+      setError(isPersonLead ? 'Family / person name is required.' : 'Company Name is required.');
       return;
     }
     if (!requestType.trim() || !requestTypeId.trim()) {
@@ -839,7 +911,7 @@ export const LeadCreatePage: React.FC = () => {
     setSaving(true);
     try {
       const contactData = contactFormToInput(newContact);
-      if (!contactData.companyName && company.trim()) {
+      if (!contactData.companyName && company.trim() && !isPersonLead) {
         contactData.companyName = company.trim();
       }
       const created = await crmApi.createContact({
@@ -1036,10 +1108,10 @@ export const LeadCreatePage: React.FC = () => {
 
     if (
       guessedLeadType &&
-      DEFAULT_LEAD_TYPES.some((t) => t.toLowerCase() === guessedLeadType.toLowerCase())
+      leadTypeOptions.some((t) => t.toLowerCase() === guessedLeadType.toLowerCase())
     ) {
       setLeadType(
-        DEFAULT_LEAD_TYPES.find((t) => t.toLowerCase() === guessedLeadType.toLowerCase()) ||
+        leadTypeOptions.find((t) => t.toLowerCase() === guessedLeadType.toLowerCase()) ||
           guessedLeadType
       );
     }
@@ -1109,7 +1181,7 @@ export const LeadCreatePage: React.FC = () => {
   // ─── Validation + submit ──────────────────────────────────────────────────
   const validate = (): string | null => {
     if (!title.trim()) return 'Lead Title is required.';
-    if (!company.trim()) return 'Company Name is required.';
+    if (!company.trim()) return isPersonLead ? 'Family / person name is required.' : 'Company Name is required.';
     if (!requestType.trim() || !requestTypeId.trim()) return 'Request Type is required.';
     if (
       !requestTypes.some(
@@ -1203,7 +1275,7 @@ export const LeadCreatePage: React.FC = () => {
       if (!contact) {
         try {
           const contactData = contactFormToInput(newContact);
-          if (!contactData.companyName && company.trim()) {
+          if (!contactData.companyName && company.trim() && !isPersonLead) {
             contactData.companyName = company.trim();
           }
           const created = await crmApi.createContact(contactData);
@@ -1255,7 +1327,7 @@ export const LeadCreatePage: React.FC = () => {
       let contact = selectedContact;
       if (!contact) {
         const contactData = contactFormToInput(newContact);
-        if (!contactData.companyName && company.trim()) {
+        if (!contactData.companyName && company.trim() && !isPersonLead) {
           contactData.companyName = company.trim();
         }
         contactData.allowDuplicate = true;
@@ -1638,20 +1710,27 @@ export const LeadCreatePage: React.FC = () => {
 
             <div data-tour="leads-field-company" className="sm:col-span-6">
               <label className={labelCls}>
-                Company Name *{' '}
+                {isPersonLead ? 'Family / Person Name *' : 'Company Name *'}{' '}
                 <span className="text-[11px] font-normal text-zinc-500 dark:text-zinc-400">
-                  (Synced from contact person)
+                  {isPersonLead ? '(made from the contact person — you can change it)' : '(Synced from contact person)'}
                 </span>
               </label>
               <input
                 type="text"
                 required
-                readOnly={true}
+                readOnly={!isPersonLead}
                 maxLength={120}
                 value={company}
-                onChange={(e) => setCompany(e.target.value)}
-                placeholder="Auto-filled from contact person"
-                className={`${inputCls} bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 cursor-not-allowed`}
+                onChange={(e) => {
+                  setFamilyNameEdited(true);
+                  setCompany(e.target.value);
+                }}
+                placeholder={isPersonLead ? 'e.g. Sharma Family' : 'Auto-filled from contact person'}
+                className={
+                  isPersonLead
+                    ? inputCls
+                    : `${inputCls} bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 cursor-not-allowed`
+                }
               />
             </div>
 
@@ -1663,7 +1742,7 @@ export const LeadCreatePage: React.FC = () => {
                 className={inputCls}
               >
                 <option value="">Select type…</option>
-                {DEFAULT_LEAD_TYPES.map((t) => (
+                {leadTypeOptions.map((t) => (
                   <option key={t} value={t}>
                     {t}
                   </option>
@@ -1734,7 +1813,8 @@ export const LeadCreatePage: React.FC = () => {
                 onChange={(e) => setStage(e.target.value)}
                 className={`${inputCls} font-semibold`}
               >
-                {pipelineStages.map((s) => (
+                {/* CRM 3.56.0: a new lead starts in the first two pipeline stages only (e.g. New / Contacted). */}
+                {pipelineStages.slice(0, 2).map((s) => (
                   <option key={s} value={s}>
                     {s}
                   </option>
@@ -1942,7 +2022,7 @@ export const LeadCreatePage: React.FC = () => {
               />
             </div>
 
-            <div className="sm:col-span-6">
+            <div className="sm:col-span-4">
               <label className={labelCls}>City</label>
               <input
                 type="text"
@@ -1954,7 +2034,19 @@ export const LeadCreatePage: React.FC = () => {
               />
             </div>
 
-            <div className="sm:col-span-6">
+            <div className="sm:col-span-4">
+              <label className={labelCls}>District</label>
+              <input
+                type="text"
+                maxLength={120}
+                value={district}
+                onChange={(e) => setDistrict(e.target.value)}
+                placeholder="District"
+                className={inputCls}
+              />
+            </div>
+
+            <div className="sm:col-span-4">
               <label className={labelCls}>State</label>
               <input
                 type="text"
@@ -2330,10 +2422,12 @@ export const LeadCreatePage: React.FC = () => {
         onSelect={clientMatch.select}
         onAddSecondary={() => void handleClientMatchAddSecondary()}
         onContinueLead={handleClientMatchContinue}
+        onCreateForClient={handleClientMatchForClient}
         onClose={clientMatch.close}
         loading={clientMatch.busy}
         error={clientMatch.error}
         continueLabel="Continue Creating Lead"
+        continueNote="a different company with the same name. The lead is created as usual (a new client when it is won)."
         newContact={(() => {
           const shown = clientMatch.resume === 'existing' ? matchContactRef.current : selectedContact;
           return shown

@@ -49,6 +49,9 @@ export interface QuotationLineItem {
   sourceRef?: string;
   /** Key of the extension's line group (salesFlow.quotationLineGroups); '' = ungrouped. */
   group?: string;
+  /** GST suite (CRM 3.53.0): SAC code and service key of the line. */
+  sac?: string;
+  serviceType?: string;
   name: string;
   description?: string;
   qty: number;
@@ -110,6 +113,9 @@ export interface QuotationItem {
   shippingCharge?: number;
   recipientNotes?: string;
   sections?: QuotationSection[];
+  /** GST suite (CRM 3.53.0): one place of supply per document ('' = the client's state) and the TCS rule. */
+  placeOfSupply?: string;
+  tcsRuleKey?: string;
   subtotal?: number;
   taxTotal?: number;
   cgst?: number;

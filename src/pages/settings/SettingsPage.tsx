@@ -45,8 +45,10 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import { OpportunityPipelinesPanel } from '../../components/settings/OpportunityPipelinesPanel';
 import { RequestTypesPanel } from '../../components/settings/RequestTypesPanel';
 import { GroqIntegrationPanel } from '../../components/settings/GroqIntegrationPanel';
+import { FcmIntegrationPanel } from '../../components/settings/FcmIntegrationPanel';
 import { GoogleMapsIntegrationPanel } from '../../components/settings/GoogleMapsIntegrationPanel';
 import { PrivateStoragePanel } from '../../components/settings/PrivateStoragePanel';
+import { GstSettingsPanel } from '../../components/settings/GstSettingsPanel';
 import { INDIAN_STATES } from '../../types/opportunities';
 import { SettingsTabIcon } from '../../components/icons/SettingsTabIcon';
 import { ExtensionIframe } from '../../components/extensions/ExtensionIframe';
@@ -939,6 +941,12 @@ const SETTINGS_TAB_GROUPS: SettingsTabGroup[] = [
         keywords: 'finance currency inr usd bank account bank name ifsc iban account number payment terms',
       },
       {
+        id: 'gst',
+        label: 'GST',
+        subtitle: 'GSTIN, service tax rates, LUT & books lock',
+        keywords: 'gst gstin sac hsn tax rate cgst sgst igst lut export sez tcs composition upi lock books',
+      },
+      {
         id: 'email',
         label: 'Email & SMTP',
         subtitle: 'Relay server & transactional routing',
@@ -1339,8 +1347,13 @@ export const SettingsPage: React.FC = () => {
       if (settings.tax_rate < 0 || settings.tax_rate > 100) {
         return setMessage({ kind: 'error', text: 'Tax rate must be between 0 and 100.' });
       }
+      const portalLoginUrl = String(settings.client_portal_login_url || '').trim();
+      if (portalLoginUrl && !/^https?:\/\/[^\s/]+/i.test(portalLoginUrl)) {
+        return setMessage({ kind: 'error', text: 'Client portal login URL must start with https:// (e.g. https://your-site.com/login).' });
+      }
       payload.company_name = companyName;
       payload.company_state = companyState;
+      payload.client_portal_login_url = portalLoginUrl;
       payload.office_address = (settings.office_address || '').trim();
       payload.office_addresses = (settings.office_addresses || [])
         .map((a) => String(a || '').trim())
@@ -1414,7 +1427,10 @@ export const SettingsPage: React.FC = () => {
       payload.pipeline_stages = settings.pipeline_stages;
       payload.lead_sources = settings.lead_sources;
       payload.lead_statuses = mergeLeadStatusesWithBuiltins(settings.lead_statuses);
-      payload.lead_types = settings.lead_types;
+      // CRM 3.57.0: every person / family type is a lead type too.
+      const personTypes = (settings.person_lead_types || []).map((t) => String(t || '').trim()).filter(Boolean);
+      payload.lead_types = [...settings.lead_types, ...personTypes.filter((t) => !settings.lead_types.some((x) => x.toLowerCase() === t.toLowerCase()))];
+      payload.person_lead_types = personTypes;
       payload.lead_priorities = settings.lead_priorities;
       payload.lead_tags = settings.lead_tags;
       payload.activity_types = settings.activity_types;
@@ -1565,6 +1581,7 @@ export const SettingsPage: React.FC = () => {
     activeTab === 'opportunities' ||
     activeTab === 'qualification-match' ||
     activeTab === 'extensions' ||
+    activeTab === 'gst' ||
     (activeTab as string) === 'ext-settings';
 
   return (
@@ -2230,6 +2247,18 @@ export const SettingsPage: React.FC = () => {
                 )}
               </select>
             </label>
+            <label>
+              <span className={labelClass}>Client Portal Login URL</span>
+              <input
+                className={inputClass}
+                type="url"
+                maxLength={300}
+                placeholder="https://your-site.com/login"
+                value={settings.client_portal_login_url || ''}
+                onChange={(e) => update('client_portal_login_url', e.target.value)}
+              />
+              <span className="mt-1 block text-[11px] text-zinc-500">Sent in portal login emails. Empty = this site’s address + /login.</span>
+            </label>
             <label className="sm:col-span-2 lg:col-span-3">
               <span className={labelClass}>Office Address (Headquarters / Primary Dispatch Location)</span>
               <textarea
@@ -2490,7 +2519,7 @@ export const SettingsPage: React.FC = () => {
                   ['invoice_prefix', 'Invoice Prefix *'],
                   ['payment_prefix', 'Payment Receipt Prefix *'],
                   ['expense_prefix', 'Expense Voucher Prefix *'],
-                  ['client_tax_id_prefix', 'Client Tax ID Prefix *'],
+                  ['client_tax_id_prefix', 'Client code prefix *'],
                 ] as Array<[keyof CrmSettings, string]>
               ).map(([key, label]) => (
                 <label key={key}>
@@ -2670,9 +2699,12 @@ export const SettingsPage: React.FC = () => {
         </section>
       )}
 
+      {activeTab === 'gst' && <GstSettingsPanel />}
+
       {activeTab === 'integrations' && (
         <div className="space-y-5" data-tour="settings-integrations">
           <GroqIntegrationPanel />
+          <FcmIntegrationPanel />
           <GoogleMapsIntegrationPanel />
           <PrivateStoragePanel />
         </div>
@@ -2816,6 +2848,15 @@ export const SettingsPage: React.FC = () => {
               value={settings.lead_types}
               placeholder="e.g. Organizational"
               onChange={(value) => update('lead_types', value)}
+            />
+            <ChipListEditor
+              title="Person / Family Lead Types"
+              description="Lead types without a company (e.g. Individual, Family). Their leads use a Family / person name, skip the company-name match, and their clients show it instead of a company."
+              icon={<Compass className="h-[18px] w-[18px] shrink-0" aria-hidden />}
+              accent="bg-zinc-100"
+              value={settings.person_lead_types || []}
+              placeholder="e.g. Family"
+              onChange={(value) => update('person_lead_types', value)}
             />
             <ChipListEditor
               title="Lead Priorities"
@@ -2963,6 +3004,11 @@ export const SettingsPage: React.FC = () => {
                     <option value="always">Always</option>
                     <option value="never">Never</option>
                   </select>
+                  {!isModuleVisible('opportunities') && (
+                    <span className="text-xs font-normal text-amber-700" data-testid="settings-opportunities-hidden-note">
+                      Opportunities are hidden by the active extension: quotations are made from leads.
+                    </span>
+                  )}
                 </label>
                 <label className="flex cursor-pointer items-start gap-2 text-sm font-semibold text-zinc-800">
                   <input

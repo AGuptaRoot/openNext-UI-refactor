@@ -664,7 +664,7 @@ function ExtensionCard({
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
           <span>
             <strong>Files missing.</strong> The package folder for v{ext.version} is not in the plugin directory (a
-            plugin update removes it), so this extension cannot be enabled and the workspace uses the default
+            plugin update removes it). It stays enabled, but until its files are back the CRM works like the default
             extension. Upload the package again to restore it.
           </span>
         </div>

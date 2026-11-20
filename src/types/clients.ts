@@ -6,6 +6,8 @@ export interface ClientAddress {
   label?: string;
   street?: string;
   city?: string;
+  /** Optional district (between state and city in the location report). */
+  district?: string;
   state?: string;
   country?: string;
   zip?: string;
@@ -26,6 +28,10 @@ export interface ClientContact {
   companyId?: string;
   /** Directory PersonContact id when linked from Contacts module. */
   personContactId?: string | null;
+  /** CRM 3.54.0: true = name / email / phone are the Contact record's live data. */
+  linked?: boolean;
+  /** CRM 3.54.0: the linked Contact record was deleted (the row shows its last known data). */
+  contactDeleted?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -175,7 +181,6 @@ export interface ClientPortalAccess {
   loginCredentials?: {
     username?: string;
     email?: string;
-    password?: string;
     loginUrl?: string;
   };
 }
@@ -346,10 +351,16 @@ export interface ClientItem {
   avatarUrl?: string;
   address?: string;
   avatarColor?: string;
+  /** CRM 3.57.0: 'person' = a person / family client. */
+  clientKind?: string;
   status?: ClientStatus | string;
   category?: string;
   tags?: string[];
   taxId?: string;
+  /** GST suite (CRM 3.53.0): gstin '' = unregistered (B2C); pan comes from the GSTIN. */
+  gst?: { gstin: string; pan: string; isSEZ: boolean; isDeemedExport: boolean; panLast4?: string; panSource?: string };
+  /** Warnings from the last save (GSTIN state mismatch, duplicate GSTIN). Not stored. */
+  gstWarnings?: string[];
   customFields?: Record<string, string | number | boolean>;
   billingAddress?: ClientAddress;
   shippingAddress?: ClientAddress;
@@ -381,6 +392,8 @@ export interface ClientCreateInput {
   addresses?: ClientAddress[];
   allowSimilarCompany?: boolean;
   allowExactDuplicate?: boolean;
+  /** GST suite (CRM 3.53.0). PAN is never sent: the server takes it from the GSTIN. */
+  gst?: { gstin: string; isSEZ?: boolean; isDeemedExport?: boolean; pan?: string };
   leadId?: string;
   primaryContact?: {
     name: string;
@@ -398,6 +411,18 @@ export interface ClientQueryParams {
   category?: string;
   tag?: string;
   status?: string;
+  /** Source lead's source (clients without a source lead are left out). */
+  source?: string;
+  /** Sales person: the source lead's owner, or the client's creator. */
+  assignedTo?: string;
+  /** Billing-address drill-down: state / district / city and *NotSet flags. */
+  state?: string;
+  district?: string;
+  city?: string;
+  stateNotSet?: string;
+  districtNotSet?: string;
+  cityNotSet?: string;
+  locationNotSet?: string;
 }
 
 export interface ClientPaginationMeta {
